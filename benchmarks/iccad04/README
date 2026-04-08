@@ -1,0 +1,67 @@
+ICCAD 2004 Faraday Mixed-size Benchmarks with routing information
+
+Faraday Corp. recently released three benchmarks, originally intended
+for comparisons between structured and conventional ASICs. We apply to
+these benchmarks a standard ASIC design flow to generate five
+mixed-size designs. Faraday benchmarks include three commonly-used
+functional blocks: (I) 16-bit DSP, (II) 32-bit RISC CPU and (III)
+DMA. Other details on these benchmarks such as the EDA Tools used by
+Faraday, implementation conditions, settings etc. can be found in on
+the faraday web-site. To minimize the impact of routing on the results
+of the accounted placement approaches, we avoid clock-tree generation
+and power routing in our flows. However, both clock-trees and power
+rails can be built on theses benchmarks. Following is the description
+of our ASIC flow which we used for generating the mixed-size
+benchmarks from the original netlists.
+
+Faraday benchmarks come with the behavioral Verilog descriptions
+together with timing constraints and relevant scripts needed for
+synthesis. We use the Artisan's 0.13 micron libraries in IBM
+Technology for synthesizing these designs under worst-case process
+conditions, with the same timing constraints as specified in the
+Faraday design documents. Synopsys Design Compiler (v2003.03-2) was
+used for synthesis. The embedded memories in these designs were built
+using the Artisan Memory Generator.  Artisan limits the size of its
+SRAM memories to a minimum word-length of 128 for dual-port memories
+and to 256 for single-port memories. This necessitated the need for a
+change in the behavioral descriptions of the given designs to account
+for larger word-lengths. However, Artisan does give an option of
+building register-files which can be used in place of memories for
+smaller word-lengths. We explored that option as well and thus came up
+with two flavors each for DSP and RISC. One that uses only memories
+and the other which uses both memories (for larger word-lengths) and
+register-files (for smaller word-lengths).
+
+The gate-level netlists obtained after synthesis are taken through the
+automatic place and route (APR) flow using Cadence Silicon Ensemble
+Ultra (v5.4.126). We follow the Cadence recommended flow for placing
+mixed-size designs and first use the ``qplace noconfig block'' command
+to place any macro blocks in the design. After this the macro blocks
+are considered fixed, the rows below the macros are cut and the
+remaining standard-cells are placed using the command ``qplace
+noconfig''. SEUltra also provides an option of concurrent pin
+placement during the placement process to minimize wirelength. Apart
+from wirelength reasons, we also exercised this option in our flow to
+improve routability, which was not being achieved without violations
+by a random I/O placement at the time of floorplanning.  The routing
+of Artisan memories together with the standard-cells using a
+grid-based router like WarpRoute requires certain offsets to be made
+in the routing grid to avoid geometry violations. These offsets are
+provided by Artisan itself.  The APR flow consists of the classic
+steps of floorplanning (creating the layout region) followed by the
+placement of blocks and standard-cells with QPlace and culminates with
+routing using WarpRoute. Empirical results for the Faraday benchmarks
+will be available in ref [1].
+
+There are 5 benchmarks dma, dsp1, dsp2, risc1 and risc2 available in
+Bookshelf format and LEF/DEF format.
+
+Disclaimer: If you are using these benchmarks in a publication or a
+technical report, please cite the following source [1] in addition to
+the URL. They describe how the benchmarks were created.
+
+
+[1] S. N. Adya, S. Chaturvedi, J. Roy, D. Papa, I. L. Markov,
+"Unification of Partitioning, Floorplanning and Placement" ,
+International Conference of Computer Aided Design (ICCAD), San Jose,
+2004.

@@ -12,3 +12,6 @@ wheels/
 # Claude files
 .claude/
 CLAUDE.md
+
+# Misc local files
+docs-local/

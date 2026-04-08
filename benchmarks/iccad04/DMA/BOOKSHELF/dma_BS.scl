@@ -1,0 +1,1025 @@
+UCLA scl 1.0
+# Created      : Wed Jun 16 17:05:54 2004
+# User         : sadya@zenit.eecs.umich.edu (Saurabh N Adya,Not Available,NotAvailable/Freysinger;CR0i;30) 
+# Platform     : Linux 2.4.20-31.9bigmem #1 SMP Tue Apr 13 17:11:51 EDT 2004 i686 
+
+
+Numrows : 113
+
+CoreRow Horizontal
+ Coordinate   :    -203200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -199600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -196000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -192400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -188800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -185200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -181600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -178000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -174400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -170800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -167200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -163600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -160000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -156400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -152800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -149200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -145600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -142000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -138400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -134800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -131200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -127600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -124000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -120400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -116800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -113200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -109600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -106000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :    -102400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -98800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -95200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -91600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -88000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -84400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -80800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -77200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -73600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -70000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -66400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -62800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -59200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -55600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -52000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -48400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -44800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -41200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -37600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -34000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -30400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -26800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -23200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -19600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -16000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     -12400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      -8800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      -5200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      -1600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :       2000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :       5600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :       9200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      12800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      16400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      20000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      23600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      27200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      30800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      34400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      38000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      41600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      45200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      48800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      52400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      56000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      59600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      63200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      66800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      70400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      74000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      77600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      81200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      84800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      88400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      92000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      95600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :      99200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     102800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     106400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     110000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     113600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     117200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     120800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     124400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     128000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     131600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     135200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     138800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     142400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     146000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     149600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     153200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     156800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     160400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     164000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     167600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     171200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     174800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     178400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     182000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     185600
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     189200
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     192800
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     196400
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :        FS 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End
+CoreRow Horizontal
+ Coordinate   :     200000
+ Height       :       3600
+ Sitewidth    :        400
+ Sitespacing  :        400
+ Siteorient   :         N 
+ Sitesymmetry :         Y 
+ SubrowOrigin :    -204000 Numsites :       1021
+End

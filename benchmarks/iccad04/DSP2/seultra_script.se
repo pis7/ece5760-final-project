@@ -1,0 +1,47 @@
+#set all the variables of se.ini
+	set v  plan.rgrid.M1offset           200 ;
+  	set v  plan.rgrid.M2offset           200 ;
+  	set v  plan.rgrid.M3offset           200 ;
+  	set v  plan.rgrid.M4offset           200 ;
+  	set v  plan.rgrid.M5offset           200 ;
+  	set v  plan.rgrid.M6offset           200 ;
+  	set v  plan.rgrid.M7offset           400 ;
+  	set v  plan.rgrid.M8offset           400 ;
+
+#       set v groute.Allow.OffGrid.PinAccess false ;
+#       set v froute.Allow.OffGrid.PinAccess false ;
+#       set v froute.Avoid.OffGrid.Blockage  true  ;
+#       set v froute.Build.OffGrid.SPins     false ;
+
+
+#       set v wroute.allow.port.shorts       false ;
+#       set v verify.geometry.allow.same.cell.violations true ;
+#       set v verify.geometry.report.samenet             true ;
+#input all data
+
+SET VAR INPUT.VERILOG.POWER.NET "VDD";
+SET VAR INPUT.VERILOG.GROUND.NET "VSS";
+SET VAR INPUT.VERILOG.LOGIC.1.NET "VDD";
+SET VAR INPUT.VERILOG.LOGIC.0.NET "VSS";
+SET VAR INPUT.VERILOG.SPECIAL.NETS "VDD VSS";
+
+FINPUT LEF FILENAME "dsp2.lef" ;
+FINPUT DEF FILENAME "dsp2.def";
+
+# place the memories
+QPLACE NOCONFIG BLOCK;
+
+#CUT ROW BLOCKHALO 0;
+
+# place the cells
+QPLACE NOCONFIG;
+
+# routing
+WROUTE NOCONFIG ;
+
+#output data section
+OUTPUT DEF FILENAME "dsp2_routed.def" ;
+
+FQUIT ;
+
+
