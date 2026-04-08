@@ -21,7 +21,19 @@ import shutil
 import sys
 sys.path.insert(0, sys.path[0] + "/../design-file-tools")
 
-from parser import DefParser, LefParser
+import numpy as np
+from scipy.sparse import coo_matrix, csr_matrix, diags
+
+from parser import DefParser, IOPin, LefParser
+
+# Skip nets with more pins than this (large clock/power nets)
+MAX_NET_DEGREE: int = 100
+
+# Number of bins per dimension for overlap density check
+DENSITY_BINS: int = 30
+
+# Maximum outer iterations (partition + re-solve cycles)
+MAX_OUTER_ITER: int = 15
 
 
 def find_lef_def(directory: str) -> tuple[str, str]:
@@ -55,6 +67,30 @@ class Placer:
         self.lef: LefParser | None = None
         self.defn: DefParser | None = None
 
+        # Step 2 outputs
+        self.n: int = 0
+        self.cell_names: list[str] = []
+        self.cell_idx: dict[str, int] = {}
+        self.cell_widths: np.ndarray = np.array([])
+        self.cell_heights: np.ndarray = np.array([])
+        self.io_pin_map: dict[str, IOPin] = {}
+        self.Q_base: csr_matrix | None = None
+        self.c_base_x: np.ndarray = np.array([])
+        self.c_base_y: np.ndarray = np.array([])
+
+        # Active system (base + anchor springs)
+        self.Q_x: csr_matrix | None = None
+        self.Q_y: csr_matrix | None = None
+        self.c_x: np.ndarray = np.array([])
+        self.c_y: np.ndarray = np.array([])
+
+        # Cell positions (centers, database units)
+        self.x_pos: np.ndarray = np.array([])
+        self.y_pos: np.ndarray = np.array([])
+
+        # Partition state
+        self.partition_level: int = 0
+
     # -- Step 1: Parse netlist -------------------------------------------------
 
     def parse_netlist(self) -> None:
@@ -62,38 +98,362 @@ class Placer:
         self.lef = LefParser(self.lef_path)
         self.defn = DefParser(self.def_path)
 
+    def init_cell_positions(self, method: str) -> None:
+        """Initialize cell positions within the die area."""
+        assert self.defn is not None
+        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
+        rng = np.random.default_rng(seed=42)
+        for _, comp in self.defn.components.items():
+            if method == "random":
+                comp.x = rng.uniform(die_x1, die_x2)
+                comp.y = rng.uniform(die_y1, die_y2)
+            elif method == "origin":
+                comp.x = 0
+                comp.y = 0
+
     # -- Step 2: Build connectivity matrix and support vectors -----------------
 
     def build_system(self) -> None:
-        raise NotImplementedError
+        """Build sparse connectivity matrix Q and RHS vectors c.
+
+        Uses clique net decomposition: each multi-pin net is decomposed into
+        weighted two-pin connections between all pin pairs. The weight for a
+        net with P pins is 2/P per edge.
+
+        The resulting system Qx = -c_x (and Qy = -c_y) gives the
+        wirelength-optimal cell positions when solved.
+        """
+        assert self.lef is not None and self.defn is not None
+
+        # Index movable cells
+        self.cell_names = list(self.defn.components.keys())
+        self.n = len(self.cell_names)
+        self.cell_idx = {name: i for i, name in enumerate(self.cell_names)}
+
+        # Cell dimensions (LEF microns -> DEF database units)
+        dbu = self.defn.dbu_per_micron
+        self.cell_widths = np.zeros(self.n)
+        self.cell_heights = np.zeros(self.n)
+        for i, name in enumerate(self.cell_names):
+            macro = self.lef.macros.get(self.defn.components[name].macro_name)
+            if macro is not None:
+                self.cell_widths[i] = macro.width * dbu
+                self.cell_heights[i] = macro.height * dbu
+
+        # IO pin lookup
+        self.io_pin_map = {pin.name: pin for pin in self.defn.io_pins}
+
+        # Initial positions (cell centers from DEF)
+        self.x_pos = np.array([
+            self.defn.components[name].x + self.cell_widths[i] / 2
+            for i, name in enumerate(self.cell_names)
+        ])
+        self.y_pos = np.array([
+            self.defn.components[name].y + self.cell_heights[i] / 2
+            for i, name in enumerate(self.cell_names)
+        ])
+
+        # Build Q and c via clique decomposition (COO triplets)
+        q_rows: list[int] = []
+        q_cols: list[int] = []
+        q_vals: list[float] = []
+        self.c_base_x = np.zeros(self.n)
+        self.c_base_y = np.zeros(self.n)
+
+        nets_used = 0
+        for net in self.defn.nets:
+            movable: list[int] = []
+            fixed_x: list[float] = []
+            fixed_y: list[float] = []
+            seen: set[str] = set()
+
+            for comp_name, pin_name in net.pins:
+                if comp_name == "PIN":
+                    if pin_name not in seen:
+                        seen.add(pin_name)
+                        io_pin = self.io_pin_map.get(pin_name)
+                        if io_pin is not None:
+                            fixed_x.append(io_pin.x)
+                            fixed_y.append(io_pin.y)
+                else:
+                    if comp_name not in seen:
+                        seen.add(comp_name)
+                        idx = self.cell_idx.get(comp_name)
+                        if idx is not None:
+                            movable.append(idx)
+
+            p = len(movable) + len(fixed_x)
+            if p < 2 or p > MAX_NET_DEGREE:
+                continue
+            nets_used += 1
+
+            w = 2.0 / p  # clique decomposition weight
+
+            # Movable-movable clique edges
+            for a in range(len(movable)):
+                for b in range(a + 1, len(movable)):
+                    i, j = movable[a], movable[b]
+                    q_rows.extend([i, j, i, j])
+                    q_cols.extend([i, j, j, i])
+                    q_vals.extend([w, w, -w, -w])
+
+            # Movable-fixed edges
+            for idx in movable:
+                for k in range(len(fixed_x)):
+                    q_rows.append(idx)
+                    q_cols.append(idx)
+                    q_vals.append(w)
+                    self.c_base_x[idx] -= w * fixed_x[k]
+                    self.c_base_y[idx] -= w * fixed_y[k]
+
+        self.Q_base = coo_matrix(
+            (q_vals, (q_rows, q_cols)), shape=(self.n, self.n)
+        ).tocsr()
+
+        # Active system starts as base (no anchors)
+        self.Q_x = self.Q_base.copy()
+        self.Q_y = self.Q_base.copy()
+        self.c_x = self.c_base_x.copy()
+        self.c_y = self.c_base_y.copy()
+
+        self.partition_level = 0
+
+        print(f"  {self.n} cells, {len(self.defn.io_pins)} I/O pins, "
+              f"{nets_used}/{len(self.defn.nets)} nets")
+        print(f"  Q: {self.Q_base.nnz} nonzeros")
 
     # -- Step 3: Conjugate gradient solver -------------------------------------
 
-    def solve_cg(self) -> None:
-        raise NotImplementedError
+    def solve_cg(self, max_iter: int = 1000, tol: float = 1e-5) -> None:
+        """Solve Qx = -c for both x and y coordinates via CG."""
+        assert self.Q_x is not None and self.Q_y is not None
+        self.x_pos = self._cg_solve(self.Q_x, self.c_x, self.x_pos,
+                                     max_iter, tol)
+        self.y_pos = self._cg_solve(self.Q_y, self.c_y, self.y_pos,
+                                     max_iter, tol)
+        self._clamp_to_die()
+
+    @staticmethod
+    def _cg_solve(Q: csr_matrix, c: np.ndarray, x0: np.ndarray,
+                  max_iter: int, tol: float) -> np.ndarray:
+        """Conjugate gradient solve of Qx = -c starting from x0.
+
+        Follows the pseudocode from the project proposal (Listing 1).
+        """
+        x = x0.copy()
+        r = -c - Q @ x  # r = b - Ax where b = -c
+        d = r.copy()
+        rr = float(np.dot(r, r))
+        b_norm_sq = float(np.dot(-c, -c))
+        threshold = tol * tol * max(b_norm_sq, 1.0)
+
+        for _ in range(max_iter):
+            if rr < threshold:
+                break
+            q = Q @ d
+            dq = float(np.dot(d, q))
+            if abs(dq) < 1e-30:
+                break
+            alpha = rr / dq
+            x += alpha * d
+            r -= alpha * q
+            rr_new = float(np.dot(r, r))
+            beta = rr_new / rr
+            d = r + beta * d
+            rr = rr_new
+
+        return x
+
+    def _clamp_to_die(self) -> None:
+        """Clamp cell centers to within the die area."""
+        assert self.defn is not None
+        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
+        half_w = self.cell_widths / 2
+        half_h = self.cell_heights / 2
+        self.x_pos = np.maximum(self.x_pos, die_x1 + half_w)
+        self.x_pos = np.minimum(self.x_pos, die_x2 - half_w)
+        self.y_pos = np.maximum(self.y_pos, die_y1 + half_h)
+        self.y_pos = np.minimum(self.y_pos, die_y2 - half_h)
 
     # -- Step 4: Partition and update anchors ----------------------------------
 
     def partition_and_anchor(self) -> None:
-        raise NotImplementedError
+        """Recursive geometric bisection to generate anchor points.
+
+        Each call adds one more level of bisection. Anchor springs are
+        added to Q and c to pull cells toward the centers of their
+        assigned sub-regions (fixed point integration method).
+        """
+        assert self.defn is not None and self.Q_base is not None
+        self.partition_level += 1
+
+        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
+
+        # Build partition tree: partition_level rounds of bisection
+        regions: list[tuple[float, float, float, float, list[int]]] = [
+            (die_x1, die_y1, die_x2, die_y2, list(range(self.n)))
+        ]
+
+        for level in range(self.partition_level):
+            new_regions: list[tuple[float, float, float, float, list[int]]] = []
+            cut_x = (level % 2 == 0)
+
+            for rx1, ry1, rx2, ry2, indices in regions:
+                if len(indices) <= 1:
+                    new_regions.append((rx1, ry1, rx2, ry2, indices))
+                    continue
+
+                pos = self.x_pos if cut_x else self.y_pos
+                indices.sort(key=lambda i: pos[i])
+                mid = len(indices) // 2
+                left = indices[:mid]
+                right = indices[mid:]
+
+                if cut_x:
+                    mx = (rx1 + rx2) / 2
+                    new_regions.append((rx1, ry1, mx, ry2, left))
+                    new_regions.append((mx, ry1, rx2, ry2, right))
+                else:
+                    my = (ry1 + ry2) / 2
+                    new_regions.append((rx1, ry1, rx2, my, left))
+                    new_regions.append((rx1, my, rx2, ry2, right))
+
+            regions = new_regions
+
+        # Compute anchor points (region centers)
+        anchors_x = np.zeros(self.n)
+        anchors_y = np.zeros(self.n)
+        for rx1, ry1, rx2, ry2, indices in regions:
+            cx = (rx1 + rx2) / 2
+            cy = (ry1 + ry2) / 2
+            for i in indices:
+                anchors_x[i] = cx
+                anchors_y[i] = cy
+
+        # Anchor weight scales exponentially with partition level
+        diag = self.Q_base.diagonal()
+        pos_diag = diag[diag > 0]
+        avg_diag = float(pos_diag.mean()) if len(pos_diag) > 0 else 1.0
+        alpha = avg_diag * 0.1 * (2.0 ** (self.partition_level - 1))
+
+        # Update active system: Q = Q_base + alpha*I, c = c_base - alpha*anchor
+        anchor_diag = diags(
+            [np.full(self.n, alpha)], [0], shape=(self.n, self.n),
+            format="csr",
+        )
+        self.Q_x = self.Q_base + anchor_diag
+        self.Q_y = self.Q_base + anchor_diag
+        self.c_x = self.c_base_x - alpha * anchors_x
+        self.c_y = self.c_base_y - alpha * anchors_y
+
+        print(f"  Partition level {self.partition_level}: "
+              f"{len(regions)} regions, alpha={alpha:.2f}")
 
     # -- Step 5: Check overlap acceptance --------------------------------------
 
-    def check_overlap(self) -> None:
-        raise NotImplementedError
+    def check_overlap(self, target_density: float = 1.5) -> bool:
+        """Check if placement density is acceptable using bin-based metric.
+
+        Returns True if the peak bin density is below target_density.
+        """
+        assert self.defn is not None
+        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
+        die_w = die_x2 - die_x1
+        die_h = die_y2 - die_y1
+
+        bin_w = die_w / DENSITY_BINS
+        bin_h = die_h / DENSITY_BINS
+        bin_area = bin_w * bin_h
+
+        density = np.zeros((DENSITY_BINS, DENSITY_BINS))
+
+        for i in range(self.n):
+            cx, cy = self.x_pos[i], self.y_pos[i]
+            w, h = self.cell_widths[i], self.cell_heights[i]
+
+            x1 = max(cx - w / 2, die_x1)
+            y1 = max(cy - h / 2, die_y1)
+            x2 = min(cx + w / 2, die_x2)
+            y2 = min(cy + h / 2, die_y2)
+
+            bx1 = max(0, int((x1 - die_x1) / bin_w))
+            by1 = max(0, int((y1 - die_y1) / bin_h))
+            bx2 = min(DENSITY_BINS - 1, int((x2 - die_x1) / bin_w))
+            by2 = min(DENSITY_BINS - 1, int((y2 - die_y1) / bin_h))
+
+            for bx in range(bx1, bx2 + 1):
+                for by in range(by1, by2 + 1):
+                    ox1 = max(x1, die_x1 + bx * bin_w)
+                    oy1 = max(y1, die_y1 + by * bin_h)
+                    ox2 = min(x2, die_x1 + (bx + 1) * bin_w)
+                    oy2 = min(y2, die_y1 + (by + 1) * bin_h)
+                    area = max(0.0, ox2 - ox1) * max(0.0, oy2 - oy1)
+                    density[bx, by] += area
+
+        density /= bin_area
+        peak = float(density.max())
+
+        print(f"  Bin density -- peak: {peak:.2f}")
+        return peak <= target_density
+
+    # -- Metrics ---------------------------------------------------------------
+
+    def compute_hpwl(self) -> float:
+        """Compute total half-perimeter wirelength across all nets."""
+        assert self.defn is not None
+        total = 0.0
+        for net in self.defn.nets:
+            min_x = float("inf")
+            max_x = float("-inf")
+            min_y = float("inf")
+            max_y = float("-inf")
+            count = 0
+
+            for comp_name, pin_name in net.pins:
+                if comp_name == "PIN":
+                    io_pin = self.io_pin_map.get(pin_name)
+                    if io_pin is not None:
+                        min_x = min(min_x, io_pin.x)
+                        max_x = max(max_x, io_pin.x)
+                        min_y = min(min_y, io_pin.y)
+                        max_y = max(max_y, io_pin.y)
+                        count += 1
+                else:
+                    idx = self.cell_idx.get(comp_name)
+                    if idx is not None:
+                        min_x = min(min_x, self.x_pos[idx])
+                        max_x = max(max_x, self.x_pos[idx])
+                        min_y = min(min_y, self.y_pos[idx])
+                        max_y = max(max_y, self.y_pos[idx])
+                        count += 1
+
+            if count >= 2:
+                total += (max_x - min_x) + (max_y - min_y)
+
+        return total
 
     # -- Output ----------------------------------------------------------------
 
-    def write_output(self) -> str:
-        """Write placement results to ./<design_name>/ directory.
+    def _update_components(self) -> None:
+        """Write solved positions back to self.defn.components."""
+        assert self.defn is not None
+        for i, name in enumerate(self.cell_names):
+            comp = self.defn.components[name]
+            comp.x = self.x_pos[i] - self.cell_widths[i] / 2
+            comp.y = self.y_pos[i] - self.cell_heights[i] / 2
+
+    def write_output(self, tag: str = "") -> str:
+        """Write placement results to ./<design_name>[-<tag>]/ directory.
 
         Copies the original LEF file unchanged and writes a new DEF file
-        with updated component positions. Returns the output directory path.
+        with updated component positions. If tag is given (e.g. "initial",
+        "final"), it is appended to the output directory name.
+        Returns the output directory path.
         """
         assert self.defn is not None
         assert self.lef is not None
 
-        out_dir = self.design_name
+        out_dir = f"{self.design_name}-{tag}" if tag else self.design_name
         os.makedirs(f"{out_dir}/lef", exist_ok=True)
         os.makedirs(f"{out_dir}/def", exist_ok=True)
 
@@ -158,20 +518,40 @@ def main() -> None:
     placer = Placer(sys.argv[1])
 
     # Step 1: Parse netlist
+    print("Step 1: Parsing netlist...")
     placer.parse_netlist()
 
-    # TODO(PASSTHROUGH): Steps 2-5 are skipped -- positions pass through
-    # unchanged. Replace this section with:
-    #   placer.build_system()
-    #   placer.solve_cg()
-    #   for each outer iteration:
-    #       placer.partition_and_anchor()
-    #       placer.solve_cg()
-    #       if placer.check_overlap(): break
+    # Randomize cell positions and write initial DEF
+    print("Randomizing cell positions...")
+    placer.init_cell_positions("origin")
+    out_dir = placer.write_output("initial")
+    print(f"  Initial placement written to {out_dir}/")
 
-    # Write output
-    out_dir = placer.write_output()
-    print(f"Output written to {out_dir}/")
+    # Step 2: Build connectivity matrix
+    print("Step 2: Building connectivity matrix...")
+    placer.build_system()
+
+    # Step 3: Initial CG solve (wirelength-optimal, no spreading)
+    print("Step 3: Initial CG solve...")
+    placer.solve_cg()
+    print(f"  HPWL: {placer.compute_hpwl():.0f}")
+
+    # Steps 4-5: Iterative spreading via partition + re-solve
+    for iteration in range(1, MAX_OUTER_ITER + 1):
+        print(f"Iteration {iteration}:")
+        placer.partition_and_anchor()
+        placer.solve_cg()
+        print(f"  HPWL: {placer.compute_hpwl():.0f}")
+        if placer.check_overlap():
+            print("Overlap acceptable -- placement complete.")
+            break
+    else:
+        print(f"Max iterations ({MAX_OUTER_ITER}) reached.")
+
+    # Write final output
+    placer._update_components()
+    out_dir = placer.write_output("final")
+    print(f"Final placement written to {out_dir}/")
 
 
 if __name__ == "__main__":
