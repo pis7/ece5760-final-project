@@ -1,0 +1,48 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN tiny1 ;
+UNITS DISTANCE MICRONS 100 ;
+
+DIEAREA ( 0 0 ) ( 2000 2000 ) ;
+
+COMPONENTS 10 ;
+- U1 INV + PLACED ( 100 100 ) N ;
+- U2 INV + PLACED ( 300 100 ) N ;
+- U3 BUF + PLACED ( 500 100 ) N ;
+- U4 NAND2 + PLACED ( 800 100 ) N ;
+- U5 INV + PLACED ( 100 500 ) N ;
+- U6 NAND2 + PLACED ( 300 500 ) N ;
+- U7 BUF + PLACED ( 600 500 ) N ;
+- U8 INV + PLACED ( 900 500 ) N ;
+- U9 NAND2 + PLACED ( 100 900 ) N ;
+- U10 BUF + PLACED ( 400 900 ) N ;
+END COMPONENTS
+
+PINS 6 ;
+- in0 + NET in0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 300 ) N ;
+- in1 + NET in1 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 700 ) N ;
+- in2 + NET in2 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 1100 ) N ;
+- out0 + NET out0 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 2000 300 ) N ;
+- out1 + NET out1 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 2000 700 ) N ;
+- out2 + NET out2 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 2000 1100 ) N ;
+END PINS
+
+NETS 13 ;
+- in0 ( PIN in0 ) ( U1 A ) ;
+- in1 ( PIN in1 ) ( U5 A ) ;
+- in2 ( PIN in2 ) ( U9 A ) ;
+- n1 ( U1 Y ) ( U2 A ) ( U4 A ) ;
+- n2 ( U2 Y ) ( U3 A ) ;
+- n3 ( U3 Y ) ( U6 B ) ;
+- n4 ( U5 Y ) ( U6 A ) ;
+- n5 ( U4 Y ) ( U7 A ) ;
+- n6 ( U6 Y ) ( U8 A ) ( U9 B ) ;
+- n7 ( U7 Y ) ( U10 A ) ;
+- out0 ( PIN out0 ) ( U8 Y ) ;
+- out1 ( PIN out1 ) ( U10 Y ) ;
+- out2 ( PIN out2 ) ( U9 Y ) ;
+END NETS
+
+END DESIGN
