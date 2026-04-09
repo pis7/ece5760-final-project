@@ -2,12 +2,11 @@
 
 Algorithm (see docs-local/ece5760-final-project-diagram.png):
   HPS outer loop:
-    1. Parse netlist (LEF + DEF)
-    2. Build connectivity matrix Q and support vectors c
-    3. Solve Qx = -c via conjugate gradient
-    4. Partition design, update Q and anchor points
-    5. Check overlap -- if not acceptable, go to 3
-  CG inner loop (step 3):
+    1. Build connectivity matrix Q and support vectors c
+    2. Solve Qx = -c via conjugate gradient
+    3. Partition design, update Q and anchor points
+    4. Check overlap -- if not acceptable, go to 2
+  CG inner loop (step 2):
     1. Sparse matrix-vector multiply (Q * d)
     2. Compute step size alpha (dot products)
     3. Update cell positions x and residual r
@@ -15,16 +14,18 @@ Algorithm (see docs-local/ece5760-final-project-diagram.png):
     5. Check convergence
 """
 
-import glob
 import os
-import shutil
 import sys
-sys.path.insert(0, sys.path[0] + "/../design-file-tools")
 
 import numpy as np
-from scipy.sparse import coo_matrix, csr_matrix, diags
+from scipy.sparse import coo_matrix, csr_array, diags
+from scipy.sparse.linalg import cg
 
-from parser import DefParser, IOPin, LefParser
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from json_utils import Netlist, dump_netlist, load_netlist
+
+
+# -- Placer constants ----------------------------------------------------------
 
 # Skip nets with more pins than this (large clock/power nets)
 MAX_NET_DEGREE: int = 100
@@ -36,19 +37,6 @@ DENSITY_BINS: int = 30
 MAX_OUTER_ITER: int = 15
 
 
-def find_lef_def(directory: str) -> tuple[str, str]:
-    """Find the LEF and DEF files in an ICCAD04-style benchmark directory."""
-    lef_files = glob.glob(f"{directory}/lef/*.lef")
-    def_files = glob.glob(f"{directory}/def/*.def")
-    if not lef_files:
-        print(f"Error: no .lef file found in {directory}/lef/")
-        sys.exit(1)
-    if not def_files:
-        print(f"Error: no .def file found in {directory}/def/")
-        sys.exit(1)
-    return lef_files[0], def_files[0]
-
-
 class Placer:
     """Analytical global placement executor.
 
@@ -56,54 +44,31 @@ class Placer:
     can reference results from previous steps.
     """
 
-    def __init__(self, input_dir: str) -> None:
-        self.input_dir: str = input_dir
-        self.design_name: str = os.path.basename(os.path.normpath(input_dir))
-        self.lef_path: str
-        self.def_path: str
-        self.lef_path, self.def_path = find_lef_def(input_dir)
+    def __init__(self, netlist_json: str) -> None:
+        self.netlist: Netlist = load_netlist(netlist_json)
 
-        # Step 1 outputs
-        self.lef: LefParser | None = None
-        self.defn: DefParser | None = None
+        # Cell center positions (database units)
+        self.x_pos: np.ndarray = np.array([])
+        self.y_pos: np.ndarray = np.array([])
 
-        # Step 2 outputs
-        self.n: int = 0
-        self.cell_names: list[str] = []
-        self.cell_idx: dict[str, int] = {}
-        self.cell_widths: np.ndarray = np.array([])
-        self.cell_heights: np.ndarray = np.array([])
-        self.io_pin_map: dict[str, IOPin] = {}
-        self.Q_base: csr_matrix | None = None
+        # Base linear system (from clique decomposition)
+        self.Q_base: csr_array | None = None
         self.c_base_x: np.ndarray = np.array([])
         self.c_base_y: np.ndarray = np.array([])
 
-        # Active system (base + anchor springs)
-        self.Q_x: csr_matrix | None = None
-        self.Q_y: csr_matrix | None = None
+        # Active linear system (base + anchor springs)
+        self.Q: csr_array | None = None
         self.c_x: np.ndarray = np.array([])
         self.c_y: np.ndarray = np.array([])
-
-        # Cell positions (centers, database units)
-        self.x_pos: np.ndarray = np.array([])
-        self.y_pos: np.ndarray = np.array([])
 
         # Partition state
         self.partition_level: int = 0
 
-    # -- Step 1: Parse netlist -------------------------------------------------
-
-    def parse_netlist(self) -> None:
-        """Parse LEF and DEF files into self.lef and self.defn."""
-        self.lef = LefParser(self.lef_path)
-        self.defn = DefParser(self.def_path)
-
     def init_cell_positions(self, method: str) -> None:
         """Initialize cell positions within the die area."""
-        assert self.defn is not None
-        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
+        die_x1, die_y1, die_x2, die_y2 = self.netlist.die_area
         rng = np.random.default_rng(seed=42)
-        for _, comp in self.defn.components.items():
+        for comp in self.netlist.components.values():
             if method == "random":
                 comp.x = rng.uniform(die_x1, die_x2)
                 comp.y = rng.uniform(die_y1, die_y2)
@@ -111,7 +76,7 @@ class Placer:
                 comp.x = 0
                 comp.y = 0
 
-    # -- Step 2: Build connectivity matrix and support vectors -----------------
+    # -- Build connectivity matrix and support vectors -------------------------
 
     def build_system(self) -> None:
         """Build sparse connectivity matrix Q and RHS vectors c.
@@ -123,71 +88,59 @@ class Placer:
         The resulting system Qx = -c_x (and Qy = -c_y) gives the
         wirelength-optimal cell positions when solved.
         """
-        assert self.lef is not None and self.defn is not None
+        nl = self.netlist
+        n = nl.num_cells
 
-        # Index movable cells
-        self.cell_names = list(self.defn.components.keys())
-        self.n = len(self.cell_names)
-        self.cell_idx = {name: i for i, name in enumerate(self.cell_names)}
-
-        # Cell dimensions (LEF microns -> DEF database units)
-        dbu = self.defn.dbu_per_micron
-        self.cell_widths = np.zeros(self.n)
-        self.cell_heights = np.zeros(self.n)
-        for i, name in enumerate(self.cell_names):
-            macro = self.lef.macros.get(self.defn.components[name].macro_name)
-            if macro is not None:
-                self.cell_widths[i] = macro.width * dbu
-                self.cell_heights[i] = macro.height * dbu
-
-        # IO pin lookup
-        self.io_pin_map = {pin.name: pin for pin in self.defn.io_pins}
-
-        # Initial positions (cell centers from DEF)
+        # Initial positions (cell centers from component corners + half-size)
         self.x_pos = np.array([
-            self.defn.components[name].x + self.cell_widths[i] / 2
-            for i, name in enumerate(self.cell_names)
+            nl.components[name].x + nl.cell_widths[i] / 2
+            for i, name in enumerate(nl.cell_names)
         ])
         self.y_pos = np.array([
-            self.defn.components[name].y + self.cell_heights[i] / 2
-            for i, name in enumerate(self.cell_names)
+            nl.components[name].y + nl.cell_heights[i] / 2
+            for i, name in enumerate(nl.cell_names)
         ])
 
         # Build Q and c via clique decomposition (COO triplets)
         q_rows: list[int] = []
         q_cols: list[int] = []
         q_vals: list[float] = []
-        self.c_base_x = np.zeros(self.n)
-        self.c_base_y = np.zeros(self.n)
+        self.c_base_x = np.zeros(n)
+        self.c_base_y = np.zeros(n)
 
         nets_used = 0
-        for net in self.defn.nets:
+        for net in nl.nets:
             movable: list[int] = []
             fixed_x: list[float] = []
             fixed_y: list[float] = []
             seen: set[str] = set()
 
+            # Find all movable macros and fixed pins
             for comp_name, pin_name in net.pins:
                 if comp_name == "PIN":
                     if pin_name not in seen:
                         seen.add(pin_name)
-                        io_pin = self.io_pin_map.get(pin_name)
+                        io_pin = nl.io_pin_map.get(pin_name)
                         if io_pin is not None:
                             fixed_x.append(io_pin.x)
                             fixed_y.append(io_pin.y)
                 else:
                     if comp_name not in seen:
                         seen.add(comp_name)
-                        idx = self.cell_idx.get(comp_name)
+                        idx = nl.cell_index.get(comp_name)
                         if idx is not None:
                             movable.append(idx)
 
+            # Skip nets of < 1 pin or are too large
             p = len(movable) + len(fixed_x)
             if p < 2 or p > MAX_NET_DEGREE:
                 continue
             nets_used += 1
 
-            w = 2.0 / p  # clique decomposition weight
+            # Simple weight model: each net contributes a total weight of 2.0,
+            # split evenly across all edges in the clique (P*(P-1)/2 edges for P
+            # pins)
+            w = 2.0 / p
 
             # Movable-movable clique edges
             for a in range(len(movable)):
@@ -206,76 +159,44 @@ class Placer:
                     self.c_base_x[idx] -= w * fixed_x[k]
                     self.c_base_y[idx] -= w * fixed_y[k]
 
+        # Calculate sparse Q matrix in CSR format
         self.Q_base = coo_matrix(
-            (q_vals, (q_rows, q_cols)), shape=(self.n, self.n)
+            (q_vals, (q_rows, q_cols)), shape=(n, n)
         ).tocsr()
 
         # Active system starts as base (no anchors)
-        self.Q_x = self.Q_base.copy()
-        self.Q_y = self.Q_base.copy()
+        self.Q = self.Q_base.copy()
         self.c_x = self.c_base_x.copy()
         self.c_y = self.c_base_y.copy()
 
         self.partition_level = 0
 
-        print(f"  {self.n} cells, {len(self.defn.io_pins)} I/O pins, "
-              f"{nets_used}/{len(self.defn.nets)} nets")
+        print(f"  {n} cells, {len(nl.io_pins)} I/O pins, "
+              f"{nets_used}/{len(nl.nets)} nets")
         print(f"  Q: {self.Q_base.nnz} nonzeros")
 
-    # -- Step 3: Conjugate gradient solver -------------------------------------
+    # -- Conjugate gradient solver ---------------------------------------------
 
-    def solve_cg(self, max_iter: int = 1000, tol: float = 1e-5) -> None:
+    def solve_cg(self, max_iter: int = 1000, rtol: float = 1e-5) -> None:
         """Solve Qx = -c for both x and y coordinates via CG."""
-        assert self.Q_x is not None and self.Q_y is not None
-        self.x_pos = self._cg_solve(self.Q_x, self.c_x, self.x_pos,
-                                     max_iter, tol)
-        self.y_pos = self._cg_solve(self.Q_y, self.c_y, self.y_pos,
-                                     max_iter, tol)
+        assert self.Q is not None
+        self.x_pos, _ = cg(self.Q, -self.c_x, x0=self.x_pos,
+                            rtol=rtol, maxiter=max_iter)
+        self.y_pos, _ = cg(self.Q, -self.c_y, x0=self.y_pos,
+                            rtol=rtol, maxiter=max_iter)
         self._clamp_to_die()
-
-    @staticmethod
-    def _cg_solve(Q: csr_matrix, c: np.ndarray, x0: np.ndarray,
-                  max_iter: int, tol: float) -> np.ndarray:
-        """Conjugate gradient solve of Qx = -c starting from x0.
-
-        Follows the pseudocode from the project proposal (Listing 1).
-        """
-        x = x0.copy()
-        r = -c - Q @ x  # r = b - Ax where b = -c
-        d = r.copy()
-        rr = float(np.dot(r, r))
-        b_norm_sq = float(np.dot(-c, -c))
-        threshold = tol * tol * max(b_norm_sq, 1.0)
-
-        for _ in range(max_iter):
-            if rr < threshold:
-                break
-            q = Q @ d
-            dq = float(np.dot(d, q))
-            if abs(dq) < 1e-30:
-                break
-            alpha = rr / dq
-            x += alpha * d
-            r -= alpha * q
-            rr_new = float(np.dot(r, r))
-            beta = rr_new / rr
-            d = r + beta * d
-            rr = rr_new
-
-        return x
 
     def _clamp_to_die(self) -> None:
         """Clamp cell centers to within the die area."""
-        assert self.defn is not None
-        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
-        half_w = self.cell_widths / 2
-        half_h = self.cell_heights / 2
+        die_x1, die_y1, die_x2, die_y2 = self.netlist.die_area
+        half_w = self.netlist.cell_widths / 2
+        half_h = self.netlist.cell_heights / 2
         self.x_pos = np.maximum(self.x_pos, die_x1 + half_w)
         self.x_pos = np.minimum(self.x_pos, die_x2 - half_w)
         self.y_pos = np.maximum(self.y_pos, die_y1 + half_h)
         self.y_pos = np.minimum(self.y_pos, die_y2 - half_h)
 
-    # -- Step 4: Partition and update anchors ----------------------------------
+    # -- Partition and update anchors ------------------------------------------
 
     def partition_and_anchor(self) -> None:
         """Recursive geometric bisection to generate anchor points.
@@ -284,18 +205,24 @@ class Placer:
         added to Q and c to pull cells toward the centers of their
         assigned sub-regions (fixed point integration method).
         """
-        assert self.defn is not None and self.Q_base is not None
+        assert self.Q_base is not None
         self.partition_level += 1
+        n = self.netlist.num_cells
 
-        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
+        die_x1, die_y1, die_x2, die_y2 = self.netlist.die_area
 
         # Build partition tree: partition_level rounds of bisection
         regions: list[tuple[float, float, float, float, list[int]]] = [
-            (die_x1, die_y1, die_x2, die_y2, list(range(self.n)))
+            (die_x1, die_y1, die_x2, die_y2, list(range(n)))
         ]
 
+        # Perform bisection on each region at the current level, alternating x/y
+        # cuts
         for level in range(self.partition_level):
             new_regions: list[tuple[float, float, float, float, list[int]]] = []
+
+            # Alternate cut direction: even levels cut vertically (x), odd
+            # levels cut horizontally (y)
             cut_x = (level % 2 == 0)
 
             for rx1, ry1, rx2, ry2, indices in regions:
@@ -303,9 +230,18 @@ class Placer:
                     new_regions.append((rx1, ry1, rx2, ry2, indices))
                     continue
 
+                # Sort cells by position and split at median area
                 pos = self.x_pos if cut_x else self.y_pos
                 indices.sort(key=lambda i: pos[i])
-                mid = len(indices) // 2
+                areas = self.netlist.cell_areas
+                half_area = sum(areas[i] for i in indices) / 2
+                cumulative = 0.0
+                mid = len(indices) // 2  # fallback
+                for k, i in enumerate(indices):
+                    cumulative += areas[i]
+                    if cumulative >= half_area:
+                        mid = max(1, k + 1)
+                        break
                 left = indices[:mid]
                 right = indices[mid:]
 
@@ -321,8 +257,8 @@ class Placer:
             regions = new_regions
 
         # Compute anchor points (region centers)
-        anchors_x = np.zeros(self.n)
-        anchors_y = np.zeros(self.n)
+        anchors_x = np.zeros(n)
+        anchors_y = np.zeros(n)
         for rx1, ry1, rx2, ry2, indices in regions:
             cx = (rx1 + rx2) / 2
             cy = (ry1 + ry2) / 2
@@ -338,49 +274,52 @@ class Placer:
 
         # Update active system: Q = Q_base + alpha*I, c = c_base - alpha*anchor
         anchor_diag = diags(
-            [np.full(self.n, alpha)], [0], shape=(self.n, self.n),
+            [np.full(n, alpha)], offsets=[0], shape=(n, n),
             format="csr",
         )
-        self.Q_x = self.Q_base + anchor_diag
-        self.Q_y = self.Q_base + anchor_diag
+        self.Q = self.Q_base + anchor_diag
         self.c_x = self.c_base_x - alpha * anchors_x
         self.c_y = self.c_base_y - alpha * anchors_y
 
         print(f"  Partition level {self.partition_level}: "
               f"{len(regions)} regions, alpha={alpha:.2f}")
 
-    # -- Step 5: Check overlap acceptance --------------------------------------
+    # -- Check overlap acceptance ----------------------------------------------
 
     def check_overlap(self, target_density: float = 1.5) -> bool:
         """Check if placement density is acceptable using bin-based metric.
 
         Returns True if the peak bin density is below target_density.
         """
-        assert self.defn is not None
-        die_x1, die_y1, die_x2, die_y2 = self.defn.die_area
+        die_x1, die_y1, die_x2, die_y2 = self.netlist.die_area
         die_w = die_x2 - die_x1
         die_h = die_y2 - die_y1
 
+        # Set up bin grid
         bin_w = die_w / DENSITY_BINS
         bin_h = die_h / DENSITY_BINS
         bin_area = bin_w * bin_h
 
-        density = np.zeros((DENSITY_BINS, DENSITY_BINS))
+        # Initialize density map
+        density_map = np.zeros((DENSITY_BINS, DENSITY_BINS))
 
-        for i in range(self.n):
+        for i in range(self.netlist.num_cells):
             cx, cy = self.x_pos[i], self.y_pos[i]
-            w, h = self.cell_widths[i], self.cell_heights[i]
+            w, h = self.netlist.cell_widths[i], self.netlist.cell_heights[i]
 
+            # Compute cell bounding box
             x1 = max(cx - w / 2, die_x1)
             y1 = max(cy - h / 2, die_y1)
             x2 = min(cx + w / 2, die_x2)
             y2 = min(cy + h / 2, die_y2)
 
+            # Determine which bins the cell overlaps
             bx1 = max(0, int((x1 - die_x1) / bin_w))
             by1 = max(0, int((y1 - die_y1) / bin_h))
             bx2 = min(DENSITY_BINS - 1, int((x2 - die_x1) / bin_w))
             by2 = min(DENSITY_BINS - 1, int((y2 - die_y1) / bin_h))
 
+            # Compute overlap area between the cell and each bin it overlaps
             for bx in range(bx1, bx2 + 1):
                 for by in range(by1, by2 + 1):
                     ox1 = max(x1, die_x1 + bx * bin_w)
@@ -388,21 +327,22 @@ class Placer:
                     ox2 = min(x2, die_x1 + (bx + 1) * bin_w)
                     oy2 = min(y2, die_y1 + (by + 1) * bin_h)
                     area = max(0.0, ox2 - ox1) * max(0.0, oy2 - oy1)
-                    density[bx, by] += area
+                    density_map[bx, by] += area
 
-        density /= bin_area
-        peak = float(density.max())
+        # Normalize each density value by bin area and then find the maximum
+        # density across all bins
+        density_map /= bin_area
+        max_density = float(density_map.max())
 
-        print(f"  Bin density -- peak: {peak:.2f}")
-        return peak <= target_density
+        print(f"  Max bin density: {max_density:.2f}")
+        return max_density <= target_density
 
     # -- Metrics ---------------------------------------------------------------
 
     def compute_hpwl(self) -> float:
         """Compute total half-perimeter wirelength across all nets."""
-        assert self.defn is not None
         total = 0.0
-        for net in self.defn.nets:
+        for net in self.netlist.nets:
             min_x = float("inf")
             max_x = float("-inf")
             min_y = float("inf")
@@ -411,7 +351,7 @@ class Placer:
 
             for comp_name, pin_name in net.pins:
                 if comp_name == "PIN":
-                    io_pin = self.io_pin_map.get(pin_name)
+                    io_pin = self.netlist.io_pin_map.get(pin_name)
                     if io_pin is not None:
                         min_x = min(min_x, io_pin.x)
                         max_x = max(max_x, io_pin.x)
@@ -419,7 +359,7 @@ class Placer:
                         max_y = max(max_y, io_pin.y)
                         count += 1
                 else:
-                    idx = self.cell_idx.get(comp_name)
+                    idx = self.netlist.cell_index.get(comp_name)
                     if idx is not None:
                         min_x = min(min_x, self.x_pos[idx])
                         max_x = max(max_x, self.x_pos[idx])
@@ -435,75 +375,24 @@ class Placer:
     # -- Output ----------------------------------------------------------------
 
     def _update_components(self) -> None:
-        """Write solved positions back to self.defn.components."""
-        assert self.defn is not None
-        for i, name in enumerate(self.cell_names):
-            comp = self.defn.components[name]
-            comp.x = self.x_pos[i] - self.cell_widths[i] / 2
-            comp.y = self.y_pos[i] - self.cell_heights[i] / 2
+        """Write solved positions back to netlist components."""
+        nl = self.netlist
+        for i, name in enumerate(nl.cell_names):
+            comp = nl.components[name]
+            comp.x = self.x_pos[i] - nl.cell_widths[i] / 2
+            comp.y = self.y_pos[i] - nl.cell_heights[i] / 2
 
     def write_output(self, tag: str = "") -> str:
-        """Write placement results to ./<design_name>[-<tag>]/ directory.
+        """Write placement results as a JSON file.
 
-        Copies the original LEF file unchanged and writes a new DEF file
-        with updated component positions. If tag is given (e.g. "initial",
-        "final"), it is appended to the output directory name.
-        Returns the output directory path.
+        Writes <design_name>-<tag>.json (or <design_name>.json if no tag)
+        with the same schema as the input netlist JSON but with updated
+        component positions. Returns the output file path.
         """
-        assert self.defn is not None
-        assert self.lef is not None
-
-        out_dir = f"{self.design_name}-{tag}" if tag else self.design_name
-        os.makedirs(f"{out_dir}/lef", exist_ok=True)
-        os.makedirs(f"{out_dir}/def", exist_ok=True)
-
-        # Copy LEF unchanged
-        lef_basename = os.path.basename(self.lef_path)
-        shutil.copy2(self.lef_path, f"{out_dir}/lef/{lef_basename}")
-
-        # Write DEF with updated positions
-        def_basename = os.path.basename(self.def_path)
-        self._write_def(f"{out_dir}/def/{def_basename}")
-
-        return out_dir
-
-    def _write_def(self, path: str) -> None:
-        """Write a DEF file with current component positions.
-
-        Reads the original DEF and replaces component coordinates with
-        the current values from self.defn.components.
-        """
-        assert self.defn is not None
-
-        with open(self.def_path) as fin, open(path, "w") as fout:
-            in_components = False
-
-            for line in fin:
-                toks = line.split()
-
-                if not in_components:
-                    if toks and toks[0] == "COMPONENTS":
-                        in_components = True
-                    fout.write(line)
-                else:
-                    # Inside COMPONENTS section
-                    if toks and toks[0] == "END" and len(toks) > 1 and toks[1] == "COMPONENTS":
-                        fout.write(line)
-                        in_components = False
-                    elif toks and toks[0] == "-":
-                        # Component line: - name macro + PLACED ( x y ) orient ;
-                        comp_name = toks[1]
-                        comp = self.defn.components.get(comp_name)
-                        if comp is not None:
-                            fout.write(
-                                f"- {comp.name} {comp.macro_name}"
-                                f" + PLACED ( {int(comp.x)} {int(comp.y)} ) N ;\n"
-                            )
-                        else:
-                            fout.write(line)
-                    else:
-                        fout.write(line)
-
+        name = self.netlist.design_name
+        out_name = f"{name}-{tag}.json" if tag else f"{name}.json"
+        dump_netlist(self.netlist, out_name)
+        return out_name
 
 
 # -- Entry point ---------------------------------------------------------------
@@ -511,32 +400,28 @@ class Placer:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <benchmark_dir>")
-        print(f"  e.g. {sys.argv[0]} benchmarks/iccad04/DMA")
+        print(f"Usage: {sys.argv[0]} <netlist.json>")
+        print(f"  e.g. {sys.argv[0]} DMA.json")
         sys.exit(1)
 
     placer = Placer(sys.argv[1])
 
-    # Step 1: Parse netlist
-    print("Step 1: Parsing netlist...")
-    placer.parse_netlist()
-
-    # Randomize cell positions and write initial DEF
-    print("Randomizing cell positions...")
+    # Initialize cell positions and write initial JSON
+    print("Initializing cell positions...")
     placer.init_cell_positions("origin")
-    out_dir = placer.write_output("initial")
-    print(f"  Initial placement written to {out_dir}/")
+    out_path = placer.write_output("initial")
+    print(f"  Initial placement written to {out_path}")
 
-    # Step 2: Build connectivity matrix
-    print("Step 2: Building connectivity matrix...")
+    # Step 1: Build connectivity matrix
+    print("Step 1: Building connectivity matrix...")
     placer.build_system()
 
-    # Step 3: Initial CG solve (wirelength-optimal, no spreading)
-    print("Step 3: Initial CG solve...")
+    # Step 2: Initial CG solve (wirelength-optimal, no spreading)
+    print("Step 2: Initial CG solve...")
     placer.solve_cg()
     print(f"  HPWL: {placer.compute_hpwl():.0f}")
 
-    # Steps 4-5: Iterative spreading via partition + re-solve
+    # Steps 3-4: Iterative spreading via partition + re-solve
     for iteration in range(1, MAX_OUTER_ITER + 1):
         print(f"Iteration {iteration}:")
         placer.partition_and_anchor()
@@ -550,8 +435,8 @@ def main() -> None:
 
     # Write final output
     placer._update_components()
-    out_dir = placer.write_output("final")
-    print(f"Final placement written to {out_dir}/")
+    out_path = placer.write_output("final")
+    print(f"Final placement written to {out_path}")
 
 
 if __name__ == "__main__":
