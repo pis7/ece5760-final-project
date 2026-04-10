@@ -6,7 +6,8 @@ quadratic optimization problem and solved via conjugate gradient descent.
 
 ## Setup
 
-Requires Python >= 3.14 and [uv](https://docs.astral.sh/uv/).
+Requires Python >= 3.14, [uv](https://docs.astral.sh/uv/), CMake >= 3.10, and
+a C++17 compiler.
 
 ```bash
 uv sync
@@ -35,48 +36,46 @@ mkdir -p build
 cd build
 ```
 
-### Placer
-
-Runs the placement algorithm on a benchmark directory and writes the result
-to `./<design_name>/` in the same LEF/DEF directory format.
+### Parse LEF/DEF to JSON
 
 ```bash
-uv run ../sw-baseline-python/placer.py ../benchmarks/iccad04/DMA
+uv run ../design-file-tools/lefdef-parser.py ../benchmarks/iccad04/DMA
 ```
 
-Output:
+### Placer (Python)
+
+```bash
+uv run ../sw-baseline-python/placer.py DMA.json
 ```
-build/DMA/
-  lef/dma.lef   (copy of original)
-  def/dma.def   (updated component positions)
+
+### Placer (C++)
+
+```bash
+cmake ../sw-baseline-c
+make
+./placer DMA.json
 ```
+
+Both placers read the same netlist JSON and write `<design>-initial.json` and
+`<design>-final.json` with updated component positions.
 
 ### Visualizer
 
-Opens a Tk GUI showing macro sizes and placements on the die. Works on both
-input benchmarks and placer output directories.
+Opens a Tk GUI showing cell placements on the die.
 
 ```bash
-# View original benchmark
-uv run ../design-file-tools/visualizer.py ../benchmarks/iccad04/DMA
-
-# View placer output
-uv run ../design-file-tools/visualizer.py DMA
+uv run ../design-file-tools/visualizer.py DMA-final.json
 ```
 
-Controls:
-- Scroll wheel: zoom in/out
-- Click + drag: pan
-- R: reset view to fit all
+Controls: scroll to zoom, drag to pan, R to reset view.
 
 ## Directory Structure
 
 - `sw-baseline-python/` -- Python reference placer implementation
+- `sw-baseline-c/` -- C++ placer implementation (CMake build)
 - `design-file-tools/` -- LEF/DEF parser and visualizer
-- `sw-baseline-c/` -- C implementation for HPS ARM processor (planned)
-- `benchmarks/` -- ICCAD04 benchmark designs
-- `background-knowledge/` -- Reference material on LEF/DEF format and
-  analytical placement algorithms
+- `benchmarks/` -- ICCAD04 and custom benchmark designs
+- `background-knowledge/` -- Reference material on placement algorithms
 - `docs-local/` -- Proposal and documentation (not checked in)
 
 ## Team
