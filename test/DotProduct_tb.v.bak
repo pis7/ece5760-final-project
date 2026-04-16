@@ -1,0 +1,215 @@
+`timescale 1ns/1ps
+
+module DotProduct_tb;
+
+    parameter DATA_LEN = 32;
+
+    reg clk;
+    reg rst;
+    reg [31:0] n;
+
+    reg  [DATA_LEN-1:0] data_in1;
+    reg  [DATA_LEN-1:0] data_in2;
+
+    reg  dotp_req_val;
+    wire dotp_req_rdy;
+
+    reg  dotp_resp_rdy;
+    wire dotp_resp_val;
+
+    wire [DATA_LEN-1:0] result;
+    wire [31:0] compute_counter;
+
+    integer TEST_CASE_NUM;
+
+    // Global vectors (NO passing into tasks)
+    integer v1 [0:31];
+    integer v2 [0:31];
+
+    // DUT
+    DotProduct #(DATA_LEN) dut (
+        .clk             (clk),
+        .rst             (rst),
+        .n               (n),
+        .data_in1        (data_in1),
+        .data_in2        (data_in2),
+        .result          (result),
+        .compute_counter (compute_counter),
+        .dotp_req_val    (dotp_req_val),
+        .dotp_req_rdy    (dotp_req_rdy),
+        .dotp_resp_rdy   (dotp_resp_rdy),
+        .dotp_resp_val   (dotp_resp_val)
+    );
+
+    // Clock
+    always #5 clk = ~clk;
+
+    // ------------------------------------------------------------
+    // TASK: send one element (respects handshake)
+    // ------------------------------------------------------------
+    task send_element(input [DATA_LEN-1:0] a, input [DATA_LEN-1:0] b);
+    begin
+        data_in1 = a;
+        data_in2 = b;
+        dotp_req_val = 1;
+
+        if (dotp_req_rdy) begin
+            // If already see an input handshake, just process it and advance to next set of vector entries
+            @(posedge clk); 
+        end else begin
+            // If we do not see a handshake immediately, wait until this happens before moving on
+            while (!(dotp_req_rdy)) @(posedge clk);
+        end
+
+        // Drop val immediately AFTER handshake
+        dotp_req_val = 0;
+    end
+    endtask
+
+    // ------------------------------------------------------------
+    // TASK: run full dot product using global arrays
+    // ------------------------------------------------------------
+    task run_dot_product(input integer size, input integer expected);
+        integer i;
+    begin
+        $display("\n========== TEST %0d ==========", TEST_CASE_NUM);
+
+        n = size;
+
+        for (i = 0; i < size; i = i + 1) begin
+            send_element(v1[i], v2[i]);
+        end
+
+        // Expect that at this point, the module is in DONE
+        @(negedge clk)
+        // while (!dotp_resp_val) @(posedge clk);
+
+        if (result !== expected) begin
+            $display("❌ FAIL (Test %0d): expected %0d, got %0d",
+                      TEST_CASE_NUM, expected, result);
+        end else begin
+            $display("✅ PASS (Test %0d): result = %0d",
+                      TEST_CASE_NUM, result);
+        end
+
+        // Backpressure test
+        dotp_resp_rdy = 0;
+        repeat (3) @(posedge clk);
+
+        if (!dotp_resp_val)
+            $display("❌ FAIL (Test %0d): result not held under backpressure", TEST_CASE_NUM);
+
+        dotp_resp_rdy = 1;
+        @(posedge clk);
+
+        TEST_CASE_NUM = TEST_CASE_NUM + 1;
+    end
+    endtask
+
+    // ------------------------------------------------------------
+    // TEST SEQUENCE
+    // ------------------------------------------------------------
+    initial begin
+        clk = 0;
+        rst = 1;
+        dotp_req_val = 0;
+        dotp_resp_rdy = 1;
+        data_in1 = 0;
+        data_in2 = 0;
+        n = 0;
+        TEST_CASE_NUM = 1;
+
+        // Reset
+        repeat (5) @(posedge clk);
+        rst = 0;
+
+        // --------------------------------------------------------
+        // Test 1: simple
+        // --------------------------------------------------------
+        v1[0]=1; v2[0]=1;
+        v1[1]=2; v2[1]=2;
+        v1[2]=3; v2[2]=3;
+        v1[3]=4; v2[3]=4;
+
+        run_dot_product(4, 30);
+
+        // --------------------------------------------------------
+        // Test 2: zeros
+        // --------------------------------------------------------
+        v1[0]=0; v2[0]=5;
+        v1[1]=0; v2[1]=10;
+        v1[2]=0; v2[2]=20;
+
+        run_dot_product(3, 0);
+
+        // --------------------------------------------------------
+        // Test 3: mixed
+        // --------------------------------------------------------
+        v1[0]=1; v2[0]=5;
+        v1[1]=2; v2[1]=6;
+        v1[2]=3; v2[2]=7;
+
+        run_dot_product(3, (1*5 + 2*6 + 3*7));
+
+        // --------------------------------------------------------
+        // Test 4: input stall
+        // --------------------------------------------------------
+        $display("\n========== TEST %0d (STALL) ==========", TEST_CASE_NUM);
+
+        n = 3;
+
+        data_in1 = 1; data_in2 = 1; dotp_req_val = 1;
+        @(posedge clk);
+
+        dotp_req_val = 0;
+        repeat (2) @(posedge clk);
+
+        data_in1 = 2; data_in2 = 2; dotp_req_val = 1;
+        @(posedge clk);
+
+        data_in1 = 3; data_in2 = 3;
+        @(posedge clk);
+        dotp_req_val = 0;
+
+        while (!dotp_resp_val) @(posedge clk);
+
+        if (result !== 14)
+            $display("❌ FAIL (Test %0d): stall result %0d", TEST_CASE_NUM, result);
+        else
+            $display("✅ PASS (Test %0d): stall", TEST_CASE_NUM);
+
+        dotp_resp_rdy = 1;
+        @(posedge clk);
+
+        TEST_CASE_NUM = TEST_CASE_NUM + 1;
+
+        // --------------------------------------------------------
+        // Test 5: consecutive runs
+        // --------------------------------------------------------
+        v1[0]=2; v2[0]=3;
+        v1[1]=4; v2[1]=5;
+
+        run_dot_product(2, (2*3 + 4*5));
+        run_dot_product(2, (2*3 + 4*5));
+
+        // --------------------------------------------------------
+        // Test 6: reset mid-compute
+        // --------------------------------------------------------
+        n = 2;
+        send_element(1,1);
+        send_element(2,2);
+
+        rst = 1;
+        @(posedge clk);
+        rst = 0;
+
+        v1[0]=2; v2[0]=3;
+        v1[1]=4; v2[1]=5;
+
+        run_dot_product(2, (2*3 + 4*5));
+
+        $display("\nAll tests completed.");
+        $finish;
+    end
+
+endmodule
