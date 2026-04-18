@@ -33,6 +33,9 @@ MAX_NET_DEGREE: int = 100
 # Number of bins per dimension for overlap density check
 DENSITY_BINS: int = 30
 
+# Target max bin density for convergence
+TARGET_DENSITY: float = 0.75
+
 # Maximum outer iterations (partition + re-solve cycles)
 MAX_OUTER_ITER: int = 15
 
@@ -286,40 +289,32 @@ class Placer:
 
     # -- Check overlap acceptance ----------------------------------------------
 
-    def check_overlap(self, target_density: float = 1.5) -> bool:
-        """Check if placement density is acceptable using bin-based metric.
-
-        Returns True if the peak bin density is below target_density.
-        """
+    def max_bin_density(self) -> float:
+        """Compute the peak bin density of the current placement."""
         die_x1, die_y1, die_x2, die_y2 = self.netlist.die_area
         die_w = die_x2 - die_x1
         die_h = die_y2 - die_y1
 
-        # Set up bin grid
         bin_w = die_w / DENSITY_BINS
         bin_h = die_h / DENSITY_BINS
         bin_area = bin_w * bin_h
 
-        # Initialize density map
         density_map = np.zeros((DENSITY_BINS, DENSITY_BINS))
 
         for i in range(self.netlist.num_cells):
             cx, cy = self.x_pos[i], self.y_pos[i]
             w, h = self.netlist.cell_widths[i], self.netlist.cell_heights[i]
 
-            # Compute cell bounding box
             x1 = max(cx - w / 2, die_x1)
             y1 = max(cy - h / 2, die_y1)
             x2 = min(cx + w / 2, die_x2)
             y2 = min(cy + h / 2, die_y2)
 
-            # Determine which bins the cell overlaps
             bx1 = max(0, int((x1 - die_x1) / bin_w))
             by1 = max(0, int((y1 - die_y1) / bin_h))
             bx2 = min(DENSITY_BINS - 1, int((x2 - die_x1) / bin_w))
             by2 = min(DENSITY_BINS - 1, int((y2 - die_y1) / bin_h))
 
-            # Compute overlap area between the cell and each bin it overlaps
             for bx in range(bx1, bx2 + 1):
                 for by in range(by1, by2 + 1):
                     ox1 = max(x1, die_x1 + bx * bin_w)
@@ -329,13 +324,14 @@ class Placer:
                     area = max(0.0, ox2 - ox1) * max(0.0, oy2 - oy1)
                     density_map[bx, by] += area
 
-        # Normalize each density value by bin area and then find the maximum
-        # density across all bins
         density_map /= bin_area
-        max_density = float(density_map.max())
+        return float(density_map.max())
 
-        print(f"  Max bin density: {max_density:.2f}")
-        return max_density <= target_density
+    def check_overlap(self, target_density: float = 1.5) -> bool:
+        """Check if placement density is acceptable using bin-based metric."""
+        md = self.max_bin_density()
+        print(f"  Max bin density: {md:.2f}")
+        return md <= target_density
 
     # -- Metrics ---------------------------------------------------------------
 
@@ -422,15 +418,33 @@ def main() -> None:
     print(f"  HPWL: {placer.compute_hpwl():.0f}")
 
     # Steps 3-4: Iterative spreading via partition + re-solve
+    converged = False
+    prev_density = placer.max_bin_density()
     for iteration in range(1, MAX_OUTER_ITER + 1):
         print(f"Iteration {iteration}:")
         placer.partition_and_anchor()
+
+        x_saved = placer.x_pos.copy()
+        y_saved = placer.y_pos.copy()
+
         placer.solve_cg()
         print(f"  HPWL: {placer.compute_hpwl():.0f}")
-        if placer.check_overlap():
-            print("Overlap acceptable -- placement complete.")
+
+        new_density = placer.max_bin_density()
+        # Only revert once spreading has started working (density below
+        # 2x target). Early iterations often increase density temporarily.
+        if prev_density < 2 * TARGET_DENSITY and new_density > prev_density:
+            print(f"  Max bin density: {new_density:.2f} (worse than {prev_density:.2f}, reverting)")
+            placer.x_pos = x_saved
+            placer.y_pos = y_saved
             break
-    else:
+        print(f"  Max bin density: {new_density:.2f}")
+        prev_density = new_density
+        if new_density <= TARGET_DENSITY:
+            print("Overlap acceptable -- placement complete.")
+            converged = True
+            break
+    if not converged:
         print(f"Max iterations ({MAX_OUTER_ITER}) reached.")
 
     # Write final output

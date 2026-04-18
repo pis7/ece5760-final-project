@@ -49,7 +49,7 @@ def CGTop(
 
   # Main solve loop ------------------------------------------------------------
 
-  for it in range(max_iter):
+  for _ in range(max_iter):
 
     q = SPMV(
       A = Qx_reg,

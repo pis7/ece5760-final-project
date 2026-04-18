@@ -27,7 +27,7 @@ static constexpr int DENSITY_BINS = 30;
 static constexpr int MAX_OUTER_ITER = 15;
 static constexpr int CG_MAX_ITER = 1000;
 static constexpr double CG_EPS = 1e-5;
-static constexpr double TARGET_DENSITY = 1.5;
+static constexpr double TARGET_DENSITY = 0.75;
 
 // -- Data structures ----------------------------------------------------------
 
@@ -93,6 +93,14 @@ struct CSRMatrix {
     int nnz() const { return (int)vals.size(); }
 };
 
+#ifdef USE_HW_CG
+#ifdef USE_FP_GOLDEN
+#include "cg_fp_golden.h"
+#else
+#include "cg_hw_driver.h"
+#endif
+#endif
+ 
 struct COOEntry {
     int row, col;
     double val;
@@ -409,6 +417,10 @@ public:
 
     int partition_level = 0;
 
+#ifdef USE_HW_CG
+    CGHwDriver hw_driver;
+#endif
+
     explicit Placer(const std::string& json_path) : nl(load_netlist(json_path)) {}
 
     void init_cell_positions() {
@@ -506,8 +518,19 @@ public:
 
     void solve_cg() {
         // Solve Qx = -cx and Qy = -cy via CG (proposal Listing 1)
+#ifdef USE_HW_CG
+        if (Q.n <= CGHwDriver::MAX_N) {
+            hw_driver.solve(Q, c_x, c_y, x_pos, y_pos, CG_MAX_ITER, CG_EPS);
+        } else {
+            fprintf(stderr, "Warning: n=%d > %d, falling back to software CG\n",
+                    Q.n, CGHwDriver::MAX_N);
+            cg_solve(Q, c_x, x_pos, CG_MAX_ITER, CG_EPS);
+            cg_solve(Q, c_y, y_pos, CG_MAX_ITER, CG_EPS);
+        }
+#else
         cg_solve(Q, c_x, x_pos, CG_MAX_ITER, CG_EPS);
         cg_solve(Q, c_y, y_pos, CG_MAX_ITER, CG_EPS);
+#endif
         clamp_to_die();
     }
 
@@ -642,7 +665,7 @@ public:
 
     // -- Check overlap --------------------------------------------------------
 
-    bool check_overlap() {
+    double max_bin_density() {
         double dx1 = nl.die_area[0], dy1 = nl.die_area[1];
         double dx2 = nl.die_area[2], dy2 = nl.die_area[3];
         double die_w = dx2 - dx1, die_h = dy2 - dy1;
@@ -679,14 +702,18 @@ public:
             }
         }
 
-        double max_density = 0.0;
+        double md = 0.0;
         for (double& d : density) {
             d /= bin_area;
-            max_density = std::max(max_density, d);
+            md = std::max(md, d);
         }
+        return md;
+    }
 
-        std::printf("  Max bin density: %.2f\n", max_density);
-        return max_density <= TARGET_DENSITY;
+    bool check_overlap() {
+        double md = max_bin_density();
+        std::printf("  Max bin density: %.2f\n", md);
+        return md <= TARGET_DENSITY;
     }
 
     // -- HPWL -----------------------------------------------------------------
@@ -777,12 +804,31 @@ int main(int argc, char* argv[]) {
 
     // Steps 3-4: Iterative spreading
     bool converged = false;
+    double prev_density = placer.max_bin_density();
     for (int iter = 1; iter <= MAX_OUTER_ITER; ++iter) {
         std::printf("Iteration %d:\n", iter);
         placer.partition_and_anchor();
+
+        // Save positions before CG solve
+        auto x_saved = placer.x_pos;
+        auto y_saved = placer.y_pos;
+
         placer.solve_cg();
         std::printf("  HPWL: %.0f\n", placer.compute_hpwl());
-        if (placer.check_overlap()) {
+
+        double new_density = placer.max_bin_density();
+        // Only revert once spreading has started working (density below
+        // 2x target). Early iterations often increase density temporarily.
+        if (prev_density < 2 * TARGET_DENSITY && new_density > prev_density) {
+            std::printf("  Max bin density: %.2f (worse than %.2f, reverting)\n",
+                        new_density, prev_density);
+            placer.x_pos = x_saved;
+            placer.y_pos = y_saved;
+            break;
+        }
+        std::printf("  Max bin density: %.2f\n", new_density);
+        prev_density = new_density;
+        if (new_density <= TARGET_DENSITY) {
             std::printf("Overlap acceptable -- placement complete.\n");
             converged = true;
             break;

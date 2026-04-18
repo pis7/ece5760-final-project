@@ -97,10 +97,10 @@ module AXPY_tb;
             @(negedge clk);
 
             if (z_i !== expected[i]) begin
-                $display("❌ FAIL T%0d i=%0d expected=%0d got=%0d",
+                $display("FAIL T%0d i=%0d expected=%0d got=%0d",
                          TEST_CASE_NUM, i, expected[i], z_i);
             end else begin
-                $display("✔ PASS T%0d i=%0d = %0d",
+                $display("PASS T%0d i=%0d = %0d",
                          TEST_CASE_NUM, i, z_i);
             end
 
@@ -109,7 +109,7 @@ module AXPY_tb;
             repeat (3) @(posedge clk);
 
             if (!axpy_resp_val)
-                $display("❌ FAIL (Test %0d): result not held under backpressure", TEST_CASE_NUM);
+                $display("FAIL (Test %0d): result not held under backpressure", TEST_CASE_NUM);
 
             axpy_resp_rdy = 1;
             @(posedge clk); // Return to COMPUTE (or DONE if last entry)
@@ -119,7 +119,7 @@ module AXPY_tb;
         @(negedge clk);
 
         if (!done)
-            $display("❌ FAIL: done not asserted");
+            $display("FAIL: done not asserted");
 
         TEST_CASE_NUM = TEST_CASE_NUM + 1;
     end

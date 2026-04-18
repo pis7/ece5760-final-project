@@ -136,7 +136,7 @@ class PlacementViewer:
             x0, y0 = self._to_canvas(comp.x, comp.y)
             x1, y1 = self._to_canvas(comp.x + w, comp.y + h)
             self.canvas.create_rectangle(
-                x0, y0, x1, y1, fill="#4080c0", outline=""
+                x0, y0, x1, y1, fill="#4080c0", outline="white", width=1
             )
 
     def _draw_io_pins(self) -> None:
