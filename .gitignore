@@ -12,3 +12,6 @@ wheels/
 # Claude files
 .claude/
 CLAUDE.md
+
+# verilator files
+obj_dir/

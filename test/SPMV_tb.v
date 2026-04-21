@@ -69,17 +69,29 @@ module MockMem #(
 
 endmodule: MockMem
 
-task check_32b_eq (
-  input logic [31:0] expected,
-  input logic [31:0] received
-);
-  if (expected !== received) begin
-    $display("ERROR: expected %d but recieved %d", expected, received);
-  end
-endtask: check_32b_eq
+class test_bench;
+  bit all_asserts_passed;
+
+  function new;
+    this.all_asserts_passed = 1;
+  endfunction
+
+  task check_32b_eq (
+    input logic [31:0] received,
+    input logic [31:0] expected
+  );
+    if (expected !== received) begin
+      $display("ERROR: expected %d but recieved %d", expected, received);
+      this.all_asserts_passed = 0;
+    end
+  endtask: check_32b_eq
+
+  function bit all_checks_passed();
+    all_checks_passed = this.all_asserts_passed;
+  endfunction
+endclass
 
 module SPMV_tb;
-
   logic rst;
   logic clk;
   logic go;
@@ -183,6 +195,10 @@ module SPMV_tb;
   always #5 clk = ~clk;
 
   initial begin
+    // Inital Testbench Setup
+    test_bench tb;
+    tb = new();
+
     // Reset the DUT
     clk = 0;
     rst = 1;
@@ -190,16 +206,23 @@ module SPMV_tb;
     num_rows = 0;
     num_non_zero = 0;
 
-    repeat (5) @(posedge clk);
+    repeat (5) @(negedge clk);
 
     // TEST: latch the values of num_rows and num_non_zero
     rst = 0;
+    go = 1;
     num_rows = 10;
     num_non_zero = 8;
     @(negedge clk);
-    check_32b_eq(dut.num_rows, 10);
-    check_32b_eq(dut.num_non_zeros, 8);
+    tb.check_32b_eq(dut.num_rows, 10);
+    tb.check_32b_eq(dut.num_non_zeros, 8);
 
+    if (tb.all_checks_passed()) begin
+      $display("ALL TESTS PASSED");
+    end else begin
+      $display("TESTS FAILED");
+    end
+    
     $finish;
   end
 
