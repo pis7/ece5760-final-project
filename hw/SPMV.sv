@@ -19,12 +19,19 @@ typedef struct packed {
  *
  * This module directly writes its result into the x memory, the lowest value
  * at address zero.
+ *
+ * The module begins reading from memory and computing the product the cycle
+ * after go is asserted. Once the module finished writing to the x memory, it
+ * asserts done for one cycle.
  */
 module SPMV #(
   parameter DATA_WIDTH=32
 )(
   input  logic                  i_rst,
   input  logic                  i_clk,
+
+  input  logic                  i_go,
+  output logic                  o_done,
 
   input  logic [31:0]           i_num_rows,
   input  logic [31:0]           i_num_non_zeros,
