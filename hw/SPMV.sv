@@ -1,5 +1,7 @@
 `ifndef SPMV_SV_H
 `define SPMV_SV_H
+`include "macros.sv"
+`include "MemController.sv"
 
 /* Harcode index widths because system verilog is dumb and doesn't support
  * paramaterized structs */
@@ -10,18 +12,18 @@ parameter DATA_WIDTH = 32;
 
 typedef enum {
   RD, WR
-} mem_cmd_ty_e;
+} MemCmdTy;
 
 typedef struct packed {
-  mem_cmd_ty_e           ty;
+  MemCmdTy           ty;
   logic [IDX_WIDTH-1:0]  idx;
   logic [DATA_WIDTH-1:0] data;
-} mem_req_t;
+} MemReq;
 
 typedef struct packed {
-  mem_cmd_ty_e           ty;
+  MemCmdTy           ty;
   logic [DATA_WIDTH-1:0] data;
-} mem_resp_t;
+} MemResp;
 
 /* SPMV performs a matrix muliplicaton Qx = c.
  * The module assumes Q is layed out using CSR format in the order data, column
@@ -38,75 +40,139 @@ typedef struct packed {
  * for one cycle.
  */
 module SPMV (
-  input  logic        i_rst,
-  input  logic        i_clk,
+  input  logic        rst,
+  input  logic        clk,
 
-  input  logic        i_go,
-  output logic        o_done,
+  input  logic        go,
+  output logic        done,
 
-  input  logic [31:0] i_num_rows,
-  input  logic [31:0] i_num_non_zeros,
+  input  logic [31:0] num_rows,
+  input  logic [31:0] num_non_zeros,
 
-  output mem_req_t    o_q_mem_req,
+  output MemReq    o_q_mem_req,
   output logic        o_q_mem_req_val,
   input  logic        i_q_mem_req_rdy,
 
-  input  mem_resp_t   i_q_mem_resp,
+  input  MemResp   i_q_mem_resp,
   input  logic        i_q_mem_resp_val,
   output logic        o_q_mem_resp_rdy,
 
-  output mem_req_t    o_x_mem_req,
+  output MemReq    o_x_mem_req,
   output logic        o_x_mem_req_val,
   input  logic        i_x_mem_req_rdy,
 
-  input  mem_resp_t   i_x_mem_resp,
+  input  MemResp   i_x_mem_resp,
   input  logic        i_x_mem_resp_val,
   output logic        o_x_mem_resp_rdy,
 
-  output mem_req_t    o_c_mem_req,
+  output MemReq    o_c_mem_req,
   output logic        o_c_mem_req_val,
   input  logic        i_c_mem_req_rdy,
 
-  input  mem_resp_t   i_c_mem_resp,
+  input  MemResp   i_c_mem_resp,
   input  logic        i_c_mem_resp_val,
   output logic        o_c_mem_resp_rdy
 );
   typedef enum {
-    IDLE
-  } state_e;
+    IDLE,
+    READ
+  } State;
 
 
-  /* The module is implemented with a relatively straightforward state machine.
-   */
-
-  state_e state;
-  state_e next_state;
+  State state;
+  State next_state;
 
   always_comb begin
-    next_state = IDLE;
+    case (state)
+      IDLE:    next_state = go ? READ : IDLE;
+      READ:    next_state = READ;
+      default: next_state = IDLE;
+    endcase
   end
 
-  always_ff @(i_clk) begin
-    if (i_rst) state <= IDLE;
+  always_ff @(clk) begin
+    if (rst)   state <= IDLE;
     else       state <= next_state;
   end
 
-  logic [31:0] num_rows;
-  logic [31:0] num_non_zeros;
+  logic [31:0] num_rows_reg;
+  logic [31:0] num_non_zeros_reg;
 
-  always_ff @(i_clk) begin
-    if (i_rst) begin
-      num_rows      <= 0;
-      num_non_zeros <= 0;
-    end else if (i_go && state == IDLE) begin
-      num_rows      <= i_num_rows;
-      num_non_zeros <= i_num_non_zeros;
+  always_ff @(clk) begin
+    if (rst) begin
+      num_rows_reg      <= 0;
+      num_non_zeros_reg <= 0;
+    end else if (go && state == IDLE) begin
+      num_rows_reg      <= num_rows;
+      num_non_zeros_reg <= num_non_zeros;
     end else begin
-      num_rows      <= num_rows;
-      num_non_zeros <= num_non_zeros;
+      num_rows_reg      <= num_rows_reg;
+      num_non_zeros_reg <= num_non_zeros_reg;
     end
   end
 
+  // logic [DATA_WIDTH-1:0] cur_x_val;
+  // MemController #(
+  //   .DATA_WIDTH(DATA_WIDTH),
+  //   .IDX_WIDTH (IDX_WIDTH)
+  //  ) memController (
+  //   .clk              (clk),
+  //   .rst              (rst),
+  //   .req              (req),
+  //   .req_val          (req_val),
+  //   .resp             (resp),
+  //   .resp_val         (resp_val),
+  //   .mem_req_cnct     (mem_req_cnct),
+  //   .mem_req_cnct_val (mem_req_cnct_val),
+  //   .mem_req_cnct_rdy (mem_req_cnct_rdy),
+  //   .mem_resp_cnct    (mem_resp_cnct),
+  //   .mem_resp_cnct_val(mem_resp_cnct_val),
+  //   .mem_resp_cnct_rdy(mem_resp_cnct_rdy)
+  // );
+  
+
+  // logic [DATA_WIDTH-1:0] cur_x_val;
+  // logic [IDX_WIDTH-1:0]  x_val_count;
+  // logic [IDX_WIDTH-1:0]  next_x_val_count;
+
+  // // TODO: Actually assign next_x_val_count
+  // assign next_x_val_count = x_val_count;
+
+  // always_ff @(clk) begin
+  //   if (rst)                 cur_x_val <= 0;
+  //   else if (i_x_mem_resp_val) cur_x_val <= i_x_mem_resp.data;
+  //   else                       cur_x_val <= cur_x_val;
+  // end
+
+  // always_ff @(clk) begin
+  //   if (rst) x_val_count <= 0;
+  //   else       x_val_count <= next_x_val_count;
+  // end
+
+  // logic                  reqed_x_val;
+  // logic                  read_x_val;
+  // logic                  next_reqed_x_val;
+  // logic                  next_read_x_val;
+
+  // always_comb begin
+  //   o_x_mem_req_val  = !reqed_x_val && !read_x_val && state == READ;
+  //   next_reqed_x_val = !reqed_x_val && !read_x_val && i_x_mem_req_rdy && state == READ;
+
+  //   o_x_mem_resp_rdy = reqed_x_val && !read_x_val && state == READ;
+  //   next_read_x_val  = reqed_x_val && !read_x_val && i_x_mem_resp_val && state == READ;
+
+  //   o_x_mem_req      = MemReq'{RD, x_val_count, 0};
+  // end
+
+  // always_ff @(clk) begin
+  //   if (rst) begin
+  //     reqed_x_val <= 0;
+  //     read_x_val  <= 0;
+  //   end else begin
+  //     reqed_x_val <= next_reqed_x_val;
+  //     read_x_val  <= next_read_x_val;
+  //   end
+  // end
 
 endmodule: SPMV
 
