@@ -1,4 +1,5 @@
 `timescale 1ns/1ps
+
 `include "../hw/SPMV.sv"
 `include "MockMem.sv"
 `include "TestBench.sv"
@@ -12,31 +13,31 @@ module SPMV_tb;
   logic [31:0] num_non_zero;
 
   MemReq  q_mem_req;
-  logic      q_mem_req_val;
-  logic      q_mem_req_rdy;
+  logic   q_mem_req_val;
+  logic   q_mem_req_rdy;
 
   MemResp q_mem_resp;
-  logic      q_mem_resp_val;
-  logic      q_mem_resp_rdy;
+  logic   q_mem_resp_val;
+  logic   q_mem_resp_rdy;
 
   MemReq  x_mem_req;
-  logic      x_mem_req_val;
-  logic      x_mem_req_rdy;
+  logic   x_mem_req_val;
+  logic   x_mem_req_rdy;
 
   MemResp x_mem_resp;
-  logic      x_mem_resp_val;
-  logic      x_mem_resp_rdy;
+  logic   x_mem_resp_val;
+  logic   x_mem_resp_rdy;
 
   MemReq  c_mem_req;
-  logic      c_mem_req_val;
-  logic      c_mem_req_rdy;
+  logic   c_mem_req_val;
+  logic   c_mem_req_rdy;
 
   MemResp c_mem_resp;
-  logic      c_mem_resp_val;
-  logic      c_mem_resp_rdy;
+  logic   c_mem_resp_val;
+  logic   c_mem_resp_rdy;
 
   MockMem #(
-    .DATA_WIDTH(32),
+    .WIDTH(32),
     .SIZE      (1024)
    ) q_mem (
     .rst         (rst),
@@ -50,7 +51,7 @@ module SPMV_tb;
   );
 
   MockMem #(
-    .DATA_WIDTH(32),
+    .WIDTH(32),
     .SIZE      (1024)
    ) x_mem (
     .rst         (rst),
@@ -64,7 +65,7 @@ module SPMV_tb;
   );
 
   MockMem #(
-    .DATA_WIDTH(32),
+    .WIDTH(32),
     .SIZE      (1024)
    ) c_mem (
     .rst         (rst),
@@ -130,9 +131,9 @@ module SPMV_tb;
     tb.check_32b_eq(dut.num_non_zeros, 8);
 
     if (tb.all_checks_passed()) begin
-      $display("ALL TESTS PASSED");
+      $display("\033[32mALL TESTS PASSED\033[39m");
     end else begin
-      $display("TESTS FAILED");
+      $display("\033[31mTESTS FAILED\033[39m");
     end
     
     $finish;

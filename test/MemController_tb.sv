@@ -1,8 +1,8 @@
 `timescale 1ns/1ps
 
 `include "../hw/MemController.sv"
+`include "../hw/MemTypes.sv"
 `include "MockMem.sv"
-`include "../hw/SPMV.sv"
 `include "TestBench.sv"
 
 module MemController_tb;
@@ -10,26 +10,26 @@ module MemController_tb;
   logic clk;
   logic rst;
 
-  MemReq dut_req;
-  logic  dut_req_val;
+  MemReq  dut_req;
+  logic   dut_req_val;
 
   MemResp dut_resp;
   logic   dut_resp_val;
 
-  MemReq interconnect_req;
-  logic  interconnect_req_val;
-  logic  interconnect_req_rdy;
+  MemReq  interconnect_req;
+  logic   interconnect_req_val;
+  logic   interconnect_req_rdy;
 
   MemResp interconnect_resp;
-  logic  interconnect_resp_val;
-  logic  interconnect_resp_rdy;
+  logic   interconnect_resp_val;
+  logic   interconnect_resp_rdy;
 
   MockMem #(
-    .DATA_WIDTH(32),
+    .WIDTH(32),
     .SIZE      (1024)
    ) mockMem (
-    .rst         (clk),
-    .clk         (rst),
+    .rst         (rst),
+    .clk         (clk),
     .mem_req     (interconnect_req),
     .mem_req_val (interconnect_req_val),
     .mem_req_rdy (interconnect_req_rdy),
@@ -53,16 +53,44 @@ module MemController_tb;
     .mem_resp_cnct_rdy(interconnect_resp_rdy)
   );
 
+  always #5 clk = ~clk;
+
+  TestBench tb;
   initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0);
+
     // Initial Testbench Setup
-    TestBench tb;
+
     tb = new();
 
     // Reset the DUT and Memory
     clk = 0;
     rst = 1;
 
-    repeat (5) @(negedge clk);
+    repeat (2) @(negedge clk);
+
+    // TEST: Basic Read Write
+    rst = 0;
+
+    dut_req = MemReq'{WR, 10, 'hDEADBEEF};
+    dut_req_val = 1;
+
+    do @(negedge clk); while (!dut_resp_val);
+
+    dut_req = MemReq'{RD, 10, 0};
+    dut_req_val = 1;
+
+    do @(negedge clk); while (!dut_resp_val);
+
+    tb.check_32b_eq(dut_resp.data, 'hDEADBEEF);
+
+    if (tb.all_checks_passed()) begin
+      $display("\033[32mALL TESTS PASSED\033[39m");
+    end else begin
+      $display("\033[31mTESTS FAILED\033[39m");
+    end
+    $finish;
   end
 
 endmodule: MemController_tb

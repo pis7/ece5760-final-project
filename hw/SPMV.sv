@@ -1,29 +1,8 @@
 `ifndef SPMV_SV_H
 `define SPMV_SV_H
 `include "macros.sv"
-`include "MemController.sv"
-
-/* Harcode index widths because system verilog is dumb and doesn't support
- * paramaterized structs */
-parameter IDX_WIDTH  = 32;
-/* Harcode data widths because system verilog is dumb and doesn't support
- * paramaterized structs */
-parameter DATA_WIDTH = 32;
-
-typedef enum {
-  RD, WR
-} MemCmdTy;
-
-typedef struct packed {
-  MemCmdTy           ty;
-  logic [IDX_WIDTH-1:0]  idx;
-  logic [DATA_WIDTH-1:0] data;
-} MemReq;
-
-typedef struct packed {
-  MemCmdTy           ty;
-  logic [DATA_WIDTH-1:0] data;
-} MemResp;
+// `include "MemController.sv"
+`include "MemTypes.sv"
 
 /* SPMV performs a matrix muliplicaton Qx = c.
  * The module assumes Q is layed out using CSR format in the order data, column
@@ -90,7 +69,7 @@ module SPMV (
     endcase
   end
 
-  always_ff @(clk) begin
+  always_ff @(posedge clk) begin
     if (rst)   state <= IDLE;
     else       state <= next_state;
   end
@@ -98,7 +77,7 @@ module SPMV (
   logic [31:0] num_rows_reg;
   logic [31:0] num_non_zeros_reg;
 
-  always_ff @(clk) begin
+  always_ff @(posedge clk) begin
     if (rst) begin
       num_rows_reg      <= 0;
       num_non_zeros_reg <= 0;
@@ -138,13 +117,13 @@ module SPMV (
   // // TODO: Actually assign next_x_val_count
   // assign next_x_val_count = x_val_count;
 
-  // always_ff @(clk) begin
+  // always_ff @(posedge clk) begin
   //   if (rst)                 cur_x_val <= 0;
   //   else if (i_x_mem_resp_val) cur_x_val <= i_x_mem_resp.data;
   //   else                       cur_x_val <= cur_x_val;
   // end
 
-  // always_ff @(clk) begin
+  // always_ff @(posedge clk) begin
   //   if (rst) x_val_count <= 0;
   //   else       x_val_count <= next_x_val_count;
   // end
@@ -164,7 +143,7 @@ module SPMV (
   //   o_x_mem_req      = MemReq'{RD, x_val_count, 0};
   // end
 
-  // always_ff @(clk) begin
+  // always_ff @(posedge clk) begin
   //   if (rst) begin
   //     reqed_x_val <= 0;
   //     read_x_val  <= 0;

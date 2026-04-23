@@ -1,19 +1,19 @@
 `ifndef MOCK_MEM_SV
 `define MOCK_MEM_SV
 
-`include "../hw/SPMV.sv"
+`include "../hw/MemTypes.sv"
 
 module MockMem #(
-  parameter DATA_WIDTH=32, parameter SIZE
+  parameter WIDTH=32, parameter SIZE
 )(
   input  logic      clk,
   input  logic      rst,
 
-  input  MemReq  mem_req,
+  input  MemReq     mem_req,
   input  logic      mem_req_val,
   output logic      mem_req_rdy,
 
-  output MemResp mem_resp,
+  output MemResp    mem_resp,
   output logic      mem_resp_val,
   input  logic      mem_resp_rdy
 );
@@ -22,7 +22,7 @@ module MockMem #(
   } State;
 
 
-  logic [DATA_WIDTH-1:0] data[SIZE];
+  logic [WIDTH-1:0] data[SIZE];
   State state;
   State next_state;
 
@@ -34,39 +34,29 @@ module MockMem #(
     endcase
   end
 
-  always_ff @(clk) begin
-    if (rst)   state <= IDLE;
-    else       state <= next_state;
+  always_ff @(posedge clk) begin
+    if (rst) state <= IDLE;
+    else     state <= next_state;
   end
 
-  task handle_mem_req (
-    input  MemReq  req,
-    input  logic      req_val,
+  assign mem_req_rdy = state == IDLE;
 
-    output MemResp resp
-  );
-    if (req_val && req.ty == WR) begin
-      data[req.idx] <= req.data;
+  always_ff @(posedge clk) begin
+    for (integer i = 0; i < SIZE; i++) begin
+      if      (rst)                                                                  data[i] <= 0;
+      else if (state == IDLE && mem_req_val && mem_req.idx == i && mem_req.ty == WR) data[i] <= mem_req.data;
+      else                                                                           data[i] <= data[i];
     end
-
-    case (mem_req.ty)
-      RD: resp <= req_val ? MemResp'{RD, data[req.idx]} : 0;
-      WR: resp <= req_val ? MemResp'{WR, 0}             : 0;
-      default:;
-    endcase
-  endtask: handle_mem_req
-
-  always_ff @(clk) begin
-    case (state)
-      IDLE: handle_mem_req (mem_req, mem_req_val, mem_resp);
-      DONE:;
-      default:;
-    endcase
   end
 
-  always_comb begin
-    mem_req_rdy  = state == IDLE;
-    mem_resp_val = state == DONE;
+  assign mem_resp_val = state == DONE;
+
+  always_ff @(posedge clk) begin
+    if      (rst)                                              mem_resp <= 0;
+    else if (state == IDLE && mem_req_val && mem_req.ty == WR) mem_resp <= MemResp'{WR, 0};
+    else if (state == IDLE && mem_req_val && mem_req.ty == RD) mem_resp <= MemResp'{RD, data[mem_req.idx]};
+    else if (state == DONE && !mem_resp_rdy)                   mem_resp <= mem_resp;
+    else                                                       mem_resp <= 0;
   end
 
 endmodule: MockMem
