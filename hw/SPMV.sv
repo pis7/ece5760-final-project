@@ -28,27 +28,27 @@ module SPMV (
   input  logic [31:0] num_rows,
   input  logic [31:0] num_non_zeros,
 
-  output MemReq    o_q_mem_req,
+  output MemReq       o_q_mem_req,
   output logic        o_q_mem_req_val,
   input  logic        i_q_mem_req_rdy,
 
-  input  MemResp   i_q_mem_resp,
+  input  MemResp      i_q_mem_resp,
   input  logic        i_q_mem_resp_val,
   output logic        o_q_mem_resp_rdy,
 
-  output MemReq    o_x_mem_req,
+  output MemReq       o_x_mem_req,
   output logic        o_x_mem_req_val,
   input  logic        i_x_mem_req_rdy,
 
-  input  MemResp   i_x_mem_resp,
+  input  MemResp      i_x_mem_resp,
   input  logic        i_x_mem_resp_val,
   output logic        o_x_mem_resp_rdy,
 
-  output MemReq    o_c_mem_req,
+  output MemReq       o_c_mem_req,
   output logic        o_c_mem_req_val,
   input  logic        i_c_mem_req_rdy,
 
-  input  MemResp   i_c_mem_resp,
+  input  MemResp      i_c_mem_resp,
   input  logic        i_c_mem_resp_val,
   output logic        o_c_mem_resp_rdy
 );
