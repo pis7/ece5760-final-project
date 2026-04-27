@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -417,6 +418,9 @@ public:
 
     int partition_level = 0;
 
+    // Per-call elapsed time (milliseconds) for each solve_cg() invocation.
+    std::vector<double> cg_times_ms;
+
 #ifdef USE_HW_CG
     CGHwDriver hw_driver;
 #endif
@@ -518,6 +522,7 @@ public:
 
     void solve_cg() {
         // Solve Qx = -cx and Qy = -cy via CG (proposal Listing 1)
+        auto t0 = std::chrono::steady_clock::now();
 #ifdef USE_HW_CG
         if (Q.n <= CGHwDriver::MAX_N) {
             hw_driver.solve(Q, c_x, c_y, x_pos, y_pos, CG_MAX_ITER, CG_EPS);
@@ -531,6 +536,10 @@ public:
         cg_solve(Q, c_x, x_pos, CG_MAX_ITER, CG_EPS);
         cg_solve(Q, c_y, y_pos, CG_MAX_ITER, CG_EPS);
 #endif
+        auto t1 = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        cg_times_ms.push_back(ms);
+        std::printf("  CG solve #%d: %.3f ms\n", (int)cg_times_ms.size(), ms);
         clamp_to_die();
     }
 
@@ -785,6 +794,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    auto placer_t0 = std::chrono::steady_clock::now();
+
     Placer placer(argv[1]);
 
     // Initialize cell positions and write initial JSON
@@ -842,6 +853,24 @@ int main(int argc, char* argv[]) {
     placer.update_components();
     out_path = placer.write_output("final");
     std::printf("Final placement written to %s\n", out_path.c_str());
+
+    auto placer_t1 = std::chrono::steady_clock::now();
+    double total_ms =
+        std::chrono::duration<double, std::milli>(placer_t1 - placer_t0).count();
+
+    double cg_sum_ms = 0.0;
+    for (double t : placer.cg_times_ms) cg_sum_ms += t;
+    int cg_n = (int)placer.cg_times_ms.size();
+    double cg_avg_ms = cg_n > 0 ? cg_sum_ms / cg_n : 0.0;
+
+    std::printf("\nTiming summary:\n");
+    std::printf("  CG solves: %d\n", cg_n);
+    for (int i = 0; i < cg_n; ++i) {
+        std::printf("    #%d: %.3f ms\n", i + 1, placer.cg_times_ms[i]);
+    }
+    std::printf("  CG total:    %.3f ms\n", cg_sum_ms);
+    std::printf("  CG average:  %.3f ms\n", cg_avg_ms);
+    std::printf("  Placer total: %.3f ms\n", total_ms);
 
     return 0;
 }

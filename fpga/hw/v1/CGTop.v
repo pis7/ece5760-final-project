@@ -80,6 +80,33 @@ module CGTop #(
   end
 
   //----------------------------------------------------------------------
+  // M10K -> Register Loader
+  //----------------------------------------------------------------------
+
+  M10KLoader #(
+    .NUM_WORDS  (p_total_words),
+    .DATA_WIDTH (32),
+    .ADDR_WIDTH (p_m10k_addr_bits)
+  ) loader (
+    .clk                    (clk),
+    .rst                    (rst),
+    .go_read                (m10k_rd_go),
+    .go_write               (m10k_wr_go),
+    .done                   (m10k_loader_done),
+    .on_chip_ram_address    (on_chip_ram_address),
+    .on_chip_ram_chipselect (on_chip_ram_chipselect),
+    .on_chip_ram_clken      (on_chip_ram_clken),
+    .on_chip_ram_write      (on_chip_ram_write),
+    .on_chip_ram_readdata   (on_chip_ram_readdata),
+    .on_chip_ram_writedata  (on_chip_ram_writedata),
+    .on_chip_ram_byteenable (on_chip_ram_byteenable),
+    .reg_addr               (loader_reg_addr),
+    .reg_wr_en              (loader_reg_wr_en),
+    .reg_wr_data            (loader_reg_wr_data),
+    .reg_rd_data            (loader_reg_rd_data)
+  );
+
+  //----------------------------------------------------------------------
   // Control Unit
   //----------------------------------------------------------------------
 
@@ -105,29 +132,6 @@ module CGTop #(
     .do_init          (do_init),
     .do_run           (do_run),
     .sel_y            (sel_y)
-  );
-
-  M10KLoader #(
-    .NUM_WORDS  (p_total_words),
-    .DATA_WIDTH (32),
-    .ADDR_WIDTH (p_m10k_addr_bits)
-  ) loader (
-    .clk                    (clk),
-    .rst                    (rst),
-    .go_read                (m10k_rd_go),
-    .go_write               (m10k_wr_go),
-    .done                   (m10k_loader_done),
-    .on_chip_ram_address    (on_chip_ram_address),
-    .on_chip_ram_chipselect (on_chip_ram_chipselect),
-    .on_chip_ram_clken      (on_chip_ram_clken),
-    .on_chip_ram_write      (on_chip_ram_write),
-    .on_chip_ram_readdata   (on_chip_ram_readdata),
-    .on_chip_ram_writedata  (on_chip_ram_writedata),
-    .on_chip_ram_byteenable (on_chip_ram_byteenable),
-    .reg_addr               (loader_reg_addr),
-    .reg_wr_en              (loader_reg_wr_en),
-    .reg_wr_data            (loader_reg_wr_data),
-    .reg_rd_data            (loader_reg_rd_data)
   );
 
   //----------------------------------------------------------------------

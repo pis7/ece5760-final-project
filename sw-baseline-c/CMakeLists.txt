@@ -18,7 +18,9 @@ if(USE_FP_GOLDEN)
     add_executable(placer placer.cpp)
     target_compile_definitions(placer PRIVATE USE_HW_CG USE_FP_GOLDEN CG_GOLDEN_FRAC_BITS=${FRAC_BITS})
 elseif(USE_HW_CG)
-    set(VERILOG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../fpga/hw/v1")
+    # v2 is the synthesizable CG solver (the one that goes on the FPGA).
+    # v1 was combinational-only reference and is no longer wired up here.
+    set(VERILOG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../fpga/hw/v2")
     set(VDIR "${CMAKE_CURRENT_BINARY_DIR}/vobj")
     set(VERILATOR_ROOT "/usr/local/share/verilator")
 
@@ -37,7 +39,6 @@ elseif(USE_HW_CG)
         ${VERILOG_DIR}/CGDpath.v
         ${VERILOG_DIR}/FpMath.v
         ${VERILOG_DIR}/LinAlg.v
-        ${VERILOG_DIR}/M10KLoader.v
         -CFLAGS "-std=c++17"
       DEPENDS
         ${VERILOG_DIR}/CGTop.v
@@ -45,8 +46,7 @@ elseif(USE_HW_CG)
         ${VERILOG_DIR}/CGDpath.v
         ${VERILOG_DIR}/FpMath.v
         ${VERILOG_DIR}/LinAlg.v
-        ${VERILOG_DIR}/M10KLoader.v
-      COMMENT "Verilating CGTop"
+      COMMENT "Verilating CGTop (v2)"
     )
     add_custom_target(verilator_model DEPENDS ${VDIR}/VCGTop__ALL.a)
 

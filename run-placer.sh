@@ -10,7 +10,9 @@
 #   sw        <benchmark-path>   Full software C++ placer (double precision)
 #   golden    <benchmark-path>   C++ placer with fixed-point golden model CG
 #   verilated <benchmark-path>   C++ placer with Verilator RTL CG simulation
-#   arm       <benchmark-path>   Cross-compile C++ SW placer, run on DE1-SoC ARM
+#   arm       <benchmark-path>   Cross-compile SW placer, run on DE1-SoC ARM
+#   fpga      <benchmark-path>   Cross-compile FPGA-accelerated placer, run on DE1-SoC
+#                                (FPGA bitstream must already be loaded on the board)
 #   vis       <json-file>        Launch the Tk visualizer on a placement JSON
 #
 # Examples:
@@ -18,6 +20,7 @@
 #   ./run-placer.sh sw benchmarks/custom/tiny3
 #   ./run-placer.sh golden benchmarks/custom/tiny3
 #   ./run-placer.sh arm benchmarks/custom/tiny1
+#   ./run-placer.sh fpga benchmarks/custom/tiny1
 #   ./run-placer.sh vis tiny3-final.json
 
 set -e
@@ -44,6 +47,7 @@ if [ -z "$MODE" ] || [ -z "$ARG" ]; then
     echo "  golden    <benchmark-path>   C++ placer with fixed-point golden CG"
     echo "  verilated <benchmark-path>   C++ placer with Verilator RTL CG simulation"
     echo "  arm       <benchmark-path>   Cross-compile SW placer, run on DE1-SoC ARM"
+    echo "  fpga      <benchmark-path>   Cross-compile FPGA-accelerated placer, run on DE1-SoC"
     echo "  vis       <json-file>        Launch the Tk visualizer on a placement JSON"
     exit 1
 fi
@@ -129,6 +133,25 @@ arm)
     sshpass -p "$PASS" scp "$JSON_FILE" "$BOARD":"$BOARD_DIR"/
 
     echo "=== Running placer on board ==="
+    sshpass -p "$PASS" ssh -t "$BOARD" "cd $BOARD_DIR && ./placer $JSON_FILE"
+
+    echo "=== Copying results back ==="
+    sshpass -p "$PASS" scp "$BOARD":"$BOARD_DIR"/${DESIGN_NAME}-initial.json .
+    sshpass -p "$PASS" scp "$BOARD":"$BOARD_DIR"/${DESIGN_NAME}-final.json .
+    ;;
+
+fpga)
+    echo "=== Cross-compiling FPGA placer for ARM ==="
+    cmake -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ -DSTATIC_BUILD=ON "$SCRIPT_DIR/fpga/sw/"
+    make -j"$(nproc)"
+
+    BOARD_DIR="/home/root/build-${DESIGN_NAME}-fpga"
+    echo "=== Copying to board ($BOARD_DIR) ==="
+    sshpass -p "$PASS" ssh "$BOARD" "mkdir -p $BOARD_DIR"
+    sshpass -p "$PASS" scp placer "$BOARD":"$BOARD_DIR"/
+    sshpass -p "$PASS" scp "$JSON_FILE" "$BOARD":"$BOARD_DIR"/
+
+    echo "=== Running placer on board (FPGA bitstream must already be loaded) ==="
     sshpass -p "$PASS" ssh -t "$BOARD" "cd $BOARD_DIR && ./placer $JSON_FILE"
 
     echo "=== Copying results back ==="

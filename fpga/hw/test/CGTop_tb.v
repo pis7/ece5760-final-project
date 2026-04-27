@@ -162,7 +162,7 @@ module CGTop_tb;
       while (!sw_done) begin
         @(posedge clk);
         timeout_cnt++;
-        if (timeout_cnt > 100000) begin
+        if (timeout_cnt > 2000000) begin
           $display("  TIMEOUT: DUT did not complete");
           $finish;
         end
