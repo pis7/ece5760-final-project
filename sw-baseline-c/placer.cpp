@@ -424,6 +424,10 @@ public:
 #ifdef USE_HW_CG
     CGHwDriver hw_driver;
 #endif
+#if defined(USE_HW_CG) && !defined(USE_FP_GOLDEN)
+    // Per-call Verilator cycle count (sw_go to sw_done). Empty in fallback path.
+    std::vector<uint64_t> cg_cycles;
+#endif
 
     explicit Placer(const std::string& json_path) : nl(load_netlist(json_path)) {}
 
@@ -526,6 +530,9 @@ public:
 #ifdef USE_HW_CG
         if (Q.n <= CGHwDriver::MAX_N) {
             hw_driver.solve(Q, c_x, c_y, x_pos, y_pos, CG_MAX_ITER, CG_EPS);
+#if !defined(USE_FP_GOLDEN)
+            cg_cycles.push_back(hw_driver.last_solve_cycles());
+#endif
         } else {
             fprintf(stderr, "Warning: n=%d > %d, falling back to software CG\n",
                     Q.n, CGHwDriver::MAX_N);
@@ -539,7 +546,18 @@ public:
         auto t1 = std::chrono::steady_clock::now();
         double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         cg_times_ms.push_back(ms);
+#if defined(USE_HW_CG) && !defined(USE_FP_GOLDEN)
+        if (!cg_cycles.empty() && cg_cycles.size() == cg_times_ms.size()) {
+            std::printf("  CG solve #%d: %.3f ms, %llu cycles\n",
+                        (int)cg_times_ms.size(), ms,
+                        (unsigned long long)cg_cycles.back());
+        } else {
+            std::printf("  CG solve #%d: %.3f ms\n",
+                        (int)cg_times_ms.size(), ms);
+        }
+#else
         std::printf("  CG solve #%d: %.3f ms\n", (int)cg_times_ms.size(), ms);
+#endif
         clamp_to_die();
     }
 
@@ -871,6 +889,28 @@ int main(int argc, char* argv[]) {
     std::printf("  CG total:    %.3f ms\n", cg_sum_ms);
     std::printf("  CG average:  %.3f ms\n", cg_avg_ms);
     std::printf("  Placer total: %.3f ms\n", total_ms);
+
+#if defined(USE_HW_CG) && !defined(USE_FP_GOLDEN)
+    if (!placer.cg_cycles.empty()) {
+        uint64_t cyc_sum = 0;
+        uint64_t cyc_max = 0;
+        for (uint64_t c : placer.cg_cycles) {
+            cyc_sum += c;
+            if (c > cyc_max) cyc_max = c;
+        }
+        double cyc_avg = (double)cyc_sum / placer.cg_cycles.size();
+        std::printf("\nHW CG cycle counts (sw_go to sw_done):\n");
+        for (size_t i = 0; i < placer.cg_cycles.size(); ++i) {
+            std::printf("    #%zu: %llu cycles\n",
+                        i + 1, (unsigned long long)placer.cg_cycles[i]);
+        }
+        std::printf("  HW CG total:   %llu cycles\n",
+                    (unsigned long long)cyc_sum);
+        std::printf("  HW CG max:     %llu cycles\n",
+                    (unsigned long long)cyc_max);
+        std::printf("  HW CG average: %.1f cycles\n", cyc_avg);
+    }
+#endif
 
     return 0;
 }

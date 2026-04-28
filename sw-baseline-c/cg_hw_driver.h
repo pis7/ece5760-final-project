@@ -48,6 +48,10 @@ public:
         delete ctx_;
     }
 
+    // Clock cycles between sw_go assertion and sw_done for the most recent
+    // solve() call. This is the apples-to-apples count we'd see on the FPGA.
+    uint64_t last_solve_cycles() const { return last_solve_cycles_; }
+
     // Solve Qx = -cx and Qy = -cy using the hardware CG.
     // Modifies x and y in place.
     void solve(const CSRMatrix& Q,
@@ -73,13 +77,18 @@ public:
         tick();
 
         // Assert sw_go for one cycle
+        last_solve_cycles_ = 0;
         dut_->sw_go = 1;
         tick();
+        ++last_solve_cycles_;
         dut_->sw_go = 0;
 
         // Wait for sw_done
         int timeout = 1000000;
-        while (!dut_->sw_done && --timeout > 0) tick();
+        while (!dut_->sw_done && --timeout > 0) {
+            tick();
+            ++last_solve_cycles_;
+        }
         if (timeout == 0) {
             fprintf(stderr, "CGHwDriver: timeout waiting for sw_done\n");
             return;
@@ -98,6 +107,7 @@ private:
     VerilatedContext* ctx_;
     VCGTop* dut_;
     int32_t m10k_mem_[TOTAL_WORDS];
+    uint64_t last_solve_cycles_ = 0;
 
     static int32_t double_to_fp(double v) {
         int32_t raw = static_cast<int32_t>(v * FRAC_SCALE);
@@ -117,20 +127,32 @@ private:
     }
 
     void tick() {
+        // Settle combinational logic with clk=0 so we see the address being
+        // driven during the cycle that is about to end -- the same address
+        // an SV `always_ff @(posedge clk)` shim samples when its NBA fires.
+        // Sampling AFTER the rising-edge eval would read the NEW state's
+        // address, which is one cycle ahead of what real hardware sees and
+        // breaks any DUT that drives a different address each cycle.
         dut_->clk = 0;
         dut_->eval();
+        bool     cs       = dut_->on_chip_ram_chipselect && dut_->on_chip_ram_clken;
+        uint32_t addr_pre = dut_->on_chip_ram_address;
+        bool     wr       = dut_->on_chip_ram_write;
+        uint32_t wdata    = dut_->on_chip_ram_writedata;
+
         dut_->clk = 1;
         dut_->eval();
-        // M10K shim (registered, matches testbench always_ff)
-        if (dut_->on_chip_ram_chipselect && dut_->on_chip_ram_clken) {
-            uint32_t addr = dut_->on_chip_ram_address;
-            if (addr < TOTAL_WORDS) {
-                if (dut_->on_chip_ram_write)
-                    m10k_mem_[addr] = static_cast<int32_t>(dut_->on_chip_ram_writedata);
-                else
-                    dut_->on_chip_ram_readdata = static_cast<uint32_t>(m10k_mem_[addr]);
-            }
+
+        if (cs && addr_pre < TOTAL_WORDS) {
+            if (wr)
+                m10k_mem_[addr_pre] = static_cast<int32_t>(wdata);
+            else
+                dut_->on_chip_ram_readdata =
+                    static_cast<uint32_t>(m10k_mem_[addr_pre]);
         }
+        // Re-evaluate so any combinational consumer of readdata in the DUT
+        // sees the freshly-updated value before the next clock cycle.
+        dut_->eval();
     }
 
     void pack_memory(const CSRMatrix& Q,

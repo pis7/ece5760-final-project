@@ -12,15 +12,25 @@ option(USE_HW_CG "Use Verilator CGTop for CG solve" OFF)
 # Use C++ fixed-point golden model instead of Verilator (faster, no Verilog needed)
 option(USE_FP_GOLDEN "Use C++ fixed-point golden model instead of Verilator" OFF)
 set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
+set(HW_CG_VERSION "v3" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide) or v3 (NR divide + rp_lo/rp_hi collapse)")
+set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3)
+
+if(HW_CG_VERSION STREQUAL "v3")
+    set(CG_GOLDEN_DEFINE "CG_GOLDEN_USE_NR")
+else()
+    set(CG_GOLDEN_DEFINE "")
+endif()
 
 if(USE_FP_GOLDEN)
     # Pure C++ fixed-point CG — no Verilator dependency
     add_executable(placer placer.cpp)
-    target_compile_definitions(placer PRIVATE USE_HW_CG USE_FP_GOLDEN CG_GOLDEN_FRAC_BITS=${FRAC_BITS})
+    target_compile_definitions(placer PRIVATE USE_HW_CG USE_FP_GOLDEN CG_GOLDEN_FRAC_BITS=${FRAC_BITS} ${CG_GOLDEN_DEFINE})
 elseif(USE_HW_CG)
-    # v2 is the synthesizable CG solver (the one that goes on the FPGA).
-    # v1 was combinational-only reference and is no longer wired up here.
-    set(VERILOG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../fpga/hw/v2")
+    # HW_CG_VERSION selects which RTL gets verilated. v3 is the current
+    # target (rp collapse + NR divide + 16 hardened tests). v2 stays for
+    # reference / regression-testing the original shift-subtract design.
+    # v1 was combinational-only reference and is not wired up here.
+    set(VERILOG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../fpga/hw/${HW_CG_VERSION}")
     set(VDIR "${CMAKE_CURRENT_BINARY_DIR}/vobj")
     set(VERILATOR_ROOT "/usr/local/share/verilator")
 
@@ -46,7 +56,7 @@ elseif(USE_HW_CG)
         ${VERILOG_DIR}/CGDpath.v
         ${VERILOG_DIR}/FpMath.v
         ${VERILOG_DIR}/LinAlg.v
-      COMMENT "Verilating CGTop (v2)"
+      COMMENT "Verilating CGTop (${HW_CG_VERSION})"
     )
     add_custom_target(verilator_model DEPENDS ${VDIR}/VCGTop__ALL.a)
 
@@ -56,7 +66,7 @@ elseif(USE_HW_CG)
       ${VERILATOR_ROOT}/include/verilated_threads.cpp
     )
     add_dependencies(placer verilator_model)
-    target_compile_definitions(placer PRIVATE USE_HW_CG HW_FRAC_BITS=${FRAC_BITS})
+    target_compile_definitions(placer PRIVATE USE_HW_CG HW_FRAC_BITS=${FRAC_BITS} ${CG_GOLDEN_DEFINE})
     target_include_directories(placer SYSTEM PRIVATE ${VDIR} ${VERILATOR_ROOT}/include)
     target_link_libraries(placer PRIVATE ${VDIR}/VCGTop__ALL.a pthread)
     set_source_files_properties(

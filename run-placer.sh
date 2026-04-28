@@ -3,22 +3,25 @@
 # Run the analytical placer end-to-end.
 #
 # Usage:
-#   ./run-placer.sh <mode> <path>
+#   ./run-placer.sh <mode> <path> [extra]
 #
 # Modes:
-#   python    <benchmark-path>   Baseline Python placer
-#   sw        <benchmark-path>   Full software C++ placer (double precision)
-#   golden    <benchmark-path>   C++ placer with fixed-point golden model CG
-#   verilated <benchmark-path>   C++ placer with Verilator RTL CG simulation
-#   arm       <benchmark-path>   Cross-compile SW placer, run on DE1-SoC ARM
-#   fpga      <benchmark-path>   Cross-compile FPGA-accelerated placer, run on DE1-SoC
-#                                (FPGA bitstream must already be loaded on the board)
-#   vis       <json-file>        Launch the Tk visualizer on a placement JSON
+#   python    <benchmark-path>             Baseline Python placer
+#   sw        <benchmark-path>             Full software C++ placer (double precision)
+#   golden    <benchmark-path>             C++ placer with fixed-point golden model CG
+#   verilated <benchmark-path> [v2|v3]     C++ placer with Verilator RTL CG simulation
+#                                          (RTL version, default v3)
+#   arm       <benchmark-path>             Cross-compile SW placer, run on DE1-SoC ARM
+#   fpga      <benchmark-path>             Cross-compile FPGA-accelerated placer, run on DE1-SoC
+#                                          (FPGA bitstream must already be loaded on the board)
+#   vis       <json-file>                  Launch the Tk visualizer on a placement JSON
 #
 # Examples:
 #   ./run-placer.sh python benchmarks/iccad04/DMA
 #   ./run-placer.sh sw benchmarks/custom/tiny3
 #   ./run-placer.sh golden benchmarks/custom/tiny3
+#   ./run-placer.sh verilated benchmarks/custom/tiny3        # v3 (default)
+#   ./run-placer.sh verilated benchmarks/custom/tiny3 v2     # v2 reference
 #   ./run-placer.sh arm benchmarks/custom/tiny1
 #   ./run-placer.sh fpga benchmarks/custom/tiny1
 #   ./run-placer.sh vis tiny3-final.json
@@ -37,18 +40,19 @@ PASS="greatpassword123!"
 
 MODE="${1:-}"
 ARG="${2:-}"
+EXTRA="${3:-}"
 
 if [ -z "$MODE" ] || [ -z "$ARG" ]; then
-    echo "Usage: ./run-placer.sh <mode> <path>"
+    echo "Usage: ./run-placer.sh <mode> <path> [extra]"
     echo ""
     echo "Modes:"
-    echo "  python    <benchmark-path>   Baseline Python placer"
-    echo "  sw        <benchmark-path>   Full software C++ placer (double precision)"
-    echo "  golden    <benchmark-path>   C++ placer with fixed-point golden CG"
-    echo "  verilated <benchmark-path>   C++ placer with Verilator RTL CG simulation"
-    echo "  arm       <benchmark-path>   Cross-compile SW placer, run on DE1-SoC ARM"
-    echo "  fpga      <benchmark-path>   Cross-compile FPGA-accelerated placer, run on DE1-SoC"
-    echo "  vis       <json-file>        Launch the Tk visualizer on a placement JSON"
+    echo "  python    <benchmark-path>             Baseline Python placer"
+    echo "  sw        <benchmark-path>             Full software C++ placer (double precision)"
+    echo "  golden    <benchmark-path>             C++ placer with fixed-point golden CG"
+    echo "  verilated <benchmark-path> [v2|v3]     C++ placer with Verilator RTL CG (default v3)"
+    echo "  arm       <benchmark-path>             Cross-compile SW placer, run on DE1-SoC ARM"
+    echo "  fpga      <benchmark-path>             Cross-compile FPGA-accelerated placer, run on DE1-SoC"
+    echo "  vis       <json-file>                  Launch the Tk visualizer on a placement JSON"
     exit 1
 fi
 
@@ -113,11 +117,16 @@ golden)
     ;;
 
 verilated)
-    echo "=== Building C++ placer (Verilator CG) ==="
-    cmake "$SCRIPT_DIR/sw-baseline-c/" -DUSE_HW_CG=ON
+    HW_VERSION="${EXTRA:-v3}"
+    if [ "$HW_VERSION" != "v2" ] && [ "$HW_VERSION" != "v3" ]; then
+        echo "Error: verilated mode expects 'v2' or 'v3' as the third arg (got '$HW_VERSION')"
+        exit 1
+    fi
+    echo "=== Building C++ placer (Verilator CG, $HW_VERSION) ==="
+    cmake "$SCRIPT_DIR/sw-baseline-c/" -DUSE_HW_CG=ON -DHW_CG_VERSION="$HW_VERSION"
     make -j"$(nproc)"
 
-    echo "=== Running placer ==="
+    echo "=== Running placer ($HW_VERSION) ==="
     ./placer "$JSON_FILE"
     ;;
 

@@ -70,3 +70,36 @@ add_custom_command(TARGET VCGTop_tb_v2 POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${V2_VDIR}/V${TB} ${CMAKE_CURRENT_BINARY_DIR}/V${TB}_v2
 )
+
+# ----------------------------------------------------------------------
+# v3 target -- uses the NR-divide DPI golden so compares stay bit-exact.
+# ----------------------------------------------------------------------
+set(V3_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../v3")
+set(V3_VDIR "${CMAKE_CURRENT_BINARY_DIR}/vobj_v3")
+
+set(RTL_SRCS_V3
+  ${V3_DIR}/CGTop.v
+  ${V3_DIR}/CGCtrl.v
+  ${V3_DIR}/CGDpath.v
+  ${V3_DIR}/FpMath.v
+  ${V3_DIR}/LinAlg.v
+)
+
+add_custom_target(VCGTop_tb_v3 ALL
+  COMMAND verilator --cc --exe --build --timing --main
+    -Wall -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSEDSIGNAL
+    -Wno-UNUSEDPARAM -Wno-BLKSEQ -Wno-DECLFILENAME
+    --top-module ${TB}
+    --Mdir ${V3_VDIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${TB}.v
+    ${RTL_SRCS_V3}
+    ${DPI_SRC}
+    -CFLAGS "-std=c++17 -DCG_GOLDEN_USE_NR -I${CMAKE_CURRENT_SOURCE_DIR}/../../../sw-baseline-c"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMENT "Building ${TB} (v3) with Verilator"
+)
+
+add_custom_command(TARGET VCGTop_tb_v3 POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${V3_VDIR}/V${TB} ${CMAKE_CURRENT_BINARY_DIR}/V${TB}_v3
+)
