@@ -90,68 +90,63 @@ module SPMV (
     end
   end
 
-  // logic [DATA_WIDTH-1:0] cur_x_val;
-  // MemController #(
-  //   .DATA_WIDTH(DATA_WIDTH),
-  //   .IDX_WIDTH (IDX_WIDTH)
-  //  ) memController (
-  //   .clk              (clk),
-  //   .rst              (rst),
-  //   .req              (req),
-  //   .req_val          (req_val),
-  //   .resp             (resp),
-  //   .resp_val         (resp_val),
-  //   .mem_req_cnct     (mem_req_cnct),
-  //   .mem_req_cnct_val (mem_req_cnct_val),
-  //   .mem_req_cnct_rdy (mem_req_cnct_rdy),
-  //   .mem_resp_cnct    (mem_resp_cnct),
-  //   .mem_resp_cnct_val(mem_resp_cnct_val),
-  //   .mem_resp_cnct_rdy(mem_resp_cnct_rdy)
-  // );
-  
+  logic [DATA_WIDTH-1:0] cur_x_val;
+  MemController memController (
+    .clk              (clk),
+    .rst              (rst),
+    .req              (req),
+    .req_val          (req_val),
+    .resp             (resp),
+    .resp_val         (resp_val),
+    .mem_req_cnct     (mem_req_cnct),
+    .mem_req_cnct_val (mem_req_cnct_val),
+    .mem_req_cnct_rdy (mem_req_cnct_rdy),
+    .mem_resp_cnct    (mem_resp_cnct),
+    .mem_resp_cnct_val(mem_resp_cnct_val),
+    .mem_resp_cnct_rdy(mem_resp_cnct_rdy)
+  );
+  logic [DATA_WIDTH-1:0] cur_x_val;
+  logic [IDX_WIDTH-1:0]  x_val_count;
+  logic [IDX_WIDTH-1:0]  next_x_val_count;
 
-  // logic [DATA_WIDTH-1:0] cur_x_val;
-  // logic [IDX_WIDTH-1:0]  x_val_count;
-  // logic [IDX_WIDTH-1:0]  next_x_val_count;
+  // TODO: Actually assign next_x_val_count
+  assign next_x_val_count = x_val_count;
 
-  // // TODO: Actually assign next_x_val_count
-  // assign next_x_val_count = x_val_count;
+  always_ff @(posedge clk) begin
+    if (rst)                 cur_x_val <= 0;
+    else if (i_x_mem_resp_val) cur_x_val <= i_x_mem_resp.data;
+    else                       cur_x_val <= cur_x_val;
+  end
 
-  // always_ff @(posedge clk) begin
-  //   if (rst)                 cur_x_val <= 0;
-  //   else if (i_x_mem_resp_val) cur_x_val <= i_x_mem_resp.data;
-  //   else                       cur_x_val <= cur_x_val;
-  // end
+  always_ff @(posedge clk) begin
+    if (rst) x_val_count <= 0;
+    else       x_val_count <= next_x_val_count;
+  end
 
-  // always_ff @(posedge clk) begin
-  //   if (rst) x_val_count <= 0;
-  //   else       x_val_count <= next_x_val_count;
-  // end
+  logic                  reqed_x_val;
+  logic                  read_x_val;
+  logic                  next_reqed_x_val;
+  logic                  next_read_x_val;
 
-  // logic                  reqed_x_val;
-  // logic                  read_x_val;
-  // logic                  next_reqed_x_val;
-  // logic                  next_read_x_val;
+  always_comb begin
+    o_x_mem_req_val  = !reqed_x_val && !read_x_val && state == READ;
+    next_reqed_x_val = !reqed_x_val && !read_x_val && i_x_mem_req_rdy && state == READ;
 
-  // always_comb begin
-  //   o_x_mem_req_val  = !reqed_x_val && !read_x_val && state == READ;
-  //   next_reqed_x_val = !reqed_x_val && !read_x_val && i_x_mem_req_rdy && state == READ;
+    o_x_mem_resp_rdy = reqed_x_val && !read_x_val && state == READ;
+    next_read_x_val  = reqed_x_val && !read_x_val && i_x_mem_resp_val && state == READ;
 
-  //   o_x_mem_resp_rdy = reqed_x_val && !read_x_val && state == READ;
-  //   next_read_x_val  = reqed_x_val && !read_x_val && i_x_mem_resp_val && state == READ;
+    o_x_mem_req      = MemReq'{RD, x_val_count, 0};
+  end
 
-  //   o_x_mem_req      = MemReq'{RD, x_val_count, 0};
-  // end
-
-  // always_ff @(posedge clk) begin
-  //   if (rst) begin
-  //     reqed_x_val <= 0;
-  //     read_x_val  <= 0;
-  //   end else begin
-  //     reqed_x_val <= next_reqed_x_val;
-  //     read_x_val  <= next_read_x_val;
-  //   end
-  // end
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      reqed_x_val <= 0;
+      read_x_val  <= 0;
+    end else begin
+      reqed_x_val <= next_reqed_x_val;
+      read_x_val  <= next_read_x_val;
+    end
+  end
 
 endmodule: SPMV
 
