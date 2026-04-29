@@ -13,10 +13,12 @@ Introduction
   first step of place and route for ASICs.
 
 - Here is the example: <cmd to generate animation for benchmark 1>
+  `./run-placer.sh fpga benchmarks/custom/tiny1`
   Point at the screen and say "you can see a 10% improvement in placement and
   a 2x improvement when compared to a C++ implementation."
 
 - <cmd to generate animation for benchmark 2>
+  `./run-placer.sh fpga benchmarks/custom/tiny2`
   Here's another example.
 
 - That's cool for those benchmarks. Now, we want you to do something: write a
