@@ -1,0 +1,31 @@
+Introduction
+-------------------------------------------------------------------------------
+- We accelerate analytical global placement based on a qudratic wirelength
+  modle by using the FPGA to run congugate gradient decent in parallel. This
+  works by parallelizing the vector vector and vector scalar multiplications
+  (we cannot paralellize the matrix vector multiplications because the loop
+  used to do multiplication for the sparse representation we use, CSR, has
+  cross iteration data dependencies.*)
+
+- The problem we solve is as follows: Given a set of "macros," pieces of
+  hardware, connected by wires, we place the macros on a plane such that the
+  total wirelength to connect all macros is as small as possible. This is the
+  first step of place and route for ASICs.
+
+- Here is the example: <cmd to generate animation for benchmark 1>
+  `./run-placer.sh fpga benchmarks/custom/tiny1`
+  Point at the screen and say "you can see a 10% improvement in placement and
+  a 2x improvement when compared to a C++ implementation."
+
+- <cmd to generate animation for benchmark 2>
+  `./run-placer.sh fpga benchmarks/custom/tiny2`
+  Here's another example.
+
+- That's cool for those benchmarks. Now, we want you to do something: write a
+  little verilog design (please make it combinational, the parser doesn't
+  support very much). <cmd to convert the design into a lef/def>
+  We now will place the design you just wrote. <run placement on the design>
+
+- That's it.
+
+* Without extreme cleverness.
