@@ -9,7 +9,7 @@
 // and is not touching the memory while sw_done is low.
 
 module CGTop #(
-  parameter p_lanes            = 4,
+  parameter p_lanes            = 2,
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
@@ -47,6 +47,40 @@ module CGTop #(
   input [31:0] eps_sq,
   input [31:0] n
 );
+
+  //----------------------------------------------------------------------
+  // PIO input registration
+  //
+  // Every value coming from a Qsys PIO (cg_n, cg_max_iter, cg_eps_sq,
+  // and the cg_ctrl bits sw_go / sw_done_ack / rst) is registered once
+  // here on CLOCK_50 before being routed to CGCtrl or CGDpath. This
+  // breaks long combinational fanout from PIO outputs into the inner
+  // FSM next-state mux (sw_go), the dpath comparators in VecDot, AXPY
+  // and SPMV (n), and the convergence test (max_iter, eps_sq). Quartus
+  // had been reporting setup-time failures on cg_n -> cx_reg and
+  // cg_ctrl -> dpath flop paths; with these flops in front, every such
+  // path now starts at a CLOCK_50 register, not at the PIO directly.
+  //
+  // 1 cycle of latency on each of these inputs is harmless: cg_n /
+  // cg_max_iter / cg_eps_sq are stable for the whole solve, sw_go /
+  // sw_done_ack are level pulses that the FSM samples until acted on,
+  // and the soft-reset path holds rst for ~50000 cycles via usleep().
+  //----------------------------------------------------------------------
+  logic        sw_go_q;
+  logic        sw_done_ack_q;
+  logic        rst_q;
+  logic [31:0] n_q;
+  logic [31:0] max_iter_q;
+  logic [31:0] eps_sq_q;
+
+  always_ff @(posedge clk) begin
+    sw_go_q       <= sw_go;
+    sw_done_ack_q <= sw_done_ack;
+    rst_q         <= rst;
+    n_q           <= n;
+    max_iter_q    <= max_iter;
+    eps_sq_q      <= eps_sq;
+  end
 
   //----------------------------------------------------------------------
   // CGCtrl <-> CGDpath wires
@@ -136,9 +170,14 @@ module CGTop #(
     .p_x_base_addr    (p_x_base_addr),
     .p_y_base_addr    (p_y_base_addr)
   ) ctrl (
-    .clk, .rst,
-    .sw_go, .sw_done, .sw_done_ack,
-    .n, .max_iter, .eps_sq,
+    .clk,
+    .rst         (rst_q),
+    .sw_go       (sw_go_q),
+    .sw_done,
+    .sw_done_ack (sw_done_ack_q),
+    .n           (n_q),
+    .max_iter    (max_iter_q),
+    .eps_sq      (eps_sq_q),
     .iter, .rr_new, .rr_old,
     .ctrl_mem_addr, .ctrl_mem_wr_en, .ctrl_mem_wdata, .ctrl_mem_src_spmv,
     .rd_a_sel, .rd_a_idx_packed, .rd_a_valid, .rd_a_data_packed,
@@ -175,8 +214,9 @@ module CGTop #(
     .p_q_col_base_addr  (p_q_col_base_addr),
     .p_q_rowp_base_addr (p_q_rowp_base_addr)
   ) dpath (
-    .clk, .rst,
-    .n,
+    .clk,
+    .rst (rst_q),
+    .n   (n_q),
     .mem_addr (dp_mem_addr),
     .mem_wr_en(dp_mem_wr_en),
     .mem_wdata(dp_mem_wdata),

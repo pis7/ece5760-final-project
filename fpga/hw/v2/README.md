@@ -36,24 +36,25 @@ that runs against Qsys on-chip SRAM via an Avalon slave port.
 
 ## Fixed-point format
 
-- `p_total_bits = 27` (`p_int_bits=13`, `p_frac_bits=14`), targeting the
+- 27-bit total (`p_int_bits=13`, `p_frac_bits=14`), targeting the
   Cyclone V 27x27 DSP block via `(* multstyle = "dsp" *)`.
 - `p_acc_bits = 48` for VecDot/SPMV accumulators and FpDiv operands -
   products accumulate without early truncation.
 
-## Memory layout (parameterized by `p_max_n`)
+## Memory layout (parameterized by `N = p_max_n`)
 
-Single Avalon-mapped on-chip SRAM, addresses in 32-bit words:
+Single Avalon-mapped on-chip SRAM, addresses in 32-bit words. All
+regions are contiguous; total footprint is `2*N^2 + 5*N + 1` words.
 
 | Region | Base | Size |
 | --- | --- | --- |
-| Q values (CSR) | 0 | `p_max_n^2` |
-| Q col_idx (CSR) | `p_max_n^2` | `p_max_n^2` |
-| Q row_ptr (CSR) | `2*p_max_n^2` | `p_max_n + 1` |
-| cx (x dim) | + `p_max_n` | `p_max_n` |
-| cx (y dim) | + `p_max_n` | `p_max_n` |
-| x out | + `p_max_n` | `p_max_n` |
-| y out | + `p_max_n` | `p_max_n` |
+| Q values (CSR) | 0 | `N^2` |
+| Q col_idx (CSR) | `N^2` | `N^2` |
+| Q row_ptr (CSR) | `2*N^2` | `N + 1` |
+| cx (x dim) | `2*N^2 + N + 1` | `N` |
+| cx (y dim) | `2*N^2 + 2*N + 1` | `N` |
+| x out | `2*N^2 + 3*N + 1` | `N` |
+| y out | `2*N^2 + 4*N + 1` | `N` |
 
 `sel_y` flips between x-dim and y-dim base addresses so a single FSM
 runs both solves back-to-back without doubling state count.
@@ -72,12 +73,12 @@ runs both solves back-to-back without doubling state count.
   reads, and `we[k]` is masked off on writeback. Zero contributes
   nothing to VecDot/AXPY.
 - DSP count: VecDot `p_lanes` + AXPY `p_lanes` + SPMV 1.
-  At `p_lanes=4` -> 9 DSPs.
+  `p_lanes=2` (default) -> 5 DSPs; `p_lanes=4` -> 9 DSPs.
 
 ## Register files (in CGDpath)
 
 Five flip-flop unpacked arrays of size `p_max_n`, each
-`p_total_bits`-wide:
+27 bits wide:
 
 | RF | Role |
 | --- | --- |
@@ -128,12 +129,12 @@ convention. Each is `{Kernel}Ctrl` + `{Kernel}Dpath` wrapped in a
   handshake takes `p_lanes` (a,b) pairs; one ostream handshake emits
   `p_lanes` z values one cycle later.
 - **SPMV_seq** - Single-lane (memory-bandwidth-bound on the single
-  Avalon port). 12-state inner FSM walks CSR per row: read row_ptr lo
-  and hi (2-cycle ADDR/CAPT pairs), then for each nnz read val, read
-  col, MAC into a 48-bit accumulator. Emits `(row_idx, row_val)` per
-  output handshake. Pipelined version was attempted but caused
-  correctness regressions on tiny3 - reverted (see comment in
-  [LinAlg.v](LinAlg.v)).
+  Avalon port). 12-state inner FSM walks CSR per row: read `rp_lo`
+  and `rp_hi` (2-cycle ADDR/CAPT pairs), then for each nnz read val,
+  read col, MAC into a 48-bit accumulator. Emits `(row_idx, row_val)`
+  per output handshake. A pipelined inner loop (2 cycles/nnz) was
+  attempted but caused correctness regressions on tiny3 - reverted
+  (see comment in [LinAlg.v](LinAlg.v)).
 - **VecNegSub_seq** - `result = -(a + b)`. Used inline by CGCtrl's
   `S_VNS_R` phase via the `WD_VNS` write-data mux source rather than
   as a separate streaming module.
@@ -146,8 +147,9 @@ convention. Each is `{Kernel}Ctrl` + `{Kernel}Dpath` wrapped in a
   product. Used wherever products need to accumulate without
   intermediate truncation (VecDot, SPMV).
 - **FpDiv** - sequential restoring shift-subtract divide with val/rdy.
-  Latency = `p_wide_bits + p_frac_bits` iterations + 1 finish cycle.
-  Operates on 48-bit signed operands, returns a 27-bit quotient.
+  Latency = `p_wide_bits + p_frac_bits` iterations + 1 finish cycle
+  (~63 cycles for the default widths). Operates on 48-bit signed
+  operands, returns a 27-bit quotient.
 
 ## Avalon slave bus ownership
 
@@ -160,7 +162,7 @@ and SPMV (CSR walk) as the Avalon master. CGCtrl drives `chipselect`,
 
 | Param | Default | Notes |
 | --- | --- | --- |
-| `p_lanes` | 4 | SIMD width for VecDot and AXPY |
+| `p_lanes` | 2 | SIMD width for VecDot and AXPY |
 | `p_max_n` | 50 | RF depth and SRAM region sizing |
 | `p_int_bits` | 13 | Fixed-point integer bits |
 | `p_frac_bits` | 14 | Fixed-point fractional bits |

@@ -1,6 +1,6 @@
 // FPGA mmap driver for CGTop. Same interface as the Verilator-based
-// CGHwDriver in sw-baseline-c/cg_hw_driver.h, but talks to the real
-// DE1-SoC via /dev/mem instead of a simulated model.
+// CGHwDriver in sw-baseline-c/cg_verilator_driver.h, but talks to the
+// real DE1-SoC via /dev/mem instead of a simulated model.
 //
 // Assumes the Qsys layout:
 //   - On-chip SRAM (32 KB) is mapped via the HPS h2f AXI bridge
@@ -144,6 +144,10 @@ public:
 
         unpack_results(x, y, n);
     }
+
+    // No on-FPGA cycle counter is wired up (no PIO for it in Qsys/FPGATop).
+    // Return 0 as a sentinel; placer.cpp treats 0 as "no measurement".
+    uint64_t last_solve_cycles() const { return 0; }
 
 private:
     int   mem_fd_   = -1;

@@ -15,6 +15,8 @@ set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog
 set(HW_CG_VERSION "v3" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide) or v3 (NR divide + rp_lo/rp_hi collapse)")
 set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3)
 
+# NR-divide variants need the NR DPI golden to stay bit-exact. v2 uses
+# shift-subtract so it falls through to the empty define.
 if(HW_CG_VERSION STREQUAL "v3")
     set(CG_GOLDEN_DEFINE "CG_GOLDEN_USE_NR")
 else()

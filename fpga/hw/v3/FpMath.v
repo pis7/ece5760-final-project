@@ -113,12 +113,19 @@ module FpDiv #(
   // to a few LSBs. A 2nd iter washes out the truncation noise and gets us
   // close to exact within the 14-bit fractional output, matching shift-
   // subtract bit-exactly on most operand pairs.
-  typedef enum logic [2:0] {
+  // Each NR iteration is split into two states: _M1 latches m1 = b_norm *
+  // nr_input into nr_m1_reg, _M2 then computes m2 = nr_input * (2 - m1)
+  // from the registered m1. This keeps each cycle's combinational chain
+  // to a single multiply (plus a small subtract/select) instead of two
+  // back-to-back multiplies that were the v3 critical path.
+  typedef enum logic [3:0] {
     S_IDLE,
     S_NORM,
     S_ROM,
-    S_NR1,
-    S_NR2,
+    S_NR1_M1,
+    S_NR1_M2,
+    S_NR2_M1,
+    S_NR2_M2,
     S_QMUL,
     S_QFINISH,
     S_DONE
@@ -137,6 +144,7 @@ module FpDiv #(
   logic [BNORM_W-1:0] b_norm;
   logic [BNORM_W-1:0] r0;
   logic [BNORM_W-1:0] r1;
+  logic [33:0]        nr_m1_reg;
   logic [M3_W-1:0]    m3;
 
   // -- Handshake wires --------------------------------------------------------
@@ -426,11 +434,19 @@ module FpDiv #(
     return cnt;
   endfunction
 
-  // NR step combinational expressions. The input is r0 in S_NR1 (1st iter)
-  // and r1 in S_NR2 (2nd iter); the output is the new r1 in either case.
-  wire [BNORM_W-1:0] nr_input    = (state == S_NR2) ? r1 : r0;
+  // NR step combinational expressions. The input is r0 in S_NR1_* (1st
+  // iter) and r1 in S_NR2_* (2nd iter); the output is the new r1.
+  //
+  // The two NR multiplies used to be back-to-back combinational
+  // (b_norm * nr_input -> sub -> nr_input * (2-m1)) which on Cyclone V
+  // is two cascaded DSP multiplies plus an adder per 20 ns clock --
+  // not closeable. We now register the first multiply's output into
+  // nr_m1_reg in the _M1 phase, and use that registered value to drive
+  // the second multiply in the _M2 phase.
+  wire [BNORM_W-1:0] nr_input    =
+      (state == S_NR2_M1 || state == S_NR2_M2) ? r1 : r0;
   wire [33:0]        nr_m1       = b_norm * nr_input;
-  wire [17:0]        nr_two_minus = 18'h2_0000 - 18'(nr_m1[33:16]);
+  wire [17:0]        nr_two_minus = 18'h2_0000 - 18'(nr_m1_reg[33:16]);
   wire [34:0]        nr_m2       = nr_input * nr_two_minus;
 
   // Saturation / shift in S_QFINISH.
@@ -462,9 +478,11 @@ module FpDiv #(
     case (state)
       S_IDLE:    if (input_handshake)  next_state = S_NORM;
       S_NORM:                          next_state = S_ROM;
-      S_ROM:                           next_state = S_NR1;
-      S_NR1:                           next_state = S_NR2;
-      S_NR2:                           next_state = S_QMUL;
+      S_ROM:                           next_state = S_NR1_M1;
+      S_NR1_M1:                        next_state = S_NR1_M2;
+      S_NR1_M2:                        next_state = S_NR2_M1;
+      S_NR2_M1:                        next_state = S_NR2_M2;
+      S_NR2_M2:                        next_state = S_QMUL;
       S_QMUL:                          next_state = S_QFINISH;
       S_QFINISH:                       next_state = S_DONE;
       S_DONE:    if (output_handshake) next_state = S_IDLE;
@@ -484,6 +502,7 @@ module FpDiv #(
       b_norm             <= '0;
       r0                 <= '0;
       r1                 <= '0;
+      nr_m1_reg          <= '0;
       m3                 <= '0;
       ostream_msg_result <= '0;
     end else begin
@@ -502,12 +521,20 @@ module FpDiv #(
           b_norm <= shifted[47:31];
           r0     <= recip_rom[shifted[46:39]];  // = b_norm[15:8]
         end
-        S_NR1: begin
-          // 1st NR iter: input is r0, output goes into r1.
+        S_NR1_M1: begin
+          // 1st NR iter, phase 1: m1 = b_norm * r0. One DSP this cycle.
+          nr_m1_reg <= nr_m1;
+        end
+        S_NR1_M2: begin
+          // 1st NR iter, phase 2: r1 = r0 * (2 - m1). One DSP this cycle.
           r1 <= nr_m2[32:16];
         end
-        S_NR2: begin
-          // 2nd NR iter: input is r1 (from prior cycle), output overwrites r1.
+        S_NR2_M1: begin
+          // 2nd NR iter, phase 1: m1 = b_norm * r1. One DSP this cycle.
+          nr_m1_reg <= nr_m1;
+        end
+        S_NR2_M2: begin
+          // 2nd NR iter, phase 2: r1 = r1_prev * (2 - m1). One DSP this cycle.
           r1 <= nr_m2[32:16];
         end
         S_QMUL: begin

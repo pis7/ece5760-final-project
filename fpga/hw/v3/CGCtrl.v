@@ -118,6 +118,12 @@ module CGCtrl #(
 
   localparam IDX_W       = $clog2(p_max_n);
   localparam CLOG2_LANES = $clog2(p_lanes);
+  // Narrow width for n, n-1, num_groups, num_groups-1, stream/out indices
+  // and e_in/e_out. n is in [0..p_max_n], so $clog2(p_max_n+1) bits suffice
+  // (6 bits for p_max_n=50 vs the original 32). Also the natural bound for
+  // stream_elem_base/e_in since (num_groups-1)*p_lanes + p_lanes-1 < p_max_n
+  // + p_lanes <= 2^N_W for typical configs (e.g. 50+4=54 fits in 6 bits).
+  localparam N_W         = $clog2(p_max_n + 1);
 
   //----------------------------------------------------------------------
   // RF select encodings (match CGDpath's rf_read function)
@@ -202,10 +208,40 @@ module CGCtrl #(
   wire fpdiv_out_hs = fpdiv_ostream_val && fpdiv_ostream_rdy;
 
   //----------------------------------------------------------------------
-  // num_groups = ceil(n / p_lanes). Used as terminal for group phases.
+  // Registered narrow forms of n, n-1, num_groups, and num_groups-1.
+  //
+  // The cg_n PIO arrives unregistered at this module's `n` port and used
+  // to fan into 32-bit comparators / adders / shifters across the FSM
+  // next-state logic and the per-lane group_in_valid generator. Quartus
+  // reported a -19 ns WNS at 50 MHz on cg_n -> cx_reg as a result.
+  //
+  // Capturing n once at S_IDLE -> S_PREP and reusing the registered
+  // N_W-bit forms (a) breaks the long combinational chain off the PIO
+  // and (b) shrinks every dependent comparator from 32 bits to 6 bits.
   //----------------------------------------------------------------------
-  logic [31:0] num_groups;
-  assign num_groups = (n + p_lanes[31:0] - 32'd1) >> CLOG2_LANES;
+  logic [N_W-1:0] n_narrow;
+  logic [N_W-1:0] num_groups_calc;
+  assign n_narrow        = n[N_W-1:0];
+  assign num_groups_calc = (n_narrow + N_W'(p_lanes - 1)) >> CLOG2_LANES;
+
+  logic [N_W-1:0] n_reg;
+  logic [N_W-1:0] n_minus_1_reg;
+  logic [N_W-1:0] num_groups_reg;
+  logic [N_W-1:0] num_groups_minus_1_reg;
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      n_reg                  <= '0;
+      n_minus_1_reg          <= '0;
+      num_groups_reg         <= '0;
+      num_groups_minus_1_reg <= '0;
+    end else if (state == S_IDLE && sw_go) begin
+      n_reg                  <= n_narrow;
+      n_minus_1_reg          <= n_narrow        - N_W'(1);
+      num_groups_reg         <= num_groups_calc;
+      num_groups_minus_1_reg <= num_groups_calc - N_W'(1);
+    end
+  end
 
   //----------------------------------------------------------------------
   // Convergence test (matches v1 semantics)
@@ -242,10 +278,10 @@ module CGCtrl #(
   logic [p_lanes*IDX_W-1:0] single_idx_packed;
   logic [p_lanes-1:0]       single_lane0_mask;
 
-  logic [31:0] stream_elem_base;
-  logic [31:0] out_elem_base;
-  assign stream_elem_base = {{(32-$bits(stream_idx)){1'b0}}, stream_idx} << CLOG2_LANES;
-  assign out_elem_base    = {{(32-$bits(out_idx)){1'b0}}, out_idx} << CLOG2_LANES;
+  logic [N_W-1:0] stream_elem_base;
+  logic [N_W-1:0] out_elem_base;
+  assign stream_elem_base = stream_idx << CLOG2_LANES;
+  assign out_elem_base    = out_idx    << CLOG2_LANES;
 
   always_comb begin
     group_in_idx_packed  = '0;
@@ -254,15 +290,15 @@ module CGCtrl #(
     group_out_valid      = '0;
 
     for (int k = 0; k < p_lanes; k++) begin
-      automatic logic [31:0] e_in;
-      automatic logic [31:0] e_out;
-      e_in  = stream_elem_base + 32'(k);
-      e_out = out_elem_base    + 32'(k);
-      if (e_in < n) begin
+      automatic logic [N_W-1:0] e_in;
+      automatic logic [N_W-1:0] e_out;
+      e_in  = stream_elem_base + N_W'(k);
+      e_out = out_elem_base    + N_W'(k);
+      if (e_in < n_reg) begin
         group_in_valid[k] = 1'b1;
         group_in_idx_packed[(k+1)*IDX_W-1 -: IDX_W] = e_in[IDX_W-1:0];
       end
-      if (e_out < n) begin
+      if (e_out < n_reg) begin
         group_out_valid[k] = 1'b1;
         group_out_idx_packed[(k+1)*IDX_W-1 -: IDX_W] = e_out[IDX_W-1:0];
       end
@@ -300,23 +336,23 @@ module CGCtrl #(
 
       // LD x vector (1 elem / cycle)
       S_LD_X_ADDR:                                                            next_state = S_LD_X_CAPT;
-      S_LD_X_CAPT:       if (stream_idx == n - 32'd1)                         next_state = S_LD_CX_ADDR;
+      S_LD_X_CAPT:       if (stream_idx == n_minus_1_reg)                         next_state = S_LD_CX_ADDR;
                          else                                                 next_state = S_LD_X_ADDR;
 
       // LD cx vector (1 elem / cycle)
       S_LD_CX_ADDR:                                                           next_state = S_LD_CX_CAPT;
-      S_LD_CX_CAPT:      if (stream_idx == n - 32'd1)                         next_state = S_SPMV_INIT_FIRE;
+      S_LD_CX_CAPT:      if (stream_idx == n_minus_1_reg)                         next_state = S_SPMV_INIT_FIRE;
                          else                                                 next_state = S_LD_CX_ADDR;
 
       // INIT SPMV (1 row / handshake)
       S_SPMV_INIT_FIRE:  if (spmv_in_hs)                                      next_state = S_SPMV_INIT_COLLECT;
       S_SPMV_INIT_COLLECT:
-                         if (spmv_out_hs && stream_idx == n - 32'd1)          next_state = S_VNS_R;
+                         if (spmv_out_hs && stream_idx == n_minus_1_reg)          next_state = S_VNS_R;
 
       // r_reg[i] = -(cx[i] + q_buf[i]); then copy r_reg -> d_reg
       // (p_lanes/cycle, num_groups cycles)
-      S_VNS_R:           if (stream_idx == num_groups - 32'd1)                next_state = S_COPY_D;
-      S_COPY_D:          if (stream_idx == num_groups - 32'd1)                next_state = S_VDOT_INIT_FEED;
+      S_VNS_R:           if (stream_idx == num_groups_minus_1_reg)                next_state = S_COPY_D;
+      S_COPY_D:          if (stream_idx == num_groups_minus_1_reg)                next_state = S_VDOT_INIT_FEED;
 
       // VDOT r.r -> rr_new_latched
       S_VDOT_INIT_FEED:  if (vdot_out_hs)                                     next_state = S_RR_REG_COPY;
@@ -327,7 +363,7 @@ module CGCtrl #(
       // RUN: SPMV (Q * d_reg) -> q_buf (1 row / handshake)
       S_SPMV_RUN_FIRE:   if (spmv_in_hs)                                      next_state = S_SPMV_RUN_COLLECT;
       S_SPMV_RUN_COLLECT:
-                         if (spmv_out_hs && stream_idx == n - 32'd1)          next_state = S_VDOT_DQ_FEED;
+                         if (spmv_out_hs && stream_idx == n_minus_1_reg)          next_state = S_VDOT_DQ_FEED;
 
       // dq = d . q_buf
       S_VDOT_DQ_FEED:    if (vdot_out_hs)                                     next_state = S_DIV_A_SEND;
@@ -337,10 +373,10 @@ module CGCtrl #(
       S_DIV_A_RECV:      if (fpdiv_out_hs)                                    next_state = S_AXPY_X_FEED;
 
       // x_vec_reg[i] += alpha * d_reg[i]
-      S_AXPY_X_FEED:     if (axpy_out_hs && out_idx == num_groups - 32'd1)    next_state = S_AXPY_R_FEED;
+      S_AXPY_X_FEED:     if (axpy_out_hs && out_idx == num_groups_minus_1_reg)    next_state = S_AXPY_R_FEED;
 
       // r_reg[i] -= alpha * q_buf[i]
-      S_AXPY_R_FEED:     if (axpy_out_hs && out_idx == num_groups - 32'd1)    next_state = S_VDOT_RR_FEED;
+      S_AXPY_R_FEED:     if (axpy_out_hs && out_idx == num_groups_minus_1_reg)    next_state = S_VDOT_RR_FEED;
 
       // rr_new = r_new . r_new
       S_VDOT_RR_FEED:    if (vdot_out_hs)                                     next_state = S_DIV_B_SEND;
@@ -350,7 +386,7 @@ module CGCtrl #(
       S_DIV_B_RECV:      if (fpdiv_out_hs)                                    next_state = S_AXPY_D_FEED;
 
       // d_reg[i] = r_reg[i] + beta * d_reg[i]
-      S_AXPY_D_FEED:     if (axpy_out_hs && out_idx == num_groups - 32'd1)    next_state = S_RUN_CHECK;
+      S_AXPY_D_FEED:     if (axpy_out_hs && out_idx == num_groups_minus_1_reg)    next_state = S_RUN_CHECK;
 
       // Convergence check + iter bump
       S_RUN_CHECK:       if (run_converged)                                   next_state = S_WB_WRITE;
@@ -358,7 +394,7 @@ module CGCtrl #(
 
       // WB phase: stream x_vec_reg -> cg_mem[x_base..] (1 elem / cycle)
       S_WB_WRITE: begin
-        if (stream_idx == n - 32'd1) begin
+        if (stream_idx == n_minus_1_reg) begin
           if (sel_y)   next_state = S_CG_DONE;
           else         next_state = S_LD_X_ADDR;  // swap to Y phase
         end
@@ -407,7 +443,7 @@ module CGCtrl #(
     end else begin
       if (state == S_PREP)
         sel_y <= 1'b0;
-      else if (state == S_WB_WRITE && stream_idx == n - 32'd1 && !sel_y)
+      else if (state == S_WB_WRITE && stream_idx == n_minus_1_reg && !sel_y)
         sel_y <= 1'b1;
 
       if (reset_counters)
@@ -567,7 +603,7 @@ module CGCtrl #(
         rd_b_sel         = RF_R_REG;
         rd_b_idx_packed  = group_in_idx_packed;
         rd_b_valid       = group_in_valid;
-        vdot_istream_val = (stream_idx < num_groups[$bits(stream_idx)-1:0]);
+        vdot_istream_val = (stream_idx < num_groups_reg);
         vdot_ostream_rdy = 1'b1;
         latch_rr_new     = vdot_out_hs;
       end
@@ -599,7 +635,7 @@ module CGCtrl #(
         rd_b_sel         = RF_Q_BUF;
         rd_b_idx_packed  = group_in_idx_packed;
         rd_b_valid       = group_in_valid;
-        vdot_istream_val = (stream_idx < num_groups[$bits(stream_idx)-1:0]);
+        vdot_istream_val = (stream_idx < num_groups_reg);
         vdot_ostream_rdy = 1'b1;
         latch_dq         = vdot_out_hs;
       end
@@ -623,7 +659,7 @@ module CGCtrl #(
         rd_b_sel           = RF_D_REG;
         rd_b_idx_packed    = group_in_idx_packed;
         rd_b_valid         = group_in_valid;
-        axpy_istream_val   = (stream_idx < num_groups[$bits(stream_idx)-1:0]);
+        axpy_istream_val   = (stream_idx < num_groups_reg);
         axpy_ostream_rdy   = 1'b1;
         axpy_mode          = 1'b0;
         axpy_coef_src_beta = 1'b0;
@@ -641,7 +677,7 @@ module CGCtrl #(
         rd_b_sel           = RF_Q_BUF;
         rd_b_idx_packed    = group_in_idx_packed;
         rd_b_valid         = group_in_valid;
-        axpy_istream_val   = (stream_idx < num_groups[$bits(stream_idx)-1:0]);
+        axpy_istream_val   = (stream_idx < num_groups_reg);
         axpy_ostream_rdy   = 1'b1;
         axpy_mode          = 1'b1;
         axpy_coef_src_beta = 1'b0;
@@ -659,7 +695,7 @@ module CGCtrl #(
         rd_b_sel         = RF_R_REG;
         rd_b_idx_packed  = group_in_idx_packed;
         rd_b_valid       = group_in_valid;
-        vdot_istream_val = (stream_idx < num_groups[$bits(stream_idx)-1:0]);
+        vdot_istream_val = (stream_idx < num_groups_reg);
         vdot_ostream_rdy = 1'b1;
         latch_rr_new     = vdot_out_hs;
       end
@@ -683,7 +719,7 @@ module CGCtrl #(
         rd_b_sel           = RF_D_REG;
         rd_b_idx_packed    = group_in_idx_packed;
         rd_b_valid         = group_in_valid;
-        axpy_istream_val   = (stream_idx < num_groups[$bits(stream_idx)-1:0]);
+        axpy_istream_val   = (stream_idx < num_groups_reg);
         axpy_ostream_rdy   = 1'b1;
         axpy_mode          = 1'b0;
         axpy_coef_src_beta = 1'b1;
@@ -708,7 +744,7 @@ module CGCtrl #(
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_lane0_mask;
         ctrl_mem_wdata  = 32'($signed(rd_a_data_lane0));
-        if (stream_idx == n - 32'd1 && !sel_y)
+        if (stream_idx == n_minus_1_reg && !sel_y)
           reset_iter = 1'b1;
       end
 

@@ -86,8 +86,17 @@ module CGTop_tb;
   int test_num;
   int fail_count;
 
-  // Helper: load a CSR matrix + vectors into both m10k_mem and golden_mem
-  task load_test(
+  // ----------------------------------------------------------------------
+  // Helpers
+  // ----------------------------------------------------------------------
+
+  // Fixed-point conversion
+  function int to_fp(real v);
+    return int'(v * real'(FRAC_SCALE));
+  endfunction
+
+  // Load a CSR matrix + vectors into both m10k_mem and golden_mem.
+  task automatic load_test(
     input int t_n,
     input int nnz,
     input int row_ptr [],
@@ -98,89 +107,53 @@ module CGTop_tb;
     input int cy      [],
     input int y0      []
   );
-    // Clear both memories
     for (int i = 0; i < TOTAL_WORDS; i++) begin
       m10k_mem[i]   = 0;
       golden_mem[i] = 0;
     end
-
-    // Q vals
     for (int j = 0; j < nnz; j++) begin
       m10k_mem  [Q_VAL_BASE + j] = vals[j];
       golden_mem[Q_VAL_BASE + j] = vals[j];
-    end
-
-    // Q col_idx
-    for (int j = 0; j < nnz; j++) begin
       m10k_mem  [Q_COL_BASE + j] = col_idx[j];
       golden_mem[Q_COL_BASE + j] = col_idx[j];
     end
-
-    // Q row_ptr
     for (int i = 0; i <= t_n; i++) begin
       m10k_mem  [Q_ROWP_BASE + i] = row_ptr[i];
       golden_mem[Q_ROWP_BASE + i] = row_ptr[i];
     end
-
-    // cx_x
     for (int i = 0; i < t_n; i++) begin
       m10k_mem  [CX_X_BASE + i] = cx[i];
       golden_mem[CX_X_BASE + i] = cx[i];
-    end
-
-    // cx_y
-    for (int i = 0; i < t_n; i++) begin
       m10k_mem  [CX_Y_BASE + i] = cy[i];
       golden_mem[CX_Y_BASE + i] = cy[i];
-    end
-
-    // x0
-    for (int i = 0; i < t_n; i++) begin
-      m10k_mem  [X_BASE + i] = x0[i];
-      golden_mem[X_BASE + i] = x0[i];
-    end
-
-    // y0
-    for (int i = 0; i < t_n; i++) begin
-      m10k_mem  [Y_BASE + i] = y0[i];
-      golden_mem[Y_BASE + i] = y0[i];
+      m10k_mem  [X_BASE    + i] = x0[i];
+      golden_mem[X_BASE    + i] = x0[i];
+      m10k_mem  [Y_BASE    + i] = y0[i];
+      golden_mem[Y_BASE    + i] = y0[i];
     end
   endtask
 
-  // Helper: run DUT to completion
-  task run_dut();
-    // Assert go
-    @(posedge clk);
-    sw_go = 1;
-    @(posedge clk);
-    sw_go = 0;
-
-    // Wait for done with timeout
-    begin
-      int timeout_cnt;
-      timeout_cnt = 0;
-      while (!sw_done) begin
-        @(posedge clk);
-        timeout_cnt++;
-        if (timeout_cnt > 2000000) begin
-          $display("  TIMEOUT: DUT did not complete");
-          $finish;
-        end
+  // Drive go, wait for done (with 2M-cycle timeout), ack, and return to IDLE.
+  task automatic run_dut();
+    int timeout_cnt;
+    @(posedge clk); sw_go = 1;
+    @(posedge clk); sw_go = 0;
+    timeout_cnt = 0;
+    while (!sw_done) begin
+      @(posedge clk);
+      timeout_cnt++;
+      if (timeout_cnt > 2000000) begin
+        $display("  TIMEOUT: DUT did not complete");
+        $finish;
       end
     end
-
-    // Acknowledge done
-    @(posedge clk);
-    sw_done_ack = 1;
-    @(posedge clk);
-    sw_done_ack = 0;
-
-    // Let state machine return to IDLE
+    @(posedge clk); sw_done_ack = 1;
+    @(posedge clk); sw_done_ack = 0;
     repeat(2) @(posedge clk);
   endtask
 
-  // Helper: compare a single vector (x or y) in DUT vs golden
-  task check_vec(
+  // Compare a single solution vector (x or y) in DUT vs golden memory.
+  task automatic check_vec(
     input int t_n,
     input int base,
     input string vec_name,
@@ -189,7 +162,6 @@ module CGTop_tb;
   );
     int dut_v, gold_v;
     real dut_real, gold_real;
-
     for (int i = 0; i < t_n; i++) begin
       dut_v  = m10k_mem  [base + i];
       gold_v = golden_mem[base + i];
@@ -205,14 +177,12 @@ module CGTop_tb;
     end
   endtask
 
-  // Helper: compare DUT result (in m10k_mem) vs golden (in golden_mem)
-  task check_results(input int t_n, input string name);
+  // Compare DUT solution (m10k_mem) vs golden (golden_mem) for both dims.
+  task automatic check_results(input int t_n, input string name);
     int mismatch;
     mismatch = 0;
-
     check_vec(t_n, X_BASE, "x", name, mismatch);
     check_vec(t_n, Y_BASE, "y", name, mismatch);
-
     if (mismatch == 0)
       $display("  PASS %s: all %0d x+y elements match", name, 2 * t_n);
     else begin
@@ -221,17 +191,64 @@ module CGTop_tb;
     end
   endtask
 
+  // Run a full test: load matrix+vectors, invoke golden, drive DUT, compare.
+  task automatic run_test(
+    input string name,
+    input int    t_n,
+    input int    nnz,
+    input int    row_ptr [],
+    input int    col_idx [],
+    input int    vals    [],
+    input int    cx      [],
+    input int    cy      [],
+    input int    x0      [],
+    input int    y0      []
+  );
+    test_num++;
+    n = t_n;
+    $display("Test %0d: %s", test_num, name);
+    load_test(t_n, nnz, row_ptr, col_idx, vals, cx, x0, cy, y0);
+    dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
+    run_dut();
+    check_results(t_n, name);
+  endtask
+
+  // Build a uniform tridiagonal CSR: diag_fp on the main diagonal, off_fp on
+  // both first off-diagonals. Allocates and writes the row_ptr/col_idx/vals
+  // dynamic arrays and returns nnz.
+  task automatic build_uniform_tridiag(
+    input  int t_n,
+    input  int diag_fp,
+    input  int off_fp,
+    output int row_ptr [],
+    output int col_idx [],
+    output int vals    [],
+    output int nnz
+  );
+    int idx;
+    nnz = 3 * t_n - 2;
+    row_ptr = new[t_n + 1];
+    col_idx = new[nnz];
+    vals    = new[nnz];
+    idx = 0;
+    for (int i = 0; i < t_n; i++) begin
+      row_ptr[i] = idx;
+      if (i > 0) begin
+        col_idx[idx] = i - 1; vals[idx] = off_fp; idx++;
+      end
+      col_idx[idx] = i; vals[idx] = diag_fp; idx++;
+      if (i < t_n - 1) begin
+        col_idx[idx] = i + 1; vals[idx] = off_fp; idx++;
+      end
+    end
+    row_ptr[t_n] = idx;
+  endtask
+
   // -----------------------------------------------------------------------
   // Test cases
   // -----------------------------------------------------------------------
 
-  // Fixed-point conversion helper
-  function int to_fp(real v);
-    return int'(v * real'(FRAC_SCALE));
-  endfunction
-
   initial begin
-    // Init
     rst         = 1;
     sw_go       = 0;
     sw_done_ack = 0;
@@ -255,18 +272,7 @@ module CGTop_tb;
       int cy[]      = '{to_fp(2.0), to_fp(1.0)};
       int x0[]      = '{0, 0};
       int y0[]      = '{0, 0};
-
-      test_num++;
-      n = 2;
-      $display("Test %0d: 2x2 system", test_num);
-
-      load_test(2, 4, row_ptr, col_idx, vals, cx, x0, cy, y0);
-
-      dpi_cg_solve(golden_mem, 2, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(2, "2x2");
+      run_test("2x2", 2, 4, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 2: 3x3 ====
@@ -281,18 +287,7 @@ module CGTop_tb;
       int cy[]      = '{to_fp(2.0), to_fp(0.0), to_fp(1.0)};
       int x0[]      = '{0, 0, 0};
       int y0[]      = '{0, 0, 0};
-
-      test_num++;
-      n = 3;
-      $display("Test %0d: 3x3 system", test_num);
-
-      load_test(3, 7, row_ptr, col_idx, vals, cx, x0, cy, y0);
-
-      dpi_cg_solve(golden_mem, 3, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(3, "3x3");
+      run_test("3x3", 3, 7, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 3: 2x2 diagonal ====
@@ -305,92 +300,45 @@ module CGTop_tb;
       int cy[]      = '{to_fp(5.0), to_fp(9.0)};
       int x0[]      = '{0, 0};
       int y0[]      = '{0, 0};
-
-      test_num++;
-      n = 2;
-      $display("Test %0d: 2x2 diagonal", test_num);
-
-      load_test(2, 2, row_ptr, col_idx, vals, cx, x0, cy, y0);
-
-      dpi_cg_solve(golden_mem, 2, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(2, "2x2_diag");
+      run_test("2x2_diag", 2, 2, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 4: 4x4 tridiagonal ====
-    // Q = [[2,-1,0,0],[-1,2,-1,0],[0,-1,2,-1],[0,0,-1,2]]
-    // cx = [1,0,0,1], cy = [0,1,1,0]
+    // Q = standard 1-D Laplacian, cx = [1,0,0,1], cy = [0,1,1,0]
     begin
-      int row_ptr[] = '{0, 2, 5, 8, 10};
-      int col_idx[] = '{0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
-      int vals[]    = '{to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0)};
+      int t_n, nnz;
+      int row_ptr [], col_idx [], vals [];
       int cx[]      = '{to_fp(1.0), to_fp(0.0), to_fp(0.0), to_fp(1.0)};
       int cy[]      = '{to_fp(0.0), to_fp(1.0), to_fp(1.0), to_fp(0.0)};
       int x0[]      = '{0, 0, 0, 0};
       int y0[]      = '{0, 0, 0, 0};
-
-      test_num++;
-      n = 4;
-      $display("Test %0d: 4x4 tridiagonal", test_num);
-
-      load_test(4, 10, row_ptr, col_idx, vals, cx, x0, cy, y0);
-
-      dpi_cg_solve(golden_mem, 4, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(4, "4x4_tridiag");
+      t_n = 4;
+      build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
+      run_test("4x4_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 5: 8x8 tridiagonal ====
+    // Same matrix as Test 4, larger n; cx/cy place sources at the ends.
     begin
-      int row_ptr[] = '{0, 2, 5, 8, 11, 14, 17, 20, 22};
-      int col_idx[] = '{0,1, 0,1,2, 1,2,3, 2,3,4, 3,4,5, 4,5,6, 5,6,7, 6,7};
-      int vals[]    = '{to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0), to_fp(-1.0),
-                        to_fp(-1.0), to_fp(2.0)};
+      int t_n, nnz;
+      int row_ptr [], col_idx [], vals [];
       int cx[]      = '{to_fp(1.0), to_fp(0.0), to_fp(0.0), to_fp(0.0),
                          to_fp(0.0), to_fp(0.0), to_fp(0.0), to_fp(1.0)};
       int cy[]      = '{to_fp(0.0), to_fp(1.0), to_fp(0.0), to_fp(0.0),
                          to_fp(0.0), to_fp(0.0), to_fp(1.0), to_fp(0.0)};
       int x0[]      = '{0, 0, 0, 0, 0, 0, 0, 0};
       int y0[]      = '{0, 0, 0, 0, 0, 0, 0, 0};
-
-      test_num++;
-      n = 8;
-      $display("Test %0d: 8x8 tridiagonal", test_num);
-
-      load_test(8, 22, row_ptr, col_idx, vals, cx, x0, cy, y0);
-
-      dpi_cg_solve(golden_mem, 8, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(8, "8x8_tridiag");
+      t_n = 8;
+      build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
+      run_test("8x8_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
-    // ==== Test 6: 10x10 dense SPD ====
-    // Q = diag(10..19) + 0.1 off-diagonal
+    // ==== Test 6: 10x10 dense diagonally-dominant ====
+    // Q = diag(10..19) + 0.1 off-diagonal everywhere else.
     begin
       int t_n, nnz;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 10;
       nnz = t_n * t_n;
       row_ptr = new[t_n + 1];
@@ -400,152 +348,55 @@ module CGTop_tb;
       cy_arr  = new[t_n];
       x0_arr  = new[t_n];
       y0_arr  = new[t_n];
-
-      for (int i = 0; i <= t_n; i++)
-        row_ptr[i] = i * t_n;
-
+      for (int i = 0; i <= t_n; i++) row_ptr[i] = i * t_n;
       for (int i = 0; i < t_n; i++) begin
         for (int jj = 0; jj < t_n; jj++) begin
           col_idx[i * t_n + jj] = jj;
-          if (i == jj)
-            vals[i * t_n + jj] = to_fp(10.0 + real'(i));
-          else
-            vals[i * t_n + jj] = to_fp(0.1);
+          vals[i * t_n + jj] = (i == jj) ? to_fp(10.0 + real'(i)) : to_fp(0.1);
         end
         cx_arr[i] = to_fp(1.0);
         cy_arr[i] = to_fp(2.0);
         x0_arr[i] = 0;
         y0_arr[i] = 0;
       end
-
-      test_num++;
-      n = t_n;
-      $display("Test %0d: 10x10 dense diag-dominant", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "10x10_dense");
+      run_test("10x10_dense", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
     end
 
     // ==== Test 7: 20x20 tridiagonal ====
     begin
-      int t_n, nnz, idx;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int t_n, nnz;
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 20;
-      nnz = 3 * t_n - 2;
-      row_ptr = new[t_n + 1];
-      col_idx = new[nnz];
-      vals    = new[nnz];
-      cx_arr  = new[t_n];
-      cy_arr  = new[t_n];
-      x0_arr  = new[t_n];
-      y0_arr  = new[t_n];
-
-      idx = 0;
+      build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
+      cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
       for (int i = 0; i < t_n; i++) begin
-        row_ptr[i] = idx;
-        if (i > 0) begin
-          col_idx[idx] = i - 1;
-          vals[idx] = to_fp(-1.0);
-          idx++;
-        end
-        col_idx[idx] = i;
-        vals[idx] = to_fp(2.0);
-        idx++;
-        if (i < t_n - 1) begin
-          col_idx[idx] = i + 1;
-          vals[idx] = to_fp(-1.0);
-          idx++;
-        end
         cx_arr[i] = to_fp(1.0);
         cy_arr[i] = to_fp(0.5 + real'(i) * 0.1);
         x0_arr[i] = 0;
         y0_arr[i] = 0;
       end
-      row_ptr[t_n] = idx;
-
-      test_num++;
-      n = t_n;
-      $display("Test %0d: 20x20 tridiagonal", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "20x20_tridiag");
+      run_test("20x20_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
     end
 
     // ==== Test 8: 50x50 tridiagonal ====
+    // Hits MAX_N. Needs more iterations to converge.
     begin
-      int t_n, nnz, idx;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int t_n, nnz;
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 50;
-      nnz = 3 * t_n - 2;
-      row_ptr = new[t_n + 1];
-      col_idx = new[nnz];
-      vals    = new[nnz];
-      cx_arr  = new[t_n];
-      cy_arr  = new[t_n];
-      x0_arr  = new[t_n];
-      y0_arr  = new[t_n];
-
-      idx = 0;
+      build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
+      cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
       for (int i = 0; i < t_n; i++) begin
-        row_ptr[i] = idx;
-        if (i > 0) begin
-          col_idx[idx] = i - 1;
-          vals[idx] = to_fp(-1.0);
-          idx++;
-        end
-        col_idx[idx] = i;
-        vals[idx] = to_fp(2.0);
-        idx++;
-        if (i < t_n - 1) begin
-          col_idx[idx] = i + 1;
-          vals[idx] = to_fp(-1.0);
-          idx++;
-        end
         cx_arr[i] = to_fp(1.0);
         cy_arr[i] = to_fp(0.5);
         x0_arr[i] = 0;
         y0_arr[i] = 0;
       end
-      row_ptr[t_n] = idx;
-
-      test_num++;
-      n = t_n;
       max_iter = 200;
-      $display("Test %0d: 50x50 tridiagonal", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "50x50_tridiag");
-
-      max_iter = 100;  // restore default
+      run_test("50x50_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
+      max_iter = 100;
     end
 
     // ==== Test 9: n=1 (degenerate single-element) ====
@@ -559,88 +410,36 @@ module CGTop_tb;
       int cy[]      = '{to_fp(3.0)};
       int x0[]      = '{0};
       int y0[]      = '{0};
-
-      test_num++;
-      n = 1;
-      $display("Test %0d: n=1 single-element", test_num);
-
-      load_test(1, 1, row_ptr, col_idx, vals, cx, x0, cy, y0);
-
-      dpi_cg_solve(golden_mem, 1, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(1, "n1");
+      run_test("n1", 1, 1, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 10: 49x49 tridiagonal (one below p_max_n) ====
     // Last group with p_lanes=4 has only 1 valid lane. Tests lane-mask logic.
     begin
-      int t_n, nnz, idx;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int t_n, nnz;
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 49;
-      nnz = 3 * t_n - 2;
-      row_ptr = new[t_n + 1];
-      col_idx = new[nnz];
-      vals    = new[nnz];
-      cx_arr  = new[t_n];
-      cy_arr  = new[t_n];
-      x0_arr  = new[t_n];
-      y0_arr  = new[t_n];
-
-      idx = 0;
+      build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
+      cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
       for (int i = 0; i < t_n; i++) begin
-        row_ptr[i] = idx;
-        if (i > 0) begin
-          col_idx[idx] = i - 1; vals[idx] = to_fp(-1.0); idx++;
-        end
-        col_idx[idx] = i; vals[idx] = to_fp(2.0); idx++;
-        if (i < t_n - 1) begin
-          col_idx[idx] = i + 1; vals[idx] = to_fp(-1.0); idx++;
-        end
         cx_arr[i] = to_fp(1.0);
         cy_arr[i] = to_fp(0.5);
         x0_arr[i] = 0;
         y0_arr[i] = 0;
       end
-      row_ptr[t_n] = idx;
-
-      test_num++;
-      n = t_n;
       max_iter = 200;
-      $display("Test %0d: 49x49 tridiagonal (p_max_n boundary)", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "49x49_tridiag");
-
+      run_test("49x49_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
       max_iter = 100;
     end
 
     // ==== Test 11: 10x10 diagonal-only (single-nnz per row) ====
-    // Every row has exactly 1 nnz on the diagonal. Maximum sparsity.
-    // Stresses SPMV row-boundary transitions on minimum-length rows.
+    // Maximum sparsity. Stresses SPMV row-boundary transitions on
+    // minimum-length rows.
     begin
       int t_n, nnz;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 10;
       nnz = t_n;
       row_ptr = new[t_n + 1];
@@ -650,7 +449,6 @@ module CGTop_tb;
       cy_arr  = new[t_n];
       x0_arr  = new[t_n];
       y0_arr  = new[t_n];
-
       for (int i = 0; i < t_n; i++) begin
         row_ptr[i] = i;
         col_idx[i] = i;
@@ -661,18 +459,7 @@ module CGTop_tb;
         y0_arr[i]  = 0;
       end
       row_ptr[t_n] = nnz;
-
-      test_num++;
-      n = t_n;
-      $display("Test %0d: 10x10 diagonal-only (single-nnz rows)", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "10x10_diag_only");
+      run_test("10x10_diag_only", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
     end
 
     // ==== Test 12: 10x10 arrow matrix ====
@@ -680,16 +467,10 @@ module CGTop_tb;
     // Mixes a max-density row with min-density rows. Diagonally dominant -> SPD.
     begin
       int t_n, nnz, idx;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 10;
-      nnz = t_n + 2 * (t_n - 1);  // row 0: t_n entries; rows 1..n-1: 2 each
+      nnz = t_n + 2 * (t_n - 1);
       row_ptr = new[t_n + 1];
       col_idx = new[nnz];
       vals    = new[nnz];
@@ -697,7 +478,6 @@ module CGTop_tb;
       cy_arr  = new[t_n];
       x0_arr  = new[t_n];
       y0_arr  = new[t_n];
-
       idx = 0;
       // Row 0: [20, 1, 1, ..., 1]
       row_ptr[0] = idx;
@@ -712,41 +492,24 @@ module CGTop_tb;
         col_idx[idx] = i; vals[idx] = to_fp(5.0); idx++;
       end
       row_ptr[t_n] = idx;
-
       for (int i = 0; i < t_n; i++) begin
         cx_arr[i] = to_fp(1.0);
         cy_arr[i] = to_fp(real'(i) * 0.25);
         x0_arr[i] = 0;
         y0_arr[i] = 0;
       end
-
-      test_num++;
-      n = t_n;
-      $display("Test %0d: 10x10 arrow matrix (mixed row sizes)", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "10x10_arrow");
+      run_test("10x10_arrow", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
     end
 
     // ==== Test 13: 20x20 random-coefficient tridiagonal ====
     // Tridiag with deterministic per-index varying coefficients.
-    // Strictly diagonally dominant -> SPD.
+    // Strictly diagonally dominant -> SPD. Cannot use build_uniform_tridiag
+    // because diag/off vary per row.
     begin
       int t_n, nnz, idx;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       real diag_v, off_v;
-
       t_n = 20;
       nnz = 3 * t_n - 2;
       row_ptr = new[t_n + 1];
@@ -756,7 +519,6 @@ module CGTop_tb;
       cy_arr  = new[t_n];
       x0_arr  = new[t_n];
       y0_arr  = new[t_n];
-
       idx = 0;
       for (int i = 0; i < t_n; i++) begin
         diag_v = 10.0 + real'(i % 5);                 // 10..14
@@ -775,71 +537,27 @@ module CGTop_tb;
         y0_arr[i] = 0;
       end
       row_ptr[t_n] = idx;
-
-      test_num++;
-      n = t_n;
-      $display("Test %0d: 20x20 random-coeff tridiag", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "20x20_rand_tridiag");
+      run_test("20x20_rand_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
     end
 
     // ==== Test 14: 8x8 tridiagonal with nonzero x0/y0 ====
-    // Same Q as Test 5 but starts from a non-zero initial guess.
-    // Exercises the SPMV-INIT phase computing Q*x0 for non-trivial x0.
+    // Q has diag=4, off=-1 (different from Test 5). Starts from a non-zero
+    // initial guess. Exercises the SPMV-INIT phase computing Q*x0 for non-
+    // trivial x0.
     begin
-      int t_n, nnz, idx;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int t_n, nnz;
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 8;
-      nnz = 3 * t_n - 2;
-      row_ptr = new[t_n + 1];
-      col_idx = new[nnz];
-      vals    = new[nnz];
-      cx_arr  = new[t_n];
-      cy_arr  = new[t_n];
-      x0_arr  = new[t_n];
-      y0_arr  = new[t_n];
-
-      idx = 0;
+      build_uniform_tridiag(t_n, to_fp(4.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
+      cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
       for (int i = 0; i < t_n; i++) begin
-        row_ptr[i] = idx;
-        if (i > 0) begin
-          col_idx[idx] = i - 1; vals[idx] = to_fp(-1.0); idx++;
-        end
-        col_idx[idx] = i; vals[idx] = to_fp(4.0); idx++;
-        if (i < t_n - 1) begin
-          col_idx[idx] = i + 1; vals[idx] = to_fp(-1.0); idx++;
-        end
         cx_arr[i] = to_fp(real'(i + 1));
         cy_arr[i] = to_fp(-(real'(i + 1)));
         x0_arr[i] = to_fp(real'(i + 1) * 0.1);
         y0_arr[i] = to_fp(-(real'(i + 1)) * 0.1);
       end
-      row_ptr[t_n] = idx;
-
-      test_num++;
-      n = t_n;
-      $display("Test %0d: 8x8 tridiag with nonzero x0", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "8x8_nonzero_x0");
+      run_test("8x8_nonzero_x0", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
     end
 
     // ==== Test 15: 2x2 with x0 near solution ====
@@ -851,21 +569,9 @@ module CGTop_tb;
       int vals[]    = '{to_fp(4.0), to_fp(1.0), to_fp(1.0), to_fp(3.0)};
       int cx[]      = '{to_fp(1.0), to_fp(2.0)};
       int cy[]      = '{to_fp(2.0), to_fp(1.0)};
-      // Approximate exact solutions perturbed slightly
       int x0[]      = '{to_fp(-0.090), to_fp(-0.640)};
       int y0[]      = '{to_fp(-0.450), to_fp(-0.180)};
-
-      test_num++;
-      n = 2;
-      $display("Test %0d: 2x2 x0 near solution", test_num);
-
-      load_test(2, 4, row_ptr, col_idx, vals, cx, x0, cy, y0);
-
-      dpi_cg_solve(golden_mem, 2, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(2, "2x2_near");
+      run_test("2x2_near", 2, 4, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 16: 50x50 dense SPD (max density at p_max_n boundary) ====
@@ -873,14 +579,8 @@ module CGTop_tb;
     // Exercises full-density SPMV inner loop at maximum n.
     begin
       int t_n, nnz;
-      int row_ptr [];
-      int col_idx [];
-      int vals    [];
-      int cx_arr  [];
-      int cy_arr  [];
-      int x0_arr  [];
-      int y0_arr  [];
-
+      int row_ptr [], col_idx [], vals [];
+      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 50;
       nnz = t_n * t_n;
       row_ptr = new[t_n + 1];
@@ -890,36 +590,19 @@ module CGTop_tb;
       cy_arr  = new[t_n];
       x0_arr  = new[t_n];
       y0_arr  = new[t_n];
-
-      for (int i = 0; i <= t_n; i++)
-        row_ptr[i] = i * t_n;
+      for (int i = 0; i <= t_n; i++) row_ptr[i] = i * t_n;
       for (int i = 0; i < t_n; i++) begin
         for (int jj = 0; jj < t_n; jj++) begin
           col_idx[i * t_n + jj] = jj;
-          if (i == jj)
-            vals[i * t_n + jj] = to_fp(100.0 + real'(i));
-          else
-            vals[i * t_n + jj] = to_fp(0.01);
+          vals[i * t_n + jj] = (i == jj) ? to_fp(100.0 + real'(i)) : to_fp(0.01);
         end
         cx_arr[i] = to_fp(1.0);
         cy_arr[i] = to_fp(real'(i) * 0.05 - 0.5);
         x0_arr[i] = 0;
         y0_arr[i] = 0;
       end
-
-      test_num++;
-      n = t_n;
       max_iter = 200;
-      $display("Test %0d: 50x50 dense SPD (max density)", test_num);
-
-      load_test(t_n, nnz, row_ptr, col_idx, vals, cx_arr, x0_arr, cy_arr, y0_arr);
-
-      dpi_cg_solve(golden_mem, t_n, MAX_N, max_iter, eps_sq);
-
-      run_dut();
-
-      check_results(t_n, "50x50_dense");
-
+      run_test("50x50_dense", t_n, nnz, row_ptr, col_idx, vals, cx_arr, cy_arr, x0_arr, y0_arr);
       max_iter = 100;
     end
 

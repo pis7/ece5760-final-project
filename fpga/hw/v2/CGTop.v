@@ -9,7 +9,7 @@
 // and is not touching the memory while sw_done is low.
 
 module CGTop #(
-  parameter p_lanes            = 4,
+  parameter p_lanes            = 2,
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,

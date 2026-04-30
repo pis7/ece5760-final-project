@@ -9,7 +9,8 @@
 #   python    <benchmark-path>             Baseline Python placer
 #   sw        <benchmark-path>             Full software C++ placer (double precision)
 #   golden    <benchmark-path>             C++ placer with fixed-point golden model CG
-#   verilated <benchmark-path> [v2|v3]     C++ placer with Verilator RTL CG simulation
+#   verilated <benchmark-path> [v2|v3]
+#                                          C++ placer with Verilator RTL CG simulation
 #                                          (RTL version, default v3)
 #   arm       <benchmark-path>             Cross-compile SW placer, run on DE1-SoC ARM
 #   fpga      <benchmark-path>             Cross-compile FPGA-accelerated placer, run on DE1-SoC
@@ -49,7 +50,8 @@ if [ -z "$MODE" ] || [ -z "$ARG" ]; then
     echo "  python    <benchmark-path>             Baseline Python placer"
     echo "  sw        <benchmark-path>             Full software C++ placer (double precision)"
     echo "  golden    <benchmark-path>             C++ placer with fixed-point golden CG"
-    echo "  verilated <benchmark-path> [v2|v3]     C++ placer with Verilator RTL CG (default v3)"
+    echo "  verilated <benchmark-path> [v2|v3]"
+    echo "                                         C++ placer with Verilator RTL CG (default v3)"
     echo "  arm       <benchmark-path>             Cross-compile SW placer, run on DE1-SoC ARM"
     echo "  fpga      <benchmark-path>             Cross-compile FPGA-accelerated placer, run on DE1-SoC"
     echo "  vis       <json-file>                  Launch the Tk visualizer on a placement JSON"
@@ -66,7 +68,7 @@ if [ "$MODE" = "vis" ]; then
         exit 1
     fi
     echo "=== Launching visualizer ==="
-    uv run "$SCRIPT_DIR/design-file-tools/visualizer.py" "$ARG"
+    uv run "$SCRIPT_DIR/python-utils/visualizer.py" "$ARG"
     exit 0
 fi
 
@@ -77,7 +79,7 @@ fi
 BENCH_PATH="$ARG"
 
 echo "=== Generating JSON ==="
-uv run "$SCRIPT_DIR/design-file-tools/lefdef-parser.py" "$BENCH_PATH"
+uv run "$SCRIPT_DIR/python-utils/lefdef-parser.py" "$BENCH_PATH"
 
 JSON_FILE=$(ls -t *.json 2>/dev/null | head -1)
 if [ -z "$JSON_FILE" ]; then
@@ -101,7 +103,7 @@ python)
 sw)
     echo "=== Building C++ placer (software) ==="
     cmake "$SCRIPT_DIR/sw-baseline-c/"
-    make -j"$(nproc)"
+    make -j
 
     echo "=== Running placer ==="
     ./placer "$JSON_FILE"
@@ -110,7 +112,7 @@ sw)
 golden)
     echo "=== Building C++ placer (FP golden CG) ==="
     cmake "$SCRIPT_DIR/sw-baseline-c/" -DUSE_FP_GOLDEN=ON
-    make -j"$(nproc)"
+    make -j
 
     echo "=== Running placer ==="
     ./placer "$JSON_FILE"
@@ -124,7 +126,7 @@ verilated)
     fi
     echo "=== Building C++ placer (Verilator CG, $HW_VERSION) ==="
     cmake "$SCRIPT_DIR/sw-baseline-c/" -DUSE_HW_CG=ON -DHW_CG_VERSION="$HW_VERSION"
-    make -j"$(nproc)"
+    make -j
 
     echo "=== Running placer ($HW_VERSION) ==="
     ./placer "$JSON_FILE"
@@ -133,7 +135,7 @@ verilated)
 arm)
     echo "=== Cross-compiling placer for ARM ==="
     cmake -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ -DSTATIC_BUILD=ON "$SCRIPT_DIR/sw-baseline-c/"
-    make -j"$(nproc)"
+    make -j
 
     BOARD_DIR="/home/root/build-${DESIGN_NAME}"
     echo "=== Copying to board ($BOARD_DIR) ==="
@@ -152,7 +154,7 @@ arm)
 fpga)
     echo "=== Cross-compiling FPGA placer for ARM ==="
     cmake -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ -DSTATIC_BUILD=ON "$SCRIPT_DIR/fpga/sw/"
-    make -j"$(nproc)"
+    make -j
 
     BOARD_DIR="/home/root/build-${DESIGN_NAME}-fpga"
     echo "=== Copying to board ($BOARD_DIR) ==="

@@ -1,5 +1,7 @@
-// Placer wrapper around CG golden model — converts double ↔ fixed-point
-// and provides the same CGHwDriver interface as cg_hw_driver.h (Verilator).
+// Placer-facing wrapper around the bit-exact golden CG model. Converts
+// double <-> fixed-point and exposes the same CGHwDriver interface as
+// cg_verilator_driver.h and cg_fpga_mmap_driver.h, so the placer can swap
+// backends via cmake macros (see placer.cpp's include block).
 
 #pragma once
 
@@ -7,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "cg_golden.h"
+#include "cg_golden_model.h"
 
 class CGHwDriver {
 public:

@@ -292,27 +292,11 @@ def test_uniform_rhs() -> bool:
 
 if __name__ == "__main__":
 
-  tests = [
-    test_identity_2x2,
-    test_diagonal_3x3,
-    test_dense_spd_4x4,
-    test_nonzero_initial_guess,
-    test_tridiagonal_8x8,
-    test_random_sparse_16,
-    test_random_sparse_32,
-    test_single_element,
-    test_large_condition_number,
-    test_negative_rhs,
-    test_nearly_solved,
-    test_scaled_identity_10,
-    test_arrow_matrix_6x6,
-    test_near_singular,
-    test_large_rhs_values,
-    test_close_initial_guess,
-    test_random_sparse_64,
-    test_block_diagonal_8x8,
-    test_uniform_rhs,
-  ]
+  # Auto-collect every top-level callable named test_* (in source order, since
+  # Python 3.7+ dicts preserve insertion order). Avoids hand-maintaining a
+  # registry that drifts out of sync with the test definitions above.
+  tests = [v for k, v in globals().items()
+           if k.startswith("test_") and callable(v)]
 
   print("=" * 72)
   print("CGTop FL Testbench")

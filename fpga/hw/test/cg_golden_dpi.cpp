@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include "svdpi.h"
-#include "cg_golden.h"
+#include "cg_golden_model.h"
 
 // Solve for a single dimension (cx_base / sol_base select x or y)
 static void dpi_cg_solve_dim(int32_t* mp, int n, int max_n,

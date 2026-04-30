@@ -1,5 +1,6 @@
-// Fixed-point CG golden model — single source of truth for both:
-//   1. C++ placer (via cg_fp_golden.h wrapper)
+// Bit-exact fixed-point CG golden model -- pure int32/int64 math, no I/O,
+// no placer or HW driver dependencies. Single source of truth for both:
+//   1. C++ placer (via cg_golden_driver.h wrapper)
 //   2. Verilator DPI testbench (via cg_golden_dpi.cpp wrapper)
 //
 // Arithmetic rules (matching Cyclone V hardware):

@@ -21,7 +21,7 @@ import numpy as np
 from scipy.sparse import coo_matrix, csr_array, diags
 from scipy.sparse.linalg import cg
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../python-utils"))
 from json_utils import Netlist, dump_netlist, load_netlist
 
 
@@ -70,14 +70,21 @@ class Placer:
     def init_cell_positions(self, method: str) -> None:
         """Initialize cell positions within the die area."""
         die_x1, die_y1, die_x2, die_y2 = self.netlist.die_area
+        die_cx = (die_x1 + die_x2) / 2.0
+        die_cy = (die_y1 + die_y2) / 2.0
         rng = np.random.default_rng(seed=42)
-        for comp in self.netlist.components.values():
+        nl = self.netlist
+        for i, name in enumerate(nl.cell_names):
+            comp = nl.components[name]
             if method == "random":
                 comp.x = rng.uniform(die_x1, die_x2)
                 comp.y = rng.uniform(die_y1, die_y2)
             elif method == "origin":
                 comp.x = 0
                 comp.y = 0
+            elif method == "center":
+                comp.x = die_cx - nl.cell_widths[i]  / 2.0
+                comp.y = die_cy - nl.cell_heights[i] / 2.0
 
     # -- Build connectivity matrix and support vectors -------------------------
 
@@ -404,7 +411,7 @@ def main() -> None:
 
     # Initialize cell positions and write initial JSON
     print("Initializing cell positions...")
-    placer.init_cell_positions("origin")
+    placer.init_cell_positions("center")
     out_path = placer.write_output("initial")
     print(f"  Initial placement written to {out_path}")
 
@@ -431,9 +438,13 @@ def main() -> None:
         print(f"  HPWL: {placer.compute_hpwl():.0f}")
 
         new_density = placer.max_bin_density()
-        # Only revert once spreading has started working (density below
-        # 2x target). Early iterations often increase density temporarily.
-        if prev_density < 2 * TARGET_DENSITY and new_density > prev_density:
+        # Only revert once spreading has started working (density meaningfully
+        # close to target). Early iterations often increase density
+        # temporarily. The 1.5x factor matters for inits that start cells at
+        # the die center -- their initial density can already be near 2x
+        # target before any spreading happens, which would trip a looser
+        # threshold and end the placer after one iteration.
+        if prev_density < 1.5 * TARGET_DENSITY and new_density > prev_density:
             print(f"  Max bin density: {new_density:.2f} (worse than {prev_density:.2f}, reverting)")
             placer.x_pos = x_saved
             placer.y_pos = y_saved

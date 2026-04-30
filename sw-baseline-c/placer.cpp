@@ -25,7 +25,7 @@ using ordered_json = nlohmann::ordered_json;
 
 static constexpr int MAX_NET_DEGREE = 100;
 static constexpr int DENSITY_BINS = 30;
-static constexpr int MAX_OUTER_ITER = 15;
+static constexpr int MAX_OUTER_ITER = 16;
 static constexpr int CG_MAX_ITER = 1000;
 static constexpr double CG_EPS = 1e-5;
 static constexpr double TARGET_DENSITY = 0.75;
@@ -95,10 +95,12 @@ struct CSRMatrix {
 };
 
 #ifdef USE_HW_CG
-#ifdef USE_FP_GOLDEN
-#include "cg_fp_golden.h"
+#if defined(USE_FP_GOLDEN)
+#include "cg_golden_driver.h"
+#elif defined(CG_DRIVER_FPGA_MMAP)
+#include "cg_fpga_mmap_driver.h"
 #else
-#include "cg_hw_driver.h"
+#include "cg_verilator_driver.h"
 #endif
 #endif
  
@@ -432,9 +434,12 @@ public:
     explicit Placer(const std::string& json_path) : nl(load_netlist(json_path)) {}
 
     void init_cell_positions() {
-        for (auto& [name, comp] : nl.components) {
-            comp.x = 0;
-            comp.y = 0;
+        double die_cx = (nl.die_area[0] + nl.die_area[2]) / 2.0;
+        double die_cy = (nl.die_area[1] + nl.die_area[3]) / 2.0;
+        for (int i = 0; i < nl.num_cells(); ++i) {
+            auto& comp = nl.components[nl.cell_names[i]];
+            comp.x = die_cx - nl.cell_widths[i]  / 2.0;
+            comp.y = die_cy - nl.cell_heights[i] / 2.0;
         }
     }
 
@@ -531,7 +536,8 @@ public:
         if (Q.n <= CGHwDriver::MAX_N) {
             hw_driver.solve(Q, c_x, c_y, x_pos, y_pos, CG_MAX_ITER, CG_EPS);
 #if !defined(USE_FP_GOLDEN)
-            cg_cycles.push_back(hw_driver.last_solve_cycles());
+            uint64_t cycles = hw_driver.last_solve_cycles();
+            if (cycles != 0) cg_cycles.push_back(cycles);
 #endif
         } else {
             fprintf(stderr, "Warning: n=%d > %d, falling back to software CG\n",
@@ -806,10 +812,20 @@ public:
 // -- Entry point --------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::fprintf(stderr, "Usage: %s <netlist.json>\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        std::fprintf(stderr, "Usage: %s <netlist.json> [max_outer_iter]\n", argv[0]);
         std::fprintf(stderr, "  e.g. %s DMA.json\n", argv[0]);
+        std::fprintf(stderr, "  e.g. %s DMA.json 5\n", argv[0]);
         return 1;
+    }
+
+    int max_iter = MAX_OUTER_ITER;
+    if (argc == 3) {
+        max_iter = std::atoi(argv[2]);
+        if (max_iter < 1) {
+            std::fprintf(stderr, "Error: max_outer_iter must be >= 1 (got %s)\n", argv[2]);
+            return 1;
+        }
     }
 
     auto placer_t0 = std::chrono::steady_clock::now();
@@ -833,8 +849,10 @@ int main(int argc, char* argv[]) {
 
     // Steps 3-4: Iterative spreading
     bool converged = false;
+    bool reverted = false;
+    int iters_kept = 0;
     double prev_density = placer.max_bin_density();
-    for (int iter = 1; iter <= MAX_OUTER_ITER; ++iter) {
+    for (int iter = 1; iter <= max_iter; ++iter) {
         std::printf("Iteration %d:\n", iter);
         placer.partition_and_anchor();
 
@@ -846,26 +864,36 @@ int main(int argc, char* argv[]) {
         std::printf("  HPWL: %.0f\n", placer.compute_hpwl());
 
         double new_density = placer.max_bin_density();
-        // Only revert once spreading has started working (density below
-        // 2x target). Early iterations often increase density temporarily.
-        if (prev_density < 2 * TARGET_DENSITY && new_density > prev_density) {
+        // Only revert once spreading has started working (density meaningfully
+        // close to target). Early iterations often increase density
+        // temporarily. The 1.5x factor matters for inits that start cells at
+        // the die center -- their initial density can already be near 2x
+        // target before any spreading happens, which would trip a looser
+        // threshold and end the placer after one iteration.
+        if (prev_density < 1.5 * TARGET_DENSITY && new_density > prev_density) {
             std::printf("  Max bin density: %.2f (worse than %.2f, reverting)\n",
                         new_density, prev_density);
             placer.x_pos = x_saved;
             placer.y_pos = y_saved;
+            reverted = true;
             break;
         }
         std::printf("  Max bin density: %.2f\n", new_density);
         prev_density = new_density;
+        iters_kept = iter;
         if (new_density <= TARGET_DENSITY) {
             std::printf("Overlap acceptable -- placement complete.\n");
             converged = true;
             break;
         }
     }
-    if (!converged) {
-        std::printf("Max iterations (%d) reached.\n", MAX_OUTER_ITER);
+    if (!converged && !reverted) {
+        std::printf("Max iterations (%d) reached.\n", max_iter);
     }
+    // Markers parsed by placer-sweep.py. Keep these lines stable.
+    std::printf("Outer iterations used: %d\n", iters_kept);
+    std::printf("Converged: %s\n", converged ? "true" : "false");
+    std::printf("Reverted: %s\n", reverted ? "true" : "false");
 
     // Write final output
     placer.update_components();

@@ -9,7 +9,7 @@ option(STATIC_BUILD "Build with static linking" OFF)
 set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
 
 add_executable(placer placer.cpp)
-target_compile_definitions(placer PRIVATE USE_HW_CG HW_FRAC_BITS=${FRAC_BITS})
+target_compile_definitions(placer PRIVATE USE_HW_CG CG_DRIVER_FPGA_MMAP HW_FRAC_BITS=${FRAC_BITS})
 
 # Share json.hpp with the software baseline to avoid duplicating ~1 MB
 # of vendored header.

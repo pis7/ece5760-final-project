@@ -522,20 +522,16 @@ module SPMVCtrl #(
 
   // From dpath
   input  logic [31:0]                    row_idx,
-  input  logic [31:0]                    j_addr_idx,          // next nnz to issue addrs for
-  input  logic [31:0]                    j_mac_idx,           // next nnz to MAC
-  input  logic                           pipe_phase,          // 0=val cyc, 1=col cyc
-  input  logic [1:0]                     pipe_warm,           // 0/1 prologue, 2 steady
+  input  logic [31:0]                    j_idx,
   input  logic [31:0]                    rp_lo,
   input  logic [31:0]                    rp_hi,
 
   // To dpath
-  output logic                           d_begin_op,          // reset row state
+  output logic                           d_begin_op,          // reset row/j state
   output logic                           d_capture_rplo,
   output logic                           d_capture_rphi,
-  output logic                           d_capture_rphi_next, // carry rp_hi -> rp_lo
-  output logic                           d_init_row,          // acc<-0, pipe state <- 0
-  output logic                           d_pipe_step,         // advance pipe_phase/warm/j_addr_idx
+  output logic                           d_capture_rphi_next, // carry rp_hi -> rp_lo, read new rp_hi
+  output logic                           d_init_row,          // acc <- 0, j_idx <- rp_lo
   output logic                           d_capture_val,
   output logic                           d_capture_col,
   output logic                           d_acc_en,            // MAC step
@@ -546,39 +542,31 @@ module SPMVCtrl #(
   output logic                           mem_rd_en
 );
 
-  // Two-cycle reads for prologue and inner-loop states: ADDR drives mem_addr;
-  // CAPT latches mem_rdata one cycle later.
+  // Two-cycle reads: ADDR state drives mem_addr; the CAPTURE state
+  // in the next cycle latches mem_rdata. We hold the same address
+  // across both cycles so Quartus sees a clean inferred timing path.
   //
-  // rp_lo / rp_hi collapse: only row 0 reads both rp_ptr[0] and rp_ptr[1].
-  // For rows 1..n-1, the previous row's rp_hi == this row's rp_lo, so we
-  // carry rp_hi -> rp_lo and read only the new rp_ptr[row+1] into rp_hi.
-  // States S_RPHI_ADDR_NEXT / S_RPHI_CAPT_NEXT replace the rp_lo prologue
-  // for non-first rows; saves 2 cycles per row except row 0.
-  //
-  // Inner loop is a 2-cyc/nnz overlapped pipeline (S_PIPE). On each cycle
-  // it alternates issuing val[k] and col[k] addresses while concurrently
-  // capturing the previous read into val_reg / col_reg and firing the MAC
-  // for the (k-1)th nnz. Per-row cost is 2*nnz + 2 cycles.
-  //
-  // History: two earlier 2-cyc pipelined attempts regressed tiny3 HPWL
-  // end-to-end while passing all 16 DPI tests bit-exact. Root cause was
-  // an off-by-one in the C++ M10K shim in cg_hw_driver.h: it sampled
-  // `on_chip_ram_address` AFTER the rising-edge eval, so it used the
-  // NEW state's decode instead of the address driven during the cycle
-  // that just ended. With serial 5-cyc/nnz the address held stable for
-  // 2 cycles so the bug was invisible; with single-cycle addresses the
-  // shim returned data for the wrong cycle and val_reg captured col[]
-  // bits. The shim has been fixed (sample pre-edge); this comment is
-  // here so a future debugger can find the explanation if a similar
-  // regression ever shows up again.
+  // NOTE: a pipelined version (2 cycles/nnz instead of 5) was attempted
+  // but caused correctness regressions on real placement benchmarks
+  // (tiny3) despite passing all 8 DPI golden tests bit-exact. Left the
+  // non-pipelined version in place for now; pipelining is a future
+  // optimization that needs a deeper correctness investigation.
 
+  // v3 rp_lo/rp_hi collapse on top of v2's serial inner loop. For row 0
+  // we walk RPLO_ADDR/CAPT then RPHI_ADDR/CAPT. For rows 1..n-1 the
+  // previous row's rp_hi is exactly this row's rp_lo, so we skip the
+  // rp_lo read and just carry rp_hi -> rp_lo while reading the new
+  // rp_ptr[row+1] into rp_hi (states S_RPHI_ADDR_NEXT / _CAPT_NEXT).
+  // Saves 2 cycles per row except row 0.
   typedef enum logic [3:0] {
     S_IDLE,
     S_RPLO_ADDR,        S_RPLO_CAPT,
     S_RPHI_ADDR,        S_RPHI_CAPT,
     S_RPHI_ADDR_NEXT,   S_RPHI_CAPT_NEXT,
     S_ROW_INIT,
-    S_PIPE,
+    S_VAL_ADDR,         S_VAL_CAPT,
+    S_COL_ADDR,         S_COL_CAPT,
+    S_ACC,
     S_EMIT,
     S_DONE
   } state_t;
@@ -596,7 +584,7 @@ module SPMVCtrl #(
     else     state <= next_state;
   end
 
-  // ---- Memory address + rd_en -------------------------------------------
+  // ---- Memory address + rd_en ---------------------------------------------
   always_comb begin
     mem_addr  = '0;
     mem_rd_en = 1'b0;
@@ -613,23 +601,19 @@ module SPMVCtrl #(
         mem_addr  = q_rowp_base + p_m10k_addr_bits'(row_idx) + p_m10k_addr_bits'(1);
         mem_rd_en = 1'b1;
       end
-      S_PIPE: begin
-        // Each cycle alternates between issuing val[k] and col[k] until
-        // we've issued addresses for every nnz in this row; after that
-        // the bus idles while the pipeline drains.
-        if (j_addr_idx < rp_hi) begin
-          mem_rd_en = 1'b1;
-          if (pipe_phase == 1'b0)
-            mem_addr = q_val_base + p_m10k_addr_bits'(j_addr_idx);
-          else
-            mem_addr = q_col_base + p_m10k_addr_bits'(j_addr_idx);
-        end
+      S_VAL_ADDR,  S_VAL_CAPT: begin
+        mem_addr  = q_val_base + p_m10k_addr_bits'(j_idx);
+        mem_rd_en = 1'b1;
+      end
+      S_COL_ADDR,  S_COL_CAPT: begin
+        mem_addr  = q_col_base + p_m10k_addr_bits'(j_idx);
+        mem_rd_en = 1'b1;
       end
       default: ;
     endcase
   end
 
-  // ---- Next-state -------------------------------------------------------
+  // ---- Next-state ---------------------------------------------------------
   always_comb begin
     next_state = state;
     case (state)
@@ -641,11 +625,18 @@ module SPMVCtrl #(
       S_RPHI_ADDR_NEXT:                             next_state = S_RPHI_CAPT_NEXT;
       S_RPHI_CAPT_NEXT:                             next_state = S_ROW_INIT;
       S_ROW_INIT:  if (rp_lo == rp_hi)              next_state = S_EMIT;
-                   else                             next_state = S_PIPE;
-      S_PIPE:      if (d_acc_en && (j_mac_idx + 1 == rp_hi))
-                                                    next_state = S_EMIT;
+                   else                             next_state = S_VAL_ADDR;
+      S_VAL_ADDR:                                   next_state = S_VAL_CAPT;
+      S_VAL_CAPT:                                   next_state = S_COL_ADDR;
+      S_COL_ADDR:                                   next_state = S_COL_CAPT;
+      S_COL_CAPT:                                   next_state = S_ACC;
+      S_ACC:       if (j_idx + 1 == rp_hi)          next_state = S_EMIT;
+                   else                             next_state = S_VAL_ADDR;
       S_EMIT:      if (output_handshake) begin
                      if (row_idx + 1 == n)          next_state = S_DONE;
+                     // Skip the rp_lo read for non-first rows: previous
+                     // row's rp_hi is exactly this row's rp_lo. Carry it
+                     // and read only the new row's rp_ptr[row+1].
                      else                           next_state = S_RPHI_ADDR_NEXT;
                    end
       S_DONE:                                       next_state = S_IDLE;
@@ -653,31 +644,13 @@ module SPMVCtrl #(
     endcase
   end
 
-  // ---- Control outputs to dpath -----------------------------------------
-  // In S_PIPE the pipeline runs every cycle. The capture/MAC strobes are a
-  // pure function of pipe_phase, pipe_warm, and j_mac_idx -- they fire
-  // automatically as soon as the pipeline is warm enough for each stage.
-  //
-  // Timing (entering S_PIPE with phase=0, warm=0):
-  //   cyc 0: phase=0, warm=0 -- issue val[0]
-  //   cyc 1: phase=1, warm=1 -- issue col[0]; capture val_reg<=val[0]
-  //   cyc 2: phase=0, warm=2 -- issue val[1]; capture col_reg<=col[0]
-  //   cyc 3: phase=1, warm=2 -- issue col[1]; val_reg<=val[1]; MAC nnz 0
-  //   ... (steady state 2 cyc/nnz; per-nnz row cost is 2*nnz + 2)
-  //
-  // val_reg is read by the MAC in the same cycle it gets overwritten with
-  // the next val[]. NBA semantics make this safe: the RHS of `acc <= ...`
-  // reads val_reg's pre-edge value, while `val_reg <= mem_rdata` writes
-  // its post-edge value. Both writes live in the same always_ff in
-  // SPMVDpath -- splitting them across multiple always_ff blocks would
-  // create an IEEE-1364 race that has bitten earlier pipelining attempts.
+  // ---- Control outputs to dpath ------------------------------------------
   always_comb begin
     d_begin_op          = 1'b0;
     d_capture_rplo      = 1'b0;
     d_capture_rphi      = 1'b0;
     d_capture_rphi_next = 1'b0;
     d_init_row          = 1'b0;
-    d_pipe_step         = 1'b0;
     d_capture_val       = 1'b0;
     d_capture_col       = 1'b0;
     d_acc_en            = 1'b0;
@@ -689,13 +662,9 @@ module SPMVCtrl #(
       S_RPHI_CAPT:      d_capture_rphi      = 1'b1;
       S_RPHI_CAPT_NEXT: d_capture_rphi_next = 1'b1;
       S_ROW_INIT:       d_init_row          = 1'b1;
-      S_PIPE: begin
-        d_pipe_step   = 1'b1;
-        d_capture_val = (pipe_phase == 1'b1) && (pipe_warm >= 2'd1);
-        d_capture_col = (pipe_phase == 1'b0) && (pipe_warm >= 2'd2);
-        d_acc_en      = (pipe_phase == 1'b1) && (pipe_warm >= 2'd2)
-                        && (j_mac_idx < rp_hi);
-      end
+      S_VAL_CAPT:       d_capture_val       = 1'b1;
+      S_COL_CAPT:       d_capture_col       = 1'b1;
+      S_ACC:            d_acc_en            = 1'b1;
       S_EMIT:           d_bump_row          = output_handshake;
       default: ;
     endcase
@@ -727,7 +696,6 @@ module SPMVDpath #(
   input  logic                           d_capture_rphi,
   input  logic                           d_capture_rphi_next,
   input  logic                           d_init_row,
-  input  logic                           d_pipe_step,
   input  logic                           d_capture_val,
   input  logic                           d_capture_col,
   input  logic                           d_acc_en,
@@ -735,10 +703,7 @@ module SPMVDpath #(
 
   // Exposed to Ctrl
   output logic [31:0]                    row_idx,
-  output logic [31:0]                    j_addr_idx,
-  output logic [31:0]                    j_mac_idx,
-  output logic                           pipe_phase,
-  output logic [1:0]                     pipe_warm,
+  output logic [31:0]                    j_idx,
   output logic [31:0]                    rp_lo,
   output logic [31:0]                    rp_hi,
 
@@ -772,60 +737,38 @@ module SPMVDpath #(
   assign ostream_msg_row_idx = row_idx;
   assign ostream_msg_row_val = p_total_bits'(acc);
 
-  // ALL pipeline-related state lives in this single always_ff block. Do
-  // NOT split val_reg / col_reg / acc / counters across multiple always_ff
-  // blocks: that would create an IEEE-1364 race when one block reads a
-  // signal another block writes on the same edge. Verilator may schedule
-  // such code consistently across simple tests yet diverge in larger
-  // workloads (this is one of the things that bit prior pipeline attempts).
   always_ff @(posedge clk) begin
     if (rst) begin
-      row_idx    <= '0;
-      j_addr_idx <= '0;
-      j_mac_idx  <= '0;
-      pipe_phase <= 1'b0;
-      pipe_warm  <= 2'd0;
-      rp_lo      <= '0;
-      rp_hi      <= '0;
-      val_reg    <= '0;
-      col_reg    <= '0;
-      acc        <= '0;
+      row_idx <= '0;
+      j_idx   <= '0;
+      rp_lo   <= '0;
+      rp_hi   <= '0;
+      val_reg <= '0;
+      col_reg <= '0;
+      acc     <= '0;
     end else begin
       if (d_begin_op) begin
         row_idx <= '0;
       end
       if (d_capture_rplo) rp_lo <= mem_rdata;
       if (d_capture_rphi) rp_hi <= mem_rdata;
-      // Non-first row prologue: previous row's rp_hi becomes new row's rp_lo,
-      // and the new rp_ptr[row+1] read from memory becomes the new rp_hi.
-      // Nonblocking semantics: rp_lo gets old rp_hi (start-of-cycle value),
-      // rp_hi gets mem_rdata (end-of-cycle value). Both fire same cycle.
+      // Non-first row prologue: previous row's rp_hi becomes new row's
+      // rp_lo, and the new rp_ptr[row+1] read from memory becomes the
+      // new rp_hi. NBA: rp_lo gets the pre-edge rp_hi (previous row's
+      // value) while rp_hi gets the new mem_rdata. Both fire same cycle.
       if (d_capture_rphi_next) begin
         rp_lo <= rp_hi;
         rp_hi <= mem_rdata;
       end
       if (d_init_row) begin
-        j_addr_idx <= rp_lo;
-        j_mac_idx  <= rp_lo;
-        pipe_phase <= 1'b0;
-        pipe_warm  <= 2'd0;
-        acc        <= '0;
-      end
-      if (d_pipe_step) begin
-        pipe_phase <= ~pipe_phase;
-        if (pipe_warm < 2'd2) pipe_warm <= pipe_warm + 2'd1;
-        // j_addr_idx advances after issuing both val and col for the
-        // current nnz, i.e. after the cycle where phase==1.
-        if (pipe_phase == 1'b1 && j_addr_idx < rp_hi)
-          j_addr_idx <= j_addr_idx + 32'd1;
+        j_idx <= rp_lo;
+        acc   <= '0;
       end
       if (d_capture_val) val_reg <= p_total_bits'($signed(mem_rdata));
       if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata));
       if (d_acc_en) begin
-        // Reading val_reg here grabs its pre-edge value, even when
-        // d_capture_val is also true this cycle (NBA semantics).
-        acc       <= acc + product_wide;
-        j_mac_idx <= j_mac_idx + 32'd1;
+        acc   <= acc + product_wide;
+        j_idx <= j_idx + 1;
       end
       if (d_bump_row) begin
         row_idx <= row_idx + 1;
@@ -874,12 +817,9 @@ module SPMV_seq #(
 );
 
   // Ctrl <-> Dpath connections
-  logic        d_begin_op, d_capture_rplo, d_capture_rphi, d_capture_rphi_next;
-  logic        d_init_row, d_pipe_step;
+  logic        d_begin_op, d_capture_rplo, d_capture_rphi, d_capture_rphi_next, d_init_row;
   logic        d_capture_val, d_capture_col, d_acc_en, d_bump_row;
-  logic [31:0] row_idx, j_addr_idx, j_mac_idx, rp_lo, rp_hi;
-  logic        pipe_phase;
-  logic [1:0]  pipe_warm;
+  logic [31:0] row_idx, j_idx, rp_lo, rp_hi;
 
   SPMVCtrl #(
     .p_m10k_addr_bits (p_m10k_addr_bits)
@@ -888,9 +828,8 @@ module SPMV_seq #(
     .istream_val, .istream_rdy,
     .ostream_val, .ostream_rdy,
     .n, .q_val_base, .q_col_base, .q_rowp_base,
-    .row_idx, .j_addr_idx, .j_mac_idx, .pipe_phase, .pipe_warm, .rp_lo, .rp_hi,
-    .d_begin_op, .d_capture_rplo, .d_capture_rphi, .d_capture_rphi_next,
-    .d_init_row, .d_pipe_step,
+    .row_idx, .j_idx, .rp_lo, .rp_hi,
+    .d_begin_op, .d_capture_rplo, .d_capture_rphi, .d_capture_rphi_next, .d_init_row,
     .d_capture_val, .d_capture_col, .d_acc_en, .d_bump_row,
     .mem_addr, .mem_rd_en
   );
@@ -905,10 +844,9 @@ module SPMV_seq #(
     .clk, .rst,
     .mem_rdata,
     .vec_rd_idx, .vec_rd_data,
-    .d_begin_op, .d_capture_rplo, .d_capture_rphi, .d_capture_rphi_next,
-    .d_init_row, .d_pipe_step,
+    .d_begin_op, .d_capture_rplo, .d_capture_rphi, .d_capture_rphi_next, .d_init_row,
     .d_capture_val, .d_capture_col, .d_acc_en, .d_bump_row,
-    .row_idx, .j_addr_idx, .j_mac_idx, .pipe_phase, .pipe_warm, .rp_lo, .rp_hi,
+    .row_idx, .j_idx, .rp_lo, .rp_hi,
     .ostream_msg_row_idx, .ostream_msg_row_val
   );
 

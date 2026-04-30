@@ -1,7 +1,7 @@
 """Parse LEF/DEF files into a unified netlist JSON file.
 
 Usage (from build directory):
-  uv run ../design-file-tools/lefdef-parser.py ../benchmarks/iccad04/DMA
+  uv run ../python-utils/lefdef-parser.py ../benchmarks/iccad04/DMA
   # Outputs <design_name>.json in the current directory.
 """
 
