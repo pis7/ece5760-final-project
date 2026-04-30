@@ -15,3 +15,6 @@ CLAUDE.md
 
 # Local files
 local/
+
+# Local secrets (board credentials)
+.env

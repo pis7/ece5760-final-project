@@ -13,8 +13,65 @@ Requires Python >= 3.14 with [uv](https://docs.astral.sh/uv/), CMake >= 3.10,
 a C++17 compiler, and (for RTL simulation) Verilator >= 5.
 
 ```bash
-uv sync
+uv sync                          # one-time: creates .venv/ and installs deps + entry points
+source .venv/bin/activate        # per-terminal: puts entry points (e.g. `visualizer`) on PATH
 ```
+
+`uv sync` only needs to be re-run when `pyproject.toml` / `uv.lock` change
+or after blowing away `.venv/`. If you'd rather not activate the venv, you
+can prefix any project command with `uv run` (e.g.
+`uv run visualizer DMA-final.json`) -- that works from any subdirectory of
+the repo.
+
+---
+
+## Quick start
+
+Every backend is reachable via the [`run-placer`](python-utils/run_placer.py)
+entry point from a fresh `build/` directory. The first positional picks
+the backend; pass `--sweep` to capture an iter-by-iter slideshow.
+
+```bash
+mkdir -p build && cd build
+
+# --- Software placers (no FPGA needed) ---
+uv run run-placer python ../benchmarks/iccad04/DMA      # Python baseline (algorithmic spec)
+uv run run-placer sw     ../benchmarks/iccad04/DMA      # C++ double-precision CG
+uv run run-placer golden ../benchmarks/iccad04/DMA      # C++ fixed-point golden CG (SW model of the FPGA)
+
+# --- Hardware-in-the-loop simulation (Verilator) ---
+uv run run-placer verilated    ../benchmarks/custom/tiny3   # Verilated RTL CG, default v3
+uv run run-placer verilated v2 ../benchmarks/custom/tiny3   # v2 reference
+
+# --- DE1-SoC board (needs .env with BOARD/PASS) ---
+uv run run-placer arm  ../benchmarks/iccad04/DMA        # cross-compile + run SW CG on the board's ARM
+uv run run-placer fpga ../benchmarks/iccad04/DMA        # cross-compile + run FPGA-accelerated CG
+
+# --- Iter sweep + slideshow (every mode except python) ---
+uv run run-placer verilated ../benchmarks/custom/tiny3 --sweep
+```
+
+Each run writes `<design>-initial.json` and `<design>-final.json` to the
+build dir. `arm`/`fpga` additionally need a gitignored `.env` at the repo
+root with `BOARD='root@<ip>'` and `PASS='...'` (see
+[Running the placer](#running-the-placer)). `fpga` also requires the CG
+bitstream to already be programmed onto the DE1-SoC.
+
+### Tests
+
+```bash
+# Software / functional model -- 19 cases vs scipy
+uv run fpga/fl/test/CGTop-test.py
+
+# Hardware / RTL -- 16 cases per version, bit-exact vs DPI golden
+mkdir -p build-tb && cd build-tb && cmake ../fpga/hw/test && make
+./VCGTop_tb_v1   # combinational reference
+./VCGTop_tb_v2   # synthesizable
+./VCGTop_tb_v3   # synth + Newton-Raphson FpDiv + SPMV row-prologue collapse
+```
+
+The Python suite should print `Result: 19/19 tests passed`; each RTL
+target should print `ALL 16 TESTS PASSED`.
 
 ---
 
@@ -62,14 +119,15 @@ the FPGA's `MAX_N=50` cap (each die is 500 DBU on a side, far below the
 
 ### The parser
 
-[`python-utils/lefdef-parser.py`](python-utils/lefdef-parser.py) is a
+[`python-utils/lefdef_parser.py`](python-utils/lefdef_parser.py) is a
 hand-rolled streaming tokenizer (no external LEF/DEF library) that walks
 both files once and emits a single unified JSON. Class-based with one
 public method per stage (`find_files`, `parse_lef`, `parse_def`,
-`write_json`).
+`write_json`). It is exposed as the `lefdef-parser` console script
+(see [`pyproject.toml`](pyproject.toml)):
 
 ```bash
-uv run ../python-utils/lefdef-parser.py ../benchmarks/iccad04/DMA
+uv run lefdef-parser ../benchmarks/iccad04/DMA
 # -> dma_top.json in the current directory
 ```
 
@@ -110,8 +168,8 @@ Defined in [`json_utils.py`](json_utils.py) as a set of dataclasses
 Both placers (Python and C++) read this format via `load_netlist()` and
 write the post-placement result to `<design>-initial.json` and
 `<design>-final.json` with the same schema, just with updated `x` and `y`
-on each component. The visualizer, the slideshow tool, and every backend in
-the table below all consume the same JSON -- there is no second
+on each component. The visualizer, the sweep slideshow, and every backend
+in the table below all consume the same JSON -- there is no second
 representation of the netlist anywhere in the project.
 
 ---
@@ -269,49 +327,61 @@ different driver.
 
 ## Running the placer
 
-From a fresh `build/` directory, [`run-placer.sh`](run-placer.sh) handles
-LEF/DEF parse + cmake + make + run for any backend:
+From a fresh `build/` directory, the [`run-placer`](python-utils/run_placer.py)
+console-script handles LEF/DEF parse + cmake + make + run for any backend
+(see [`pyproject.toml`](pyproject.toml) for the entry-point definition):
 
 ```bash
 mkdir -p build && cd build
 
-../run-placer.sh python    ../benchmarks/iccad04/DMA   # Python baseline
-../run-placer.sh sw        ../benchmarks/iccad04/DMA   # SW CG (double precision)
-../run-placer.sh golden    ../benchmarks/iccad04/DMA   # FP golden CG (SW)
-../run-placer.sh verilated ../benchmarks/iccad04/DMA   # Verilator CG (default v3)
-../run-placer.sh verilated ../benchmarks/custom/tiny3 v2
-../run-placer.sh arm       ../benchmarks/iccad04/DMA   # SW CG on the DE1-SoC ARM
-../run-placer.sh fpga      ../benchmarks/iccad04/DMA   # Real FPGA bitstream
-../run-placer.sh vis       DMA-final.json              # Tk visualizer
+uv run run-placer python    ../benchmarks/iccad04/DMA   # Python baseline
+uv run run-placer sw        ../benchmarks/iccad04/DMA   # SW CG (double precision)
+uv run run-placer golden    ../benchmarks/iccad04/DMA   # FP golden CG (SW)
+uv run run-placer verilated    ../benchmarks/iccad04/DMA   # Verilator CG (default v3)
+uv run run-placer verilated v2 ../benchmarks/custom/tiny3   # Verilator CG (v2 reference)
+uv run run-placer arm       ../benchmarks/iccad04/DMA   # SW CG on the DE1-SoC ARM
+uv run run-placer fpga      ../benchmarks/iccad04/DMA   # Real FPGA bitstream
 ```
 
-The `arm` and `fpga` modes need `arm-linux-gnueabihf-g++` and `sshpass` on
-the host and assume the board is reachable at the IP set near the top of
-[`run-placer.sh`](run-placer.sh). `fpga` additionally requires the CG
+The `arm` and `fpga` modes need `arm-linux-gnueabihf-g++` on the host;
+SSH/SCP to the board are handled in-process by
+[`fabric`](https://www.fabfile.org/) (no `sshpass` required). Board
+credentials (`BOARD`, `PASS`) are loaded from a gitignored [`.env`](.env)
+at the repo root -- create one with the board's SSH target and root
+password before running those modes. `fpga` additionally requires the CG
 bitstream to already be programmed onto the DE1-SoC.
+
+```bash
+# .env
+BOARD='root@10.253.17.19'
+PASS='greatpassword123!'
+```
 
 ## Iteration sweep + animation
 
-[`placer-sweep.sh`](placer-sweep.sh) accepts the same backend modes as
-`run-placer.sh` but runs the placer 16 times with `max_outer_iter` from 1 to
-16, captures `<design>-final-iter{NN}.json` for each step, renders a PNG of
-each via the visualizer, and stitches them into `<design>-sweep.gif` and
-`<design>-sweep.mp4`. It stops early as soon as the placer reports it
-needed fewer iterations than the cap (so the slideshow doesn't show
-duplicate frames).
+Pass `--sweep` to `run-placer` to run the placer 16 times with
+`max_outer_iter` from 1 to 16, capture `<design>-final-iter{NN}.json` for
+each step, render a PNG of each via the visualizer, and stitch them into
+`<design>-sweep.gif` and `<design>-sweep.mp4`. The sweep stops early as
+soon as the placer reports it needed fewer iterations than the cap (so
+the slideshow doesn't show duplicate frames). Sweep supports the same
+backends as a single run except `python`.
 
 ```bash
-../placer-sweep.sh sw ../benchmarks/iccad04/DMA
+uv run run-placer sw ../benchmarks/iccad04/DMA --sweep
 ```
 
 ## Visualizing a placement
 
 [`python-utils/visualizer.py`](python-utils/visualizer.py) opens a Tk window
 with the die outline, components (blue rectangles), and I/O pins (yellow
-dots). Hovering over a cell shows its name and macro type.
+dots). Hovering over a cell shows its name and macro type. It is exposed
+as a `visualizer` console-script entry point (see
+[`pyproject.toml`](pyproject.toml)) so `uv sync` makes it directly
+runnable:
 
 ```bash
-uv run ../python-utils/visualizer.py DMA-final.json
+uv run visualizer DMA-final.json
 ```
 
 Controls: scroll to zoom, drag to pan, F to fit-all, Q to quit. A
@@ -350,7 +420,7 @@ print `Result: 19/19 tests passed`.
 | [fpga/hw/test/](fpga/hw/test/)             | (4-6) Verilator + DPI golden testbench (one for each of v1/v2/v3) |
 | [fpga/hw/FPGATop.v](fpga/hw/FPGATop.v)     | DE1-SoC top: wires CGTop into Qsys SRAM + control PIOs |
 | [fpga/sw/](fpga/sw/)                       | (7) ARM-side driver and the `cg_fpga_mmap_driver.h` |
-| [python-utils/](python-utils/)             | LEF/DEF parser, visualizer, slideshow |
+| [python-utils/](python-utils/)             | LEF/DEF parser, visualizer, run-placer entry points |
 | [benchmarks/](benchmarks/)                 | ICCAD04 + custom designs |
 | [background-knowledge/](background-knowledge/) | Reference material on placement algorithms |
 

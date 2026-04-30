@@ -1,16 +1,14 @@
 """Parse LEF/DEF files into a unified netlist JSON file.
 
 Usage (from build directory):
-  uv run ../python-utils/lefdef-parser.py ../benchmarks/iccad04/DMA
+  uv run lefdef-parser ../benchmarks/iccad04/DMA
   # Outputs <design_name>.json in the current directory.
 """
 
 import glob
-import os
 import sys
 from io import TextIOWrapper
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from json_utils import (
     Component,
     IOPin,
