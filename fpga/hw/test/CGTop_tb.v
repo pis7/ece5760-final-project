@@ -35,6 +35,19 @@ module CGTop_tb;
   initial clk = 0;
   always #5 clk = ~clk;
 
+  // Optional VCD dump. Pass `+vcd=<path>` on the simulator command line
+  // to enable; with no plusarg, no waveform is written. Verilator must
+  // be built with --trace (set in fpga/hw/test/CMakeLists.txt) for this
+  // to do anything.
+  initial begin
+    string vcd_file;
+    if ($value$plusargs("dump-vcd=%s", vcd_file)) begin
+      $display("VCD: dumping to %s", vcd_file);
+      $dumpfile(vcd_file);
+      $dumpvars(0, CGTop_tb);
+    end
+  end
+
   // DUT signals
   logic        sw_go, sw_done, sw_done_ack;
   logic [31:0] max_iter, eps_sq, n;

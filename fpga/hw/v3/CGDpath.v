@@ -119,6 +119,21 @@ module CGDpath #(
   localparam IDX_W = $clog2(p_max_n);
 
   //----------------------------------------------------------------------
+  // RF select encodings (must match CGCtrl.v)
+  //----------------------------------------------------------------------
+  localparam [2:0] RF_D_REG     = 3'd0;
+  localparam [2:0] RF_R_REG     = 3'd1;
+  localparam [2:0] RF_X_VEC_REG = 3'd2;
+  localparam [2:0] RF_CX_REG    = 3'd3;
+  localparam [2:0] RF_Q_BUF     = 3'd4;
+
+  localparam [2:0] WD_MEM  = 3'd0;
+  localparam [2:0] WD_AXPY = 3'd1;
+  localparam [2:0] WD_SPMV = 3'd2;
+  localparam [2:0] WD_RDA  = 3'd3;
+  localparam [2:0] WD_VNS  = 3'd4;
+
+  //----------------------------------------------------------------------
   // Register files (flip-flop unpacked arrays)
   //----------------------------------------------------------------------
 
@@ -150,12 +165,12 @@ module CGDpath #(
     input logic [IDX_W-1:0]    idx
   );
     case (sel)
-      3'd0: rf_read = d_reg[idx];
-      3'd1: rf_read = r_reg[idx];
-      3'd2: rf_read = x_vec_reg[idx];
-      3'd3: rf_read = cx_reg[idx];
-      3'd4: rf_read = q_buf[idx];
-      default: rf_read = '0;
+      RF_D_REG:     rf_read = d_reg[idx];
+      RF_R_REG:     rf_read = r_reg[idx];
+      RF_X_VEC_REG: rf_read = x_vec_reg[idx];
+      RF_CX_REG:    rf_read = cx_reg[idx];
+      RF_Q_BUF:     rf_read = q_buf[idx];
+      default:      rf_read = '0;
     endcase
   endfunction
 
@@ -336,15 +351,15 @@ module CGDpath #(
   always_comb begin
     for (int k = 0; k < p_lanes; k++) wr_data[k] = '0;
     case (wdata_src)
-      3'd0: wr_data[0] = p_total_bits'($signed(mem_rdata));
-      3'd1: begin
+      WD_MEM:  wr_data[0] = p_total_bits'($signed(mem_rdata));
+      WD_AXPY: begin
         for (int k = 0; k < p_lanes; k++) wr_data[k] = axpy_z_lane[k];
       end
-      3'd2: wr_data[0] = spmv_row_val;
-      3'd3: begin
+      WD_SPMV: wr_data[0] = spmv_row_val;
+      WD_RDA: begin
         for (int k = 0; k < p_lanes; k++) wr_data[k] = rd_a_data[k];
       end
-      3'd4: begin
+      WD_VNS: begin
         for (int k = 0; k < p_lanes; k++)
           wr_data[k] = -(rd_a_data[k] + rd_b_data[k]);
       end
@@ -365,11 +380,11 @@ module CGDpath #(
       for (int k = 0; k < p_lanes; k++) begin
         if (we[k]) begin
           case (wr_sel)
-            3'd0: d_reg    [wr_idx[k]] <= wr_data[k];
-            3'd1: r_reg    [wr_idx[k]] <= wr_data[k];
-            3'd2: x_vec_reg[wr_idx[k]] <= wr_data[k];
-            3'd3: cx_reg   [wr_idx[k]] <= wr_data[k];
-            3'd4: q_buf    [wr_idx[k]] <= wr_data[k];
+            RF_D_REG:     d_reg    [wr_idx[k]] <= wr_data[k];
+            RF_R_REG:     r_reg    [wr_idx[k]] <= wr_data[k];
+            RF_X_VEC_REG: x_vec_reg[wr_idx[k]] <= wr_data[k];
+            RF_CX_REG:    cx_reg   [wr_idx[k]] <= wr_data[k];
+            RF_Q_BUF:     q_buf    [wr_idx[k]] <= wr_data[k];
             default: ;
           endcase
         end

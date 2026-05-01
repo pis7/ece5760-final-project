@@ -1,26 +1,22 @@
-// Monolithic CGCtrl FSM. Absorbs every sub-state of the CG solve that
-// used to be split between CGCtrl and CGDpath's orchestration FSM.
+// v4 CGCtrl: parallel x-AXPY and r-AXPY, plus fused S_VNS_R that
+// writes r_reg and d_reg in the same cycle.
 //
-// CGDpath is now a pure datapath (no FSM of its own): CGCtrl drives
-// every mux select, latch enable, and val/rdy handshake signal.
+// v3 ran S_AXPY_X_FEED then S_AXPY_R_FEED sequentially, sharing one
+// AXPY unit. v4 fires both updates in lockstep in a single merged
+// state S_AXPY_XR_FEED, using two AXPY units in CGDpath:
+//   u_axpy_x: x += alpha * d   (ADD, reads via rd_a/rd_b)
+//   u_axpy_r: r -= alpha * q   (SUB, reads via rd_c/rd_d)
+// Both consume the same alpha coef; both produce a p_lanes-wide z per
+// handshake; both write back through independent write paths in the
+// same cycle (x_vec_reg via primary, r_reg via secondary).
 //
-// A single `sel_y` register picks between x/y base addresses in the
-// inner sub-states so we don't double the state count for the second
-// solve.
+// The secondary write port is also reused in S_VNS_R: the computed
+// r_new = -(cx + q) is written into both r_reg (primary) and d_reg
+// (secondary) on the same cycle, eliminating v3's separate S_COPY_D
+// pass and saving num_groups cycles per CG run.
 //
-// p_lanes parallelism:
-//   - The streaming phases (VDOT feeds, AXPY feeds, VNS, COPY_D) use
-//     stream_idx as a *group* counter, 0..num_groups-1 where
-//     num_groups = ceil(n/p_lanes). Each cycle/handshake covers
-//     p_lanes elements.
-//   - The per-element phases (LD, WB, SPMV COLLECT) still use
-//     stream_idx as an element counter, 0..n-1.
-//   - For group phases CGCtrl drives the p_lanes-wide RF ports via
-//     group_idx_packed/group_in_valid (input side) and
-//     group_out_packed/group_out_valid (AXPY output side). Out-of-n
-//     lanes have valid=0 so CGDpath returns zero on reads and we[k]
-//     is gated off for writes.
-//   - For element phases CGCtrl uses lane 0 only (other lanes masked).
+// S_AXPY_D_FEED is unchanged structurally and reuses u_axpy_x only;
+// u_axpy_r idles outside S_AXPY_XR_FEED.
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -61,7 +57,8 @@ module CGCtrl #(
   output logic [31:0]                 ctrl_mem_wdata,
   output logic                        ctrl_mem_src_spmv,
 
-  // RF read ports (p_lanes-wide)
+  // RF read ports (p_lanes-wide). rd_a/rd_b are shared across all states;
+  // rd_c/rd_d are only used in S_AXPY_XR_FEED to feed u_axpy_r.
   output logic [2:0]                              rd_a_sel,
   output logic [p_lanes*$clog2(p_max_n)-1:0]      rd_a_idx_packed,
   output logic [p_lanes-1:0]                      rd_a_valid,
@@ -72,21 +69,45 @@ module CGCtrl #(
   output logic [p_lanes-1:0]                      rd_b_valid,
   input  logic [p_lanes*p_total_bits-1:0]         rd_b_data_packed,
 
+  output logic [2:0]                              rd_c_sel,
+  output logic [p_lanes*$clog2(p_max_n)-1:0]      rd_c_idx_packed,
+  output logic [p_lanes-1:0]                      rd_c_valid,
+  input  logic [p_lanes*p_total_bits-1:0]         rd_c_data_packed,
+
+  output logic [2:0]                              rd_d_sel,
+  output logic [p_lanes*$clog2(p_max_n)-1:0]      rd_d_idx_packed,
+  output logic [p_lanes-1:0]                      rd_d_valid,
+  input  logic [p_lanes*p_total_bits-1:0]         rd_d_data_packed,
+
   output logic [2:0]                              rd_vec_sel,
 
-  // RF write port (p_lanes-wide)
+  // Primary RF write port (p_lanes-wide)
   output logic [2:0]                              wr_sel,
   output logic [p_lanes*$clog2(p_max_n)-1:0]      wr_idx_ctrl_packed,
   output logic                                    wr_idx_src_spmv,
   output logic [p_lanes-1:0]                      we,
   output logic [2:0]                              wdata_src,
 
+  // Secondary RF write port (p_lanes-wide). Shares the primary
+  // wr_idx_ctrl_packed (callers always retire the same group on both ports).
+  // Used in S_AXPY_XR_FEED (writes axpy_r_z_lane to r_reg) and in
+  // S_VNS_R (writes -(cx+q) to d_reg in parallel with the primary r_reg
+  // write, eliminating v3's separate S_COPY_D pass).
+  output logic [2:0]                              wr_sel_sec,
+  output logic [2:0]                              wdata_src_sec,
+  output logic [p_lanes-1:0]                      we_sec,
+
   // Scalar latches
   output logic                               latch_dq,
   output logic                               latch_rr_new,
   output logic                               latch_alpha,
   output logic                               latch_beta,
+  // refresh_rr_reg copies rr_new_latched -> rr_reg (used after the
+  // VDOT_RR -> RUN_CHECK update). init_rr_reg bypasses rr_new_latched
+  // and writes rr_reg directly from vdot_result, used in S_VDOT_INIT_FEED
+  // so the initial rr lands in rr_reg the same cycle vdot finishes.
   output logic                               refresh_rr_reg,
+  output logic                               init_rr_reg,
   output logic                               bump_iter,
   output logic                               reset_iter,
 
@@ -96,11 +117,20 @@ module CGCtrl #(
   input  logic                               vdot_ostream_val,
   output logic                               vdot_ostream_rdy,
 
-  output logic                               axpy_istream_val,
-  input  logic                               axpy_istream_rdy,
-  input  logic                               axpy_ostream_val,
-  output logic                               axpy_ostream_rdy,
-  output logic                               axpy_mode,
+  // AXPY x: handles x update (S_AXPY_XR_FEED) and d update (S_AXPY_D_FEED).
+  // Mode is hard-wired to ADD inside CGDpath; coef source is shared.
+  output logic                               axpy_x_istream_val,
+  input  logic                               axpy_x_istream_rdy,
+  input  logic                               axpy_x_ostream_val,
+  output logic                               axpy_x_ostream_rdy,
+
+  // AXPY r: handles r update (S_AXPY_XR_FEED only). Mode is hard-wired to SUB.
+  output logic                               axpy_r_istream_val,
+  input  logic                               axpy_r_istream_rdy,
+  input  logic                               axpy_r_ostream_val,
+  output logic                               axpy_r_ostream_rdy,
+
+  // Shared AXPY coef select (both u_axpy_x and u_axpy_r see the same coef).
   output logic                               axpy_coef_src_beta,
 
   output logic                               spmv_istream_val,
@@ -118,12 +148,10 @@ module CGCtrl #(
 
   localparam IDX_W       = $clog2(p_max_n);
   localparam CLOG2_LANES = $clog2(p_lanes);
-  // Narrow width for n, n-1, num_groups, num_groups-1, stream/out indices
-  // and e_in/e_out. n is in [0..p_max_n], so $clog2(p_max_n+1) bits suffice
-  // (6 bits for p_max_n=50 vs the original 32). Also the natural bound for
-  // stream_elem_base/e_in since (num_groups-1)*p_lanes + p_lanes-1 < p_max_n
-  // + p_lanes <= 2^N_W for typical configs (e.g. 50+4=54 fits in 6 bits).
   localparam N_W         = $clog2(p_max_n + 1);
+  // BANK_SEL_W = max(CLOG2_LANES, 1) so we can name a lane id even
+  // when p_lanes == 1 (CLOG2_LANES = 0). Mirrors CGDpath.
+  localparam BANK_SEL_W  = (CLOG2_LANES == 0) ? 1 : CLOG2_LANES;
 
   //----------------------------------------------------------------------
   // RF select encodings (match CGDpath's rf_read function)
@@ -134,11 +162,11 @@ module CGCtrl #(
   localparam [2:0] RF_CX_REG    = 3'd3;
   localparam [2:0] RF_Q_BUF     = 3'd4;
 
-  localparam [2:0] WD_MEM  = 3'd0;
-  localparam [2:0] WD_AXPY = 3'd1;
-  localparam [2:0] WD_SPMV = 3'd2;
-  localparam [2:0] WD_RDA  = 3'd3;
-  localparam [2:0] WD_VNS  = 3'd4;
+  localparam [2:0] WD_MEM    = 3'd0;
+  localparam [2:0] WD_AXPY   = 3'd1;
+  localparam [2:0] WD_SPMV   = 3'd2;
+  localparam [2:0] WD_VNS    = 3'd4;
+  localparam [2:0] WD_AXPY_R = 3'd5;
 
   //----------------------------------------------------------------------
   // State enum
@@ -155,11 +183,12 @@ module CGCtrl #(
     S_SPMV_INIT_FIRE,
     S_SPMV_INIT_COLLECT,
 
+    // Fused: writes r_reg (primary) and d_reg (secondary) with the
+    // same -(cx+q) value -- replaces v3's S_VNS_R + S_COPY_D pair.
     S_VNS_R,
-    S_COPY_D,
 
+    // init_rr_reg fires on vdot_out_hs to bypass S_RR_REG_COPY.
     S_VDOT_INIT_FEED,
-    S_RR_REG_COPY,
 
     S_SPMV_RUN_FIRE,
     S_SPMV_RUN_COLLECT,
@@ -169,8 +198,8 @@ module CGCtrl #(
     S_DIV_A_SEND,
     S_DIV_A_RECV,
 
-    S_AXPY_X_FEED,
-    S_AXPY_R_FEED,
+    // Merged x and r AXPY: x += alpha*d || r -= alpha*q (lockstep).
+    S_AXPY_XR_FEED,
 
     S_VDOT_RR_FEED,
 
@@ -196,28 +225,22 @@ module CGCtrl #(
   logic [$clog2(p_max_n+1)-1:0]       out_idx;
 
   //----------------------------------------------------------------------
-  // Handshake wires
+  // Handshake wires. We use u_axpy_x's handshakes as canonical for FSM
+  // and counter control: both AXPY units run lockstep (same n, p_lanes,
+  // identical inputs, same handshake driver) so axpy_r_*_hs are
+  // equivalent by construction.
   //----------------------------------------------------------------------
-  wire vdot_in_hs   = vdot_istream_val  && vdot_istream_rdy;
-  wire vdot_out_hs  = vdot_ostream_val  && vdot_ostream_rdy;
-  wire axpy_in_hs   = axpy_istream_val  && axpy_istream_rdy;
-  wire axpy_out_hs  = axpy_ostream_val  && axpy_ostream_rdy;
-  wire spmv_in_hs   = spmv_istream_val  && spmv_istream_rdy;
-  wire spmv_out_hs  = spmv_ostream_val  && spmv_ostream_rdy;
-  wire fpdiv_in_hs  = fpdiv_istream_val && fpdiv_istream_rdy;
-  wire fpdiv_out_hs = fpdiv_ostream_val && fpdiv_ostream_rdy;
+  wire vdot_in_hs    = vdot_istream_val   && vdot_istream_rdy;
+  wire vdot_out_hs   = vdot_ostream_val   && vdot_ostream_rdy;
+  wire axpy_x_in_hs  = axpy_x_istream_val && axpy_x_istream_rdy;
+  wire axpy_x_out_hs = axpy_x_ostream_val && axpy_x_ostream_rdy;
+  wire spmv_in_hs    = spmv_istream_val   && spmv_istream_rdy;
+  wire spmv_out_hs   = spmv_ostream_val   && spmv_ostream_rdy;
+  wire fpdiv_in_hs   = fpdiv_istream_val  && fpdiv_istream_rdy;
+  wire fpdiv_out_hs  = fpdiv_ostream_val  && fpdiv_ostream_rdy;
 
   //----------------------------------------------------------------------
   // Registered narrow forms of n, n-1, num_groups, and num_groups-1.
-  //
-  // The cg_n PIO arrives unregistered at this module's `n` port and used
-  // to fan into 32-bit comparators / adders / shifters across the FSM
-  // next-state logic and the per-lane group_in_valid generator. Quartus
-  // reported a -19 ns WNS at 50 MHz on cg_n -> cx_reg as a result.
-  //
-  // Capturing n once at S_IDLE -> S_PREP and reusing the registered
-  // N_W-bit forms (a) breaks the long combinational chain off the PIO
-  // and (b) shrinks every dependent comparator from 32 bits to 6 bits.
   //----------------------------------------------------------------------
   logic [N_W-1:0] n_narrow;
   logic [N_W-1:0] num_groups_calc;
@@ -246,7 +269,7 @@ module CGCtrl #(
   end
 
   //----------------------------------------------------------------------
-  // Convergence test (matches v1 semantics)
+  // Convergence test
   //----------------------------------------------------------------------
   logic signed [p_acc_bits-1:0] eps_sq_wide;
   assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));
@@ -267,18 +290,19 @@ module CGCtrl #(
                              : p_m10k_addr_bits'(p_cx_x_base_addr);
 
   //----------------------------------------------------------------------
-  // Per-lane index / valid helpers.
-  //  group_* are driven from stream_idx (input side) and out_idx (AXPY
-  //  output side) with elem = (group << CLOG2_LANES) + k.
-  //  single_* are lane-0-only forms for LD / WB / SPMV-COLLECT which
-  //  use stream_idx directly as an element index.
+  // Per-lane index / valid helpers
   //----------------------------------------------------------------------
   logic [p_lanes*IDX_W-1:0] group_in_idx_packed;
   logic [p_lanes-1:0]       group_in_valid;
   logic [p_lanes*IDX_W-1:0] group_out_idx_packed;
   logic [p_lanes-1:0]       group_out_valid;
+  // Single-element accesses go through whichever lane owns the bank for
+  // stream_idx (= stream_idx mod p_lanes). single_idx_packed replicates
+  // stream_idx so any active lane sees the same bank-internal address;
+  // single_active_mask gates the write/valid to just that lane.
   logic [p_lanes*IDX_W-1:0] single_idx_packed;
-  logic [p_lanes-1:0]       single_lane0_mask;
+  logic [p_lanes-1:0]       single_active_mask;
+  logic [BANK_SEL_W-1:0]    single_active_lane;
 
   logic [N_W-1:0] stream_elem_base;
   logic [N_W-1:0] out_elem_base;
@@ -307,17 +331,32 @@ module CGCtrl #(
     end
   end
 
-  // Single-element packed form: lane 0 holds stream_idx, others are don't-care.
+  // Active lane for single-element accesses = stream_idx mod p_lanes.
+  // The mask is tight: only the active lane drives we/valid. The packed
+  // index replicates stream_idx so any lane's bank-internal address
+  // (idx >> CLOG2_LANES) is correct.
+  assign single_active_lane = stream_idx[BANK_SEL_W-1:0]
+                              & BANK_SEL_W'(unsigned'(p_lanes - 1));
+
   always_comb begin
-    single_idx_packed             = '0;
-    single_idx_packed[IDX_W-1:0]  = stream_idx[IDX_W-1:0];
-    single_lane0_mask             = '0;
-    single_lane0_mask[0]          = 1'b1;
+    single_idx_packed  = '0;
+    single_active_mask = '0;
+    for (int k = 0; k < p_lanes; k++) begin
+      single_idx_packed[(k+1)*IDX_W-1 -: IDX_W] = stream_idx[IDX_W-1:0];
+      if (BANK_SEL_W'(unsigned'(k)) == single_active_lane)
+        single_active_mask[k] = 1'b1;
+    end
   end
 
-  // Lane-0 extract of rd_a_data_packed for writing x_vec to SRAM in WB.
-  logic signed [p_total_bits-1:0] rd_a_data_lane0;
-  assign rd_a_data_lane0 = $signed(rd_a_data_packed[p_total_bits-1:0]);
+  // Active-lane extract of rd_a_data_packed for writing x_vec to SRAM in WB.
+  logic signed [p_total_bits-1:0] rd_a_data_active;
+  always_comb begin
+    rd_a_data_active = '0;
+    for (int k = 0; k < p_lanes; k++)
+      if (BANK_SEL_W'(unsigned'(k)) == single_active_lane)
+        rd_a_data_active =
+          $signed(rd_a_data_packed[(k+1)*p_total_bits-1 -: p_total_bits]);
+  end
 
   //----------------------------------------------------------------------
   // State register
@@ -351,16 +390,11 @@ module CGCtrl #(
       S_SPMV_INIT_COLLECT:
                          if (spmv_out_hs && stream_idx == n_minus_1_reg)          next_state = S_VNS_R;
 
-      // r_reg[i] = -(cx[i] + q_buf[i]); then copy r_reg -> d_reg
-      // (p_lanes/cycle, num_groups cycles)
-      S_VNS_R:           if (stream_idx == num_groups_minus_1_reg)                next_state = S_COPY_D;
-      S_COPY_D:          if (stream_idx == num_groups_minus_1_reg)                next_state = S_VDOT_INIT_FEED;
+      // r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i])  (fused VNS + COPY_D)
+      S_VNS_R:           if (stream_idx == num_groups_minus_1_reg)                next_state = S_VDOT_INIT_FEED;
 
-      // VDOT r.r -> rr_new_latched
-      S_VDOT_INIT_FEED:  if (vdot_out_hs)                                     next_state = S_RR_REG_COPY;
-
-      // rr_reg <= rr_new_latched (initial rr)
-      S_RR_REG_COPY:                                                          next_state = S_SPMV_RUN_FIRE;
+      // VDOT r.r -> rr_new_latched, and (via init_rr_reg) -> rr_reg
+      S_VDOT_INIT_FEED:  if (vdot_out_hs)                                     next_state = S_SPMV_RUN_FIRE;
 
       // RUN: SPMV (Q * d_reg) -> q_buf (1 row / handshake)
       S_SPMV_RUN_FIRE:   if (spmv_in_hs)                                      next_state = S_SPMV_RUN_COLLECT;
@@ -372,13 +406,10 @@ module CGCtrl #(
 
       // alpha = rr_reg / dq
       S_DIV_A_SEND:      if (fpdiv_in_hs)                                     next_state = S_DIV_A_RECV;
-      S_DIV_A_RECV:      if (fpdiv_out_hs)                                    next_state = S_AXPY_X_FEED;
+      S_DIV_A_RECV:      if (fpdiv_out_hs)                                    next_state = S_AXPY_XR_FEED;
 
-      // x_vec_reg[i] += alpha * d_reg[i]
-      S_AXPY_X_FEED:     if (axpy_out_hs && out_idx == num_groups_minus_1_reg)    next_state = S_AXPY_R_FEED;
-
-      // r_reg[i] -= alpha * q_buf[i]
-      S_AXPY_R_FEED:     if (axpy_out_hs && out_idx == num_groups_minus_1_reg)    next_state = S_VDOT_RR_FEED;
+      // Parallel: x_vec[i] += alpha*d[i] || r[i] -= alpha*q[i]
+      S_AXPY_XR_FEED:    if (axpy_x_out_hs && out_idx == num_groups_minus_1_reg)  next_state = S_VDOT_RR_FEED;
 
       // rr_new = r_new . r_new
       S_VDOT_RR_FEED:    if (vdot_out_hs)                                     next_state = S_DIV_B_SEND;
@@ -388,17 +419,15 @@ module CGCtrl #(
       S_DIV_B_RECV:      if (fpdiv_out_hs)                                    next_state = S_AXPY_D_FEED;
 
       // d_reg[i] = r_reg[i] + beta * d_reg[i]
-      S_AXPY_D_FEED:     if (axpy_out_hs && out_idx == num_groups_minus_1_reg)    next_state = S_RUN_CHECK;
+      S_AXPY_D_FEED:     if (axpy_x_out_hs && out_idx == num_groups_minus_1_reg)  next_state = S_RUN_CHECK;
 
-      // Convergence check + iter bump
       S_RUN_CHECK:       if (run_converged)                                   next_state = S_WB_WRITE;
                          else                                                 next_state = S_SPMV_RUN_FIRE;
 
-      // WB phase: stream x_vec_reg -> cg_mem[x_base..] (1 elem / cycle)
       S_WB_WRITE: begin
         if (stream_idx == n_minus_1_reg) begin
           if (sel_y)   next_state = S_CG_DONE;
-          else         next_state = S_LD_X_ADDR;  // swap to Y phase
+          else         next_state = S_LD_X_ADDR;
         end
       end
 
@@ -410,21 +439,17 @@ module CGCtrl #(
   //----------------------------------------------------------------------
   // sel_y, stream_idx, out_idx updates
   //----------------------------------------------------------------------
-  // A "phase" groups states that share the same streaming counter.
   function automatic logic [4:0] phase_of(state_t s);
     case (s)
       S_LD_X_ADDR,         S_LD_X_CAPT:          phase_of = 5'd1;
       S_LD_CX_ADDR,        S_LD_CX_CAPT:         phase_of = 5'd2;
       S_SPMV_INIT_FIRE,    S_SPMV_INIT_COLLECT:  phase_of = 5'd3;
       S_VNS_R:                                   phase_of = 5'd4;
-      S_COPY_D:                                  phase_of = 5'd5;
       S_VDOT_INIT_FEED:                          phase_of = 5'd6;
-      S_RR_REG_COPY:                             phase_of = 5'd7;
       S_SPMV_RUN_FIRE,     S_SPMV_RUN_COLLECT:   phase_of = 5'd8;
       S_VDOT_DQ_FEED:                            phase_of = 5'd9;
       S_DIV_A_SEND,        S_DIV_A_RECV:         phase_of = 5'd10;
-      S_AXPY_X_FEED:                             phase_of = 5'd11;
-      S_AXPY_R_FEED:                             phase_of = 5'd12;
+      S_AXPY_XR_FEED:                            phase_of = 5'd11;
       S_VDOT_RR_FEED:                            phase_of = 5'd13;
       S_DIV_B_SEND,        S_DIV_B_RECV:         phase_of = 5'd14;
       S_AXPY_D_FEED:                             phase_of = 5'd15;
@@ -452,29 +477,24 @@ module CGCtrl #(
         stream_idx <= '0;
       else begin
         case (state)
-          // Per-element phases: increment every cycle
           S_LD_X_CAPT, S_LD_CX_CAPT, S_WB_WRITE:
             stream_idx <= stream_idx + 1;
-          // SPMV collect: increment per row handshake
           S_SPMV_INIT_COLLECT, S_SPMV_RUN_COLLECT:
             if (spmv_out_hs) stream_idx <= stream_idx + 1;
-          // Group phases: increment every cycle (VNS/COPY_D -- comb op)
-          S_VNS_R, S_COPY_D:
+          S_VNS_R:
             stream_idx <= stream_idx + 1;
-          // Group phases: increment per VDOT input handshake
           S_VDOT_INIT_FEED, S_VDOT_DQ_FEED, S_VDOT_RR_FEED:
             if (vdot_in_hs) stream_idx <= stream_idx + 1;
-          // Group phases: increment per AXPY input handshake
-          S_AXPY_X_FEED, S_AXPY_R_FEED, S_AXPY_D_FEED:
-            if (axpy_in_hs) stream_idx <= stream_idx + 1;
+          S_AXPY_XR_FEED, S_AXPY_D_FEED:
+            if (axpy_x_in_hs) stream_idx <= stream_idx + 1;
           default: ;
         endcase
       end
 
       if (reset_counters)
         out_idx <= '0;
-      else if (axpy_out_hs &&
-               (state == S_AXPY_X_FEED || state == S_AXPY_R_FEED || state == S_AXPY_D_FEED))
+      else if (axpy_x_out_hs &&
+               (state == S_AXPY_XR_FEED || state == S_AXPY_D_FEED))
         out_idx <= out_idx + 1;
     end
   end
@@ -483,44 +503,51 @@ module CGCtrl #(
   // Output defaults + per-state drive
   //----------------------------------------------------------------------
   always_comb begin
-    // ARM
     sw_done = 1'b0;
 
-    // Memory bus (CGCtrl side)
     ctrl_mem_addr     = '0;
     ctrl_mem_wr_en    = 1'b0;
     ctrl_mem_wdata    = '0;
     ctrl_mem_src_spmv = 1'b0;
 
-    // RF read/write
     rd_a_sel            = '0;
     rd_a_idx_packed     = '0;
     rd_a_valid          = '0;
     rd_b_sel            = '0;
     rd_b_idx_packed     = '0;
     rd_b_valid          = '0;
+    rd_c_sel            = '0;
+    rd_c_idx_packed     = '0;
+    rd_c_valid          = '0;
+    rd_d_sel            = '0;
+    rd_d_idx_packed     = '0;
+    rd_d_valid          = '0;
     rd_vec_sel          = RF_D_REG;
+
     wr_sel              = '0;
     wr_idx_ctrl_packed  = '0;
     wr_idx_src_spmv     = 1'b0;
     we                  = '0;
     wdata_src           = '0;
+    wr_sel_sec          = '0;
+    wdata_src_sec       = '0;
+    we_sec              = '0;
 
-    // Scalar latches
     latch_dq          = 1'b0;
     latch_rr_new      = 1'b0;
     latch_alpha       = 1'b0;
     latch_beta        = 1'b0;
     refresh_rr_reg    = 1'b0;
+    init_rr_reg       = 1'b0;
     bump_iter         = 1'b0;
     reset_iter        = 1'b0;
 
-    // Submodule handshakes
     vdot_istream_val      = 1'b0;
     vdot_ostream_rdy      = 1'b0;
-    axpy_istream_val      = 1'b0;
-    axpy_ostream_rdy      = 1'b0;
-    axpy_mode             = 1'b0;
+    axpy_x_istream_val    = 1'b0;
+    axpy_x_ostream_rdy    = 1'b0;
+    axpy_r_istream_val    = 1'b0;
+    axpy_r_ostream_rdy    = 1'b0;
     axpy_coef_src_beta    = 1'b0;
     spmv_istream_val      = 1'b0;
     spmv_ostream_rdy      = 1'b0;
@@ -533,7 +560,6 @@ module CGCtrl #(
       S_IDLE:            ;
       S_PREP:            reset_iter = 1'b1;
 
-      // LD x (lane 0 only): ADDR drives mem_addr, CAPT captures mem_rdata
       S_LD_X_ADDR: begin
         ctrl_mem_addr = x_base_sel + p_m10k_addr_bits'(stream_idx);
       end
@@ -541,7 +567,7 @@ module CGCtrl #(
         ctrl_mem_addr      = x_base_sel + p_m10k_addr_bits'(stream_idx);
         wr_sel             = RF_X_VEC_REG;
         wr_idx_ctrl_packed = single_idx_packed;
-        we                 = single_lane0_mask;
+        we                 = single_active_mask;
         wdata_src          = WD_MEM;
       end
 
@@ -552,11 +578,10 @@ module CGCtrl #(
         ctrl_mem_addr      = cx_base_sel + p_m10k_addr_bits'(stream_idx);
         wr_sel             = RF_CX_REG;
         wr_idx_ctrl_packed = single_idx_packed;
-        we                 = single_lane0_mask;
+        we                 = single_active_mask;
         wdata_src          = WD_MEM;
       end
 
-      // SPMV INIT (vec = x_vec_reg): q_buf[row] = row_val
       S_SPMV_INIT_FIRE: begin
         ctrl_mem_src_spmv = 1'b1;
         spmv_istream_val  = 1'b1;
@@ -572,7 +597,9 @@ module CGCtrl #(
         we[0]             = spmv_out_hs;
       end
 
-      // VNS: r_reg[i] = -(cx_reg[i] + q_buf[i]) (p_lanes/cycle)
+      // Fused VNS + COPY_D: r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i]).
+      // Primary writes r_reg via the WD_VNS mux; secondary writes the
+      // same value to d_reg by selecting WD_VNS through wdata_src_sec.
       S_VNS_R: begin
         rd_a_sel           = RF_CX_REG;
         rd_a_idx_packed    = group_in_idx_packed;
@@ -584,20 +611,11 @@ module CGCtrl #(
         wr_idx_ctrl_packed = group_in_idx_packed;
         we                 = group_in_valid;
         wdata_src          = WD_VNS;
+        wr_sel_sec         = RF_D_REG;
+        wdata_src_sec      = WD_VNS;
+        we_sec             = group_in_valid;
       end
 
-      // Copy r_reg -> d_reg (p_lanes/cycle)
-      S_COPY_D: begin
-        rd_a_sel           = RF_R_REG;
-        rd_a_idx_packed    = group_in_idx_packed;
-        rd_a_valid         = group_in_valid;
-        wr_sel             = RF_D_REG;
-        wr_idx_ctrl_packed = group_in_idx_packed;
-        we                 = group_in_valid;
-        wdata_src          = WD_RDA;
-      end
-
-      // VDOT r.r for INIT
       S_VDOT_INIT_FEED: begin
         rd_a_sel         = RF_R_REG;
         rd_a_idx_packed  = group_in_idx_packed;
@@ -608,12 +626,9 @@ module CGCtrl #(
         vdot_istream_val = (stream_idx < num_groups_reg);
         vdot_ostream_rdy = 1'b1;
         latch_rr_new     = vdot_out_hs;
+        init_rr_reg      = vdot_out_hs;  // bypass S_RR_REG_COPY: rr_reg <= vdot_result this cycle
       end
 
-      // rr_reg <= rr_new_latched (initial rr)
-      S_RR_REG_COPY: refresh_rr_reg = 1'b1;
-
-      // SPMV RUN (vec = d_reg)
       S_SPMV_RUN_FIRE: begin
         ctrl_mem_src_spmv = 1'b1;
         spmv_istream_val  = 1'b1;
@@ -629,7 +644,6 @@ module CGCtrl #(
         we[0]             = spmv_out_hs;
       end
 
-      // VDOT d . q -> dq_latched
       S_VDOT_DQ_FEED: begin
         rd_a_sel         = RF_D_REG;
         rd_a_idx_packed  = group_in_idx_packed;
@@ -642,54 +656,48 @@ module CGCtrl #(
         latch_dq         = vdot_out_hs;
       end
 
-      // alpha = rr_reg / dq
       S_DIV_A_SEND: begin
         fpdiv_istream_val = 1'b1;
-        fpdiv_a_src_rrnew = 1'b0;  // rr_reg
-        fpdiv_b_src_rr    = 1'b0;  // dq_latched
+        fpdiv_a_src_rrnew = 1'b0;
+        fpdiv_b_src_rr    = 1'b0;
       end
       S_DIV_A_RECV: begin
         fpdiv_ostream_rdy = 1'b1;
         latch_alpha       = fpdiv_out_hs;
       end
 
-      // AXPY X: x_vec[i] += alpha * d[i]
-      S_AXPY_X_FEED: begin
+      // Parallel x and r AXPY in one merged state.
+      // u_axpy_x: x_vec += alpha*d   (rd_a=x_vec, rd_b=d)
+      // u_axpy_r: r    -= alpha*q   (rd_c=r,     rd_d=q)
+      S_AXPY_XR_FEED: begin
         rd_a_sel           = RF_X_VEC_REG;
         rd_a_idx_packed    = group_in_idx_packed;
         rd_a_valid         = group_in_valid;
         rd_b_sel           = RF_D_REG;
         rd_b_idx_packed    = group_in_idx_packed;
         rd_b_valid         = group_in_valid;
-        axpy_istream_val   = (stream_idx < num_groups_reg);
-        axpy_ostream_rdy   = 1'b1;
-        axpy_mode          = 1'b0;
+        rd_c_sel           = RF_R_REG;
+        rd_c_idx_packed    = group_in_idx_packed;
+        rd_c_valid         = group_in_valid;
+        rd_d_sel           = RF_Q_BUF;
+        rd_d_idx_packed    = group_in_idx_packed;
+        rd_d_valid         = group_in_valid;
+        axpy_x_istream_val = (stream_idx < num_groups_reg);
+        axpy_x_ostream_rdy = 1'b1;
+        axpy_r_istream_val = (stream_idx < num_groups_reg);
+        axpy_r_ostream_rdy = 1'b1;
         axpy_coef_src_beta = 1'b0;
+        // Primary write: x_vec_reg from u_axpy_x.
         wr_sel             = RF_X_VEC_REG;
         wr_idx_ctrl_packed = group_out_idx_packed;
-        we                 = axpy_out_hs ? group_out_valid : '0;
+        we                 = axpy_x_out_hs ? group_out_valid : '0;
         wdata_src          = WD_AXPY;
+        // Secondary write: r_reg from u_axpy_r (data routed via WD_AXPY_R).
+        wr_sel_sec         = RF_R_REG;
+        wdata_src_sec      = WD_AXPY_R;
+        we_sec             = axpy_x_out_hs ? group_out_valid : '0;
       end
 
-      // AXPY R: r[i] -= alpha * q[i]
-      S_AXPY_R_FEED: begin
-        rd_a_sel           = RF_R_REG;
-        rd_a_idx_packed    = group_in_idx_packed;
-        rd_a_valid         = group_in_valid;
-        rd_b_sel           = RF_Q_BUF;
-        rd_b_idx_packed    = group_in_idx_packed;
-        rd_b_valid         = group_in_valid;
-        axpy_istream_val   = (stream_idx < num_groups_reg);
-        axpy_ostream_rdy   = 1'b1;
-        axpy_mode          = 1'b1;
-        axpy_coef_src_beta = 1'b0;
-        wr_sel             = RF_R_REG;
-        wr_idx_ctrl_packed = group_out_idx_packed;
-        we                 = axpy_out_hs ? group_out_valid : '0;
-        wdata_src          = WD_AXPY;
-      end
-
-      // VDOT r_new . r_new -> rr_new_latched
       S_VDOT_RR_FEED: begin
         rd_a_sel         = RF_R_REG;
         rd_a_idx_packed  = group_in_idx_packed;
@@ -702,7 +710,6 @@ module CGCtrl #(
         latch_rr_new     = vdot_out_hs;
       end
 
-      // beta = rr_new / rr_reg
       S_DIV_B_SEND: begin
         fpdiv_istream_val = 1'b1;
         fpdiv_a_src_rrnew = 1'b1;
@@ -713,7 +720,7 @@ module CGCtrl #(
         latch_beta        = fpdiv_out_hs;
       end
 
-      // AXPY D: d[i] = r[i] + beta * d[i]
+      // d update: only u_axpy_x. u_axpy_r idles (no handshakes).
       S_AXPY_D_FEED: begin
         rd_a_sel           = RF_R_REG;
         rd_a_idx_packed    = group_in_idx_packed;
@@ -721,31 +728,27 @@ module CGCtrl #(
         rd_b_sel           = RF_D_REG;
         rd_b_idx_packed    = group_in_idx_packed;
         rd_b_valid         = group_in_valid;
-        axpy_istream_val   = (stream_idx < num_groups_reg);
-        axpy_ostream_rdy   = 1'b1;
-        axpy_mode          = 1'b0;
+        axpy_x_istream_val = (stream_idx < num_groups_reg);
+        axpy_x_ostream_rdy = 1'b1;
         axpy_coef_src_beta = 1'b1;
         wr_sel             = RF_D_REG;
         wr_idx_ctrl_packed = group_out_idx_packed;
-        we                 = axpy_out_hs ? group_out_valid : '0;
+        we                 = axpy_x_out_hs ? group_out_valid : '0;
         wdata_src          = WD_AXPY;
       end
 
-      // Convergence check: always bump iter + refresh rr_reg.
-      // If the check fires, next state is S_WB_WRITE; else S_SPMV_RUN_FIRE.
       S_RUN_CHECK: begin
         bump_iter      = 1'b1;
         refresh_rr_reg = 1'b1;
       end
 
-      // WB: single-cycle write. Drive addr + wdata + wr_en from lane 0.
       S_WB_WRITE: begin
         ctrl_mem_addr   = x_base_sel + p_m10k_addr_bits'(stream_idx);
         ctrl_mem_wr_en  = 1'b1;
         rd_a_sel        = RF_X_VEC_REG;
         rd_a_idx_packed = single_idx_packed;
-        rd_a_valid      = single_lane0_mask;
-        ctrl_mem_wdata  = 32'($signed(rd_a_data_lane0));
+        rd_a_valid      = single_active_mask;
+        ctrl_mem_wdata  = 32'($signed(rd_a_data_active));
         if (stream_idx == n_minus_1_reg && !sel_y)
           reset_iter = 1'b1;
       end

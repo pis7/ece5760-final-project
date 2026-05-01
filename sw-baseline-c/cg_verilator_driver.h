@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "VCGTop.h"
@@ -37,9 +38,25 @@ public:
     static constexpr int Y_BASE      = 2 * MAX_N * MAX_N + 4 * MAX_N + 1;
     static constexpr int TOTAL_WORDS = 2 * MAX_N * MAX_N + 5 * MAX_N + 1;
 
+    // Public mirrors of the working state. These ARE the canonical
+    // storage for the placer -- it reads them directly (fast, doubles
+    // already in CPU memory) and writes them via the setters below,
+    // which keep the matching m10k slot in lockstep so we never have
+    // to "pack" anything at solve time.
+    //
+    // After CG, refresh_xy_from_m10k() pulls the new x / y back into
+    // these mirrors in one bulk pass (called from solve()).
+    std::vector<double> c_x, c_y, x_pos, y_pos;
+    // Active Q. load_q_initial() pushes structure + values to m10k
+    // once; subsequent diagonal-only updates go through set_q_diag().
+    // The mirror is what the placer reads (e.g. for the SW fallback's
+    // cg_solve, which expects a CSRMatrix).
+    CSRMatrix Q;
+
     CGHwDriver() {
         ctx_ = new VerilatedContext;
         dut_ = new VCGTop(ctx_);
+        std::memset(m10k_mem_, 0, sizeof(m10k_mem_));
     }
 
     ~CGHwDriver() {
@@ -48,22 +65,65 @@ public:
         delete ctx_;
     }
 
+    // Resize the mirror vectors. Call once after the placer knows n.
+    void resize_n(int n) {
+        c_x.assign(n, 0.0);
+        c_y.assign(n, 0.0);
+        x_pos.assign(n, 0.0);
+        y_pos.assign(n, 0.0);
+    }
+
+    // Per-element setters: update the mirror AND the matching m10k slot.
+    void set_cx(int i, double v) { c_x[i]   = v; m10k_mem_[CX_X_BASE + i] = double_to_fp(v); }
+    void set_cy(int i, double v) { c_y[i]   = v; m10k_mem_[CX_Y_BASE + i] = double_to_fp(v); }
+    void set_x (int i, double v) { x_pos[i] = v; m10k_mem_[X_BASE    + i] = double_to_fp(v); }
+    void set_y (int i, double v) { y_pos[i] = v; m10k_mem_[Y_BASE    + i] = double_to_fp(v); }
+
+    // One-time bulk upload of Q (structure + values). Caller must
+    // ensure src has a diagonal entry in every row -- the placer feeds
+    // csr_add_diagonal(Q_base, 0.0) so missing diagonals get inserted
+    // with val=0; subsequent set_q_diag() calls update those slots.
+    void load_q_initial(const CSRMatrix& src) {
+        Q = src;
+        int nnz = Q.nnz();
+        assert(nnz <= MAX_N * MAX_N);
+        q_diag_pos_.assign(Q.n, -1);
+        for (int i = 0; i < Q.n; ++i) {
+            for (int j = Q.row_ptr[i]; j < Q.row_ptr[i + 1]; ++j) {
+                if (Q.col_idx[j] == i) {
+                    q_diag_pos_[i] = j;
+                    break;
+                }
+            }
+        }
+        for (int j = 0; j < nnz; ++j) {
+            m10k_mem_[Q_VAL_BASE + j] = double_to_fp(Q.vals[j]);
+            m10k_mem_[Q_COL_BASE + j] = Q.col_idx[j];
+        }
+        for (int i = 0; i <= Q.n; ++i)
+            m10k_mem_[Q_ROWP_BASE + i] = Q.row_ptr[i];
+    }
+
+    // Update the diagonal entry of row i (mirror + m10k). load_q_initial
+    // must have been called first; the diagonal slot must exist.
+    void set_q_diag(int i, double v) {
+        int j = q_diag_pos_[i];
+        assert(j >= 0);
+        Q.vals[j] = v;
+        m10k_mem_[Q_VAL_BASE + j] = double_to_fp(v);
+    }
+
     // Clock cycles between sw_go assertion and sw_done for the most recent
     // solve() call. This is the apples-to-apples count we'd see on the FPGA.
     uint64_t last_solve_cycles() const { return last_solve_cycles_; }
 
-    // Solve Qx = -cx and Qy = -cy using the hardware CG.
-    // Modifies x and y in place.
-    void solve(const CSRMatrix& Q,
-               const std::vector<double>& cx,
-               const std::vector<double>& cy,
-               std::vector<double>& x,
-               std::vector<double>& y,
-               int max_iter, double eps) {
+    // Solve Qx = -cx and Qy = -cy using the hardware CG. Everything
+    // (Q + c_x + c_y + x_pos + y_pos) already lives in m10k via the
+    // setters; this just runs the FSM. x_pos / y_pos mirrors are
+    // refreshed from m10k on completion.
+    void solve(int max_iter, double eps) {
         int n = Q.n;
         assert(n <= MAX_N);
-
-        pack_memory(Q, cx, cy, x, y, n);
 
         // Reset
         dut_->rst = 1;
@@ -100,7 +160,7 @@ public:
         dut_->sw_done_ack = 0;
         tick();
 
-        unpack_results(x, y, n);
+        refresh_xy_from_m10k(n);
     }
 
 private:
@@ -108,6 +168,10 @@ private:
     VCGTop* dut_;
     int32_t m10k_mem_[TOTAL_WORDS];
     uint64_t last_solve_cycles_ = 0;
+
+    // Cached diagonal-entry index per row: Q.col_idx[q_diag_pos_[i]] == i.
+    // Populated by load_q_initial; consumed by set_q_diag.
+    std::vector<int> q_diag_pos_;
 
     static int32_t double_to_fp(double v) {
         int32_t raw = static_cast<int32_t>(v * FRAC_SCALE);
@@ -155,40 +219,10 @@ private:
         dut_->eval();
     }
 
-    void pack_memory(const CSRMatrix& Q,
-                     const std::vector<double>& cx,
-                     const std::vector<double>& cy,
-                     const std::vector<double>& x,
-                     const std::vector<double>& y,
-                     int n) {
-        // Zero all memory
-        for (int i = 0; i < TOTAL_WORDS; ++i) m10k_mem_[i] = 0;
-
-        // CSR values and column indices
-        int nnz = Q.nnz();
-        assert(nnz <= MAX_N * MAX_N);
-        for (int j = 0; j < nnz; ++j) {
-            m10k_mem_[Q_VAL_BASE + j] = double_to_fp(Q.vals[j]);
-            m10k_mem_[Q_COL_BASE + j] = Q.col_idx[j];
-        }
-
-        // Row pointers
-        for (int i = 0; i <= n; ++i)
-            m10k_mem_[Q_ROWP_BASE + i] = Q.row_ptr[i];
-
-        // Vectors
+    void refresh_xy_from_m10k(int n) {
         for (int i = 0; i < n; ++i) {
-            m10k_mem_[CX_X_BASE + i] = double_to_fp(cx[i]);
-            m10k_mem_[CX_Y_BASE + i] = double_to_fp(cy[i]);
-            m10k_mem_[X_BASE + i]    = double_to_fp(x[i]);
-            m10k_mem_[Y_BASE + i]    = double_to_fp(y[i]);
-        }
-    }
-
-    void unpack_results(std::vector<double>& x, std::vector<double>& y, int n) {
-        for (int i = 0; i < n; ++i) {
-            x[i] = fp_to_double(m10k_mem_[X_BASE + i]);
-            y[i] = fp_to_double(m10k_mem_[Y_BASE + i]);
+            x_pos[i] = fp_to_double(m10k_mem_[X_BASE + i]);
+            y_pos[i] = fp_to_double(m10k_mem_[Y_BASE + i]);
         }
     }
 };

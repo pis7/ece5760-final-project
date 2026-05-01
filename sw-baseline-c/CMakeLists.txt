@@ -12,12 +12,12 @@ option(USE_HW_CG "Use Verilator CGTop for CG solve" OFF)
 # Use C++ fixed-point golden model instead of Verilator (faster, no Verilog needed)
 option(USE_FP_GOLDEN "Use C++ fixed-point golden model instead of Verilator" OFF)
 set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
-set(HW_CG_VERSION "v3" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide) or v3 (NR divide + rp_lo/rp_hi collapse)")
-set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3)
+set(HW_CG_VERSION "v4" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide), v3 (NR divide + rp_lo/rp_hi collapse), or v4 (v3 + parallel x/r AXPY)")
+set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3 v4)
 
 # NR-divide variants need the NR DPI golden to stay bit-exact. v2 uses
 # shift-subtract so it falls through to the empty define.
-if(HW_CG_VERSION STREQUAL "v3")
+if(HW_CG_VERSION STREQUAL "v3" OR HW_CG_VERSION STREQUAL "v4")
     set(CG_GOLDEN_DEFINE "CG_GOLDEN_USE_NR")
 else()
     set(CG_GOLDEN_DEFINE "")

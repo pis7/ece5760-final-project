@@ -11,7 +11,7 @@ Modes:
   python                 Baseline Python placer                                (run-only)
   sw                     Full software C++ placer (double precision)           (run + sweep)
   golden                 C++ placer with fixed-point golden CG                 (run + sweep)
-  verilated [v2|v3]      C++ placer with Verilator RTL CG (default v3)         (run + sweep)
+  verilated [v2|v3|v4]   C++ placer with Verilator RTL CG (default v4)         (run + sweep)
   arm                    Cross-compile SW placer, run on DE1-SoC ARM           (run + sweep)
   fpga                   Cross-compile FPGA-accelerated placer, run on DE1-SoC (run + sweep)
 
@@ -607,19 +607,19 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
             type=Path,
             help="Path to a benchmark directory (containing lef/ and def/).",
         )
-        sp.set_defaults(hw_version="v3")  # unused; keeps the attr defined
+        sp.set_defaults(hw_version="v4")  # unused; keeps the attr defined
         _add_common(sp)
 
     sp_ver = sub.add_parser(
         "verilated",
-        help="C++ placer with Verilator RTL CG. Optional [v2|v3] before path.",
+        help="C++ placer with Verilator RTL CG. Optional [v2|v3|v4] before path.",
     )
     sp_ver.add_argument(
         "hw_version",
         nargs="?",
-        choices=["v2", "v3"],
-        default="v3",
-        help="Verilator RTL version (default v3).",
+        choices=["v2", "v3", "v4"],
+        default="v4",
+        help="Verilator RTL version (default v4).",
     )
     sp_ver.add_argument(
         "benchmark_path",

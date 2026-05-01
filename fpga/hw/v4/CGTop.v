@@ -1,15 +1,14 @@
-// Toplevel v2 Verilog: synthesizable CG solver for DE1-SoC.
+// Toplevel v4 Verilog: synthesizable CG solver for DE1-SoC.
 //
-// Datapath talks directly to the Qsys on-chip SRAM via the Avalon
-// slave interface. A single flat FSM in CGCtrl drives every mux and
-// handshake in CGDpath -- there is no FSM inside CGDpath.
+// v4 == v3 + parallel x/r AXPY. Two AXPY units inside CGDpath fire in
+// lockstep during the merged S_AXPY_XR_FEED state, halving the cycles
+// spent on x/r updates per CG iteration. Cycle savings per iter:
+// num_groups = ceil(n/p_lanes). Cost: +p_lanes DSPs.
 //
-// The FPGA monopolizes the Avalon slave port for the duration of the
-// solve. That is fine because the ARM is blocked on the sw_done PIO
-// and is not touching the memory while sw_done is low.
+// External (FPGATop-facing) ports are unchanged from v3.
 
 module CGTop #(
-  parameter p_lanes            = 8,
+  parameter p_lanes            = 16,
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
@@ -49,22 +48,7 @@ module CGTop #(
 );
 
   //----------------------------------------------------------------------
-  // PIO input registration
-  //
-  // Every value coming from a Qsys PIO (cg_n, cg_max_iter, cg_eps_sq,
-  // and the cg_ctrl bits sw_go / sw_done_ack / rst) is registered once
-  // here on CLOCK_50 before being routed to CGCtrl or CGDpath. This
-  // breaks long combinational fanout from PIO outputs into the inner
-  // FSM next-state mux (sw_go), the dpath comparators in VecDot, AXPY
-  // and SPMV (n), and the convergence test (max_iter, eps_sq). Quartus
-  // had been reporting setup-time failures on cg_n -> cx_reg and
-  // cg_ctrl -> dpath flop paths; with these flops in front, every such
-  // path now starts at a CLOCK_50 register, not at the PIO directly.
-  //
-  // 1 cycle of latency on each of these inputs is harmless: cg_n /
-  // cg_max_iter / cg_eps_sq are stable for the whole solve, sw_go /
-  // sw_done_ack are level pulses that the FSM samples until acted on,
-  // and the soft-reset path holds rst for ~50000 cycles via usleep().
+  // PIO input registration (same as v3)
   //----------------------------------------------------------------------
   logic        sw_go_q;
   logic        sw_done_ack_q;
@@ -86,18 +70,16 @@ module CGTop #(
   // CGCtrl <-> CGDpath wires
   //----------------------------------------------------------------------
 
-  // Observability
   logic [31:0]                  iter;
   logic signed [p_acc_bits-1:0] rr_new;
   logic signed [p_acc_bits-1:0] rr_old;
 
-  // CGCtrl-driven memory bus (muxed with SPMV's inside CGDpath)
   logic [p_m10k_addr_bits-1:0] ctrl_mem_addr;
   logic                        ctrl_mem_wr_en;
   logic [31:0]                 ctrl_mem_wdata;
   logic                        ctrl_mem_src_spmv;
 
-  // RF read ports (p_lanes-wide)
+  // RF read ports (4 x p_lanes-wide)
   logic [2:0]                                 rd_a_sel;
   logic [p_lanes*$clog2(p_max_n)-1:0]         rd_a_idx_packed;
   logic [p_lanes-1:0]                         rd_a_valid;
@@ -108,28 +90,43 @@ module CGTop #(
   logic [p_lanes-1:0]                         rd_b_valid;
   logic [p_lanes*p_total_bits-1:0]            rd_b_data_packed;
 
+  logic [2:0]                                 rd_c_sel;
+  logic [p_lanes*$clog2(p_max_n)-1:0]         rd_c_idx_packed;
+  logic [p_lanes-1:0]                         rd_c_valid;
+  logic [p_lanes*p_total_bits-1:0]            rd_c_data_packed;
+
+  logic [2:0]                                 rd_d_sel;
+  logic [p_lanes*$clog2(p_max_n)-1:0]         rd_d_idx_packed;
+  logic [p_lanes-1:0]                         rd_d_valid;
+  logic [p_lanes*p_total_bits-1:0]            rd_d_data_packed;
+
   logic [2:0]                                 rd_vec_sel;
 
-  // RF write port (p_lanes-wide)
+  // RF write ports (primary + secondary)
   logic [2:0]                                 wr_sel;
   logic [p_lanes*$clog2(p_max_n)-1:0]         wr_idx_ctrl_packed;
   logic                                       wr_idx_src_spmv;
   logic [p_lanes-1:0]                         we;
   logic [2:0]                                 wdata_src;
+  logic [2:0]                                 wr_sel_sec;
+  logic [2:0]                                 wdata_src_sec;
+  logic [p_lanes-1:0]                         we_sec;
 
   // Scalar latches
   logic                               latch_dq, latch_rr_new;
   logic                               latch_alpha, latch_beta;
-  logic                               refresh_rr_reg;
+  logic                               refresh_rr_reg, init_rr_reg;
   logic                               bump_iter, reset_iter;
 
   // Submodule handshakes
   logic vdot_istream_val,  vdot_istream_rdy;
   logic vdot_ostream_val,  vdot_ostream_rdy;
 
-  logic axpy_istream_val,  axpy_istream_rdy;
-  logic axpy_ostream_val,  axpy_ostream_rdy;
-  logic axpy_mode, axpy_coef_src_beta;
+  logic axpy_x_istream_val, axpy_x_istream_rdy;
+  logic axpy_x_ostream_val, axpy_x_ostream_rdy;
+  logic axpy_r_istream_val, axpy_r_istream_rdy;
+  logic axpy_r_ostream_val, axpy_r_ostream_rdy;
+  logic axpy_coef_src_beta;
 
   logic spmv_istream_val,  spmv_istream_rdy;
   logic spmv_ostream_val,  spmv_ostream_rdy;
@@ -182,15 +179,20 @@ module CGTop #(
     .ctrl_mem_addr, .ctrl_mem_wr_en, .ctrl_mem_wdata, .ctrl_mem_src_spmv,
     .rd_a_sel, .rd_a_idx_packed, .rd_a_valid, .rd_a_data_packed,
     .rd_b_sel, .rd_b_idx_packed, .rd_b_valid, .rd_b_data_packed,
+    .rd_c_sel, .rd_c_idx_packed, .rd_c_valid, .rd_c_data_packed,
+    .rd_d_sel, .rd_d_idx_packed, .rd_d_valid, .rd_d_data_packed,
     .rd_vec_sel,
     .wr_sel, .wr_idx_ctrl_packed, .wr_idx_src_spmv, .we, .wdata_src,
+    .wr_sel_sec, .wdata_src_sec, .we_sec,
     .latch_dq, .latch_rr_new, .latch_alpha, .latch_beta,
-    .refresh_rr_reg, .bump_iter, .reset_iter,
+    .refresh_rr_reg, .init_rr_reg, .bump_iter, .reset_iter,
     .vdot_istream_val, .vdot_istream_rdy,
     .vdot_ostream_val, .vdot_ostream_rdy,
-    .axpy_istream_val, .axpy_istream_rdy,
-    .axpy_ostream_val, .axpy_ostream_rdy,
-    .axpy_mode, .axpy_coef_src_beta,
+    .axpy_x_istream_val, .axpy_x_istream_rdy,
+    .axpy_x_ostream_val, .axpy_x_ostream_rdy,
+    .axpy_r_istream_val, .axpy_r_istream_rdy,
+    .axpy_r_ostream_val, .axpy_r_ostream_rdy,
+    .axpy_coef_src_beta,
     .spmv_istream_val, .spmv_istream_rdy,
     .spmv_ostream_val, .spmv_ostream_rdy,
     .fpdiv_istream_val, .fpdiv_istream_rdy,
@@ -224,15 +226,20 @@ module CGTop #(
     .ctrl_mem_addr, .ctrl_mem_wr_en, .ctrl_mem_wdata, .ctrl_mem_src_spmv,
     .rd_a_sel, .rd_a_idx_packed, .rd_a_valid, .rd_a_data_packed,
     .rd_b_sel, .rd_b_idx_packed, .rd_b_valid, .rd_b_data_packed,
+    .rd_c_sel, .rd_c_idx_packed, .rd_c_valid, .rd_c_data_packed,
+    .rd_d_sel, .rd_d_idx_packed, .rd_d_valid, .rd_d_data_packed,
     .rd_vec_sel,
     .wr_sel, .wr_idx_ctrl_packed, .wr_idx_src_spmv, .we, .wdata_src,
+    .wr_sel_sec, .wdata_src_sec, .we_sec,
     .latch_dq, .latch_rr_new, .latch_alpha, .latch_beta,
-    .refresh_rr_reg, .bump_iter, .reset_iter,
+    .refresh_rr_reg, .init_rr_reg, .bump_iter, .reset_iter,
     .vdot_istream_val, .vdot_istream_rdy,
     .vdot_ostream_val, .vdot_ostream_rdy,
-    .axpy_istream_val, .axpy_istream_rdy,
-    .axpy_ostream_val, .axpy_ostream_rdy,
-    .axpy_mode, .axpy_coef_src_beta,
+    .axpy_x_istream_val, .axpy_x_istream_rdy,
+    .axpy_x_ostream_val, .axpy_x_ostream_rdy,
+    .axpy_r_istream_val, .axpy_r_istream_rdy,
+    .axpy_r_ostream_val, .axpy_r_ostream_rdy,
+    .axpy_coef_src_beta,
     .spmv_istream_val, .spmv_istream_rdy,
     .spmv_ostream_val, .spmv_ostream_rdy,
     .fpdiv_istream_val, .fpdiv_istream_rdy,

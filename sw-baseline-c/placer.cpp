@@ -199,6 +199,7 @@ CSRMatrix csr_add_diagonal(const CSRMatrix& A, double alpha) {
 
 // -- Vector helpers -----------------------------------------------------------
 
+#ifndef USE_HW_CG
 static double vec_dot(const std::vector<double>& a,
                       const std::vector<double>& b) {
     double s = 0.0;
@@ -207,6 +208,7 @@ static double vec_dot(const std::vector<double>& a,
 }
 
 // -- Conjugate gradient solver ------------------------------------------------
+
 
 // Solve Qx * x = -cx, starting from x0. Returns solution in x.
 // Matches the CG algorithm from the project proposal (Listing 1):
@@ -261,6 +263,7 @@ static void cg_solve(const CSRMatrix& Qx, const std::vector<double>& cx,
         rr = rr_new;
     }
 }
+#endif // USE_HW_CG
 
 // -- JSON I/O -----------------------------------------------------------------
 
@@ -407,16 +410,16 @@ class Placer {
 public:
     Netlist nl;
 
-    // Cell center positions
-    std::vector<double> x_pos, y_pos;
-
-    // Base linear system (from clique decomposition)
+    // Base linear system (from clique decomposition). Lives in
+    // placer-side memory; the active Q (base + anchor springs) is
+    // owned by the driver in HW builds.
     CSRMatrix Q_base;
     std::vector<double> c_base_x, c_base_y;
-
-    // Active linear system (base + anchor springs)
-    CSRMatrix Q;
-    std::vector<double> c_x, c_y;
+    // Diagonal of Q_base (val=0 where the row had no diagonal entry)
+    // and the corresponding j-index into Q.vals. Cached at build time
+    // so the partition loop drives diag updates without rescanning CSR.
+    std::vector<double> q_base_diag;
+    std::vector<int>    q_diag_pos;
 
     int partition_level = 0;
 
@@ -424,14 +427,87 @@ public:
     std::vector<double> cg_times_ms;
 
 #ifdef USE_HW_CG
+    // The driver owns canonical storage for x_pos / y_pos / c_x / c_y
+    // and the active Q (verilator + mmap drivers keep the mirrors in
+    // lockstep with the SRAM/m10k slots; the golden driver's mirror
+    // IS the storage). Reads come from these references; writes go
+    // through the set_* helpers below so the SRAM mirror stays in
+    // sync.
     CGHwDriver hw_driver;
+    std::vector<double>& x_pos = hw_driver.x_pos;
+    std::vector<double>& y_pos = hw_driver.y_pos;
+    std::vector<double>& c_x   = hw_driver.c_x;
+    std::vector<double>& c_y   = hw_driver.c_y;
+    CSRMatrix&           Q     = hw_driver.Q;
+#else
+    // Cell center positions + active c-vectors (CPU-only build).
+    std::vector<double> x_pos, y_pos;
+    std::vector<double> c_x, c_y;
+    CSRMatrix Q;
 #endif
+
 #if defined(USE_HW_CG) && !defined(USE_FP_GOLDEN)
     // Per-call Verilator cycle count (sw_go to sw_done). Empty in fallback path.
     std::vector<uint64_t> cg_cycles;
 #endif
 
     explicit Placer(const std::string& json_path) : nl(load_netlist(json_path)) {}
+
+    // Setter helpers. In the HW build these go through the driver so
+    // the SRAM/m10k mirror stays consistent with the placer's view;
+    // in the SW build they're plain vector assignments.
+    inline void set_x (int i, double v) {
+#ifdef USE_HW_CG
+        hw_driver.set_x (i, v);
+#else
+        x_pos[i] = v;
+#endif
+    }
+    inline void set_y (int i, double v) {
+#ifdef USE_HW_CG
+        hw_driver.set_y (i, v);
+#else
+        y_pos[i] = v;
+#endif
+    }
+    inline void set_cx(int i, double v) {
+#ifdef USE_HW_CG
+        hw_driver.set_cx(i, v);
+#else
+        c_x[i] = v;
+#endif
+    }
+    inline void set_cy(int i, double v) {
+#ifdef USE_HW_CG
+        hw_driver.set_cy(i, v);
+#else
+        c_y[i] = v;
+#endif
+    }
+
+    // Resize all four working vectors; mirrors the n that the placer
+    // uses elsewhere.
+    inline void resize_working_vectors(int n) {
+#ifdef USE_HW_CG
+        hw_driver.resize_n(n);
+#else
+        x_pos.assign(n, 0.0);
+        y_pos.assign(n, 0.0);
+        c_x.assign(n, 0.0);
+        c_y.assign(n, 0.0);
+#endif
+    }
+
+    // Update row i's diagonal entry in the active Q. Routes through
+    // the HW driver (mirror + SRAM/m10k write-through) or modifies the
+    // placer-owned Q directly in the SW build.
+    inline void set_q_diag(int i, double v) {
+#ifdef USE_HW_CG
+        hw_driver.set_q_diag(i, v);
+#else
+        Q.vals[q_diag_pos[i]] = v;
+#endif
+    }
 
     void init_cell_positions() {
         double die_cx = (nl.die_area[0] + nl.die_area[2]) / 2.0;
@@ -448,13 +524,25 @@ public:
     void build_system() {
         int n = nl.num_cells();
 
-        // Initial positions (cell centers)
-        x_pos.resize(n);
-        y_pos.resize(n);
+#ifdef USE_HW_CG
+        if (n > CGHwDriver::MAX_N) {
+            std::fprintf(stderr,
+                "Error: design has %d cells but the hardware CG only "
+                "supports up to %d. Rebuild without USE_HW_CG to use the "
+                "software solver, or pick a smaller benchmark.\n",
+                n, CGHwDriver::MAX_N);
+            std::exit(1);
+        }
+#endif
+
+        // Initial positions (cell centers). resize_working_vectors
+        // sizes c_x / c_y / x_pos / y_pos at once and routes through
+        // the HW driver (where it primes the SRAM-side mirrors).
+        resize_working_vectors(n);
         for (int i = 0; i < n; ++i) {
             auto& comp = nl.components[nl.cell_names[i]];
-            x_pos[i] = comp.x + nl.cell_widths[i] / 2;
-            y_pos[i] = comp.y + nl.cell_heights[i] / 2;
+            set_x(i, comp.x + nl.cell_widths[i] / 2);
+            set_y(i, comp.y + nl.cell_heights[i] / 2);
         }
 
         // Build Q and c via clique decomposition
@@ -517,9 +605,33 @@ public:
         }
 
         Q_base = coo_to_csr(n, entries);
-        Q = Q_base;  // copy
-        c_x = c_base_x;
-        c_y = c_base_y;
+        // Materialize Q with a diagonal slot in every row -- alpha=0
+        // here just inserts a 0-val diagonal where Q_base lacked one.
+        // From this point on the partition loop only touches diagonals,
+        // never structure.
+        CSRMatrix Q_with_diag = csr_add_diagonal(Q_base, 0.0);
+        q_base_diag.assign(n, 0.0);
+        q_diag_pos.assign(n, -1);
+        for (int i = 0; i < n; ++i) {
+            for (int j = Q_with_diag.row_ptr[i];
+                 j < Q_with_diag.row_ptr[i + 1]; ++j) {
+                if (Q_with_diag.col_idx[j] == i) {
+                    q_diag_pos[i]  = j;
+                    q_base_diag[i] = Q_with_diag.vals[j];
+                    break;
+                }
+            }
+        }
+#ifdef USE_HW_CG
+        hw_driver.load_q_initial(Q_with_diag);
+#else
+        Q = std::move(Q_with_diag);
+#endif
+        // Element-wise so the HW driver's SRAM mirror gets primed.
+        for (int i = 0; i < n; ++i) {
+            set_cx(i, c_base_x[i]);
+            set_cy(i, c_base_y[i]);
+        }
         partition_level = 0;
 
         std::printf("  %d cells, %d I/O pins, %d/%d nets\n",
@@ -533,18 +645,15 @@ public:
         // Solve Qx = -cx and Qy = -cy via CG (proposal Listing 1)
         auto t0 = std::chrono::steady_clock::now();
 #ifdef USE_HW_CG
-        if (Q.n <= CGHwDriver::MAX_N) {
-            hw_driver.solve(Q, c_x, c_y, x_pos, y_pos, CG_MAX_ITER, CG_EPS);
+        // Q + c_x + c_y + x_pos + y_pos already live in the driver's
+        // SRAM mirror -- no per-call pack needed. n > MAX_N would
+        // trip the driver's internal assert; we don't carry an SW
+        // fallback for that case.
+        hw_driver.solve(CG_MAX_ITER, CG_EPS);
 #if !defined(USE_FP_GOLDEN)
-            uint64_t cycles = hw_driver.last_solve_cycles();
-            if (cycles != 0) cg_cycles.push_back(cycles);
+        uint64_t cycles = hw_driver.last_solve_cycles();
+        if (cycles != 0) cg_cycles.push_back(cycles);
 #endif
-        } else {
-            fprintf(stderr, "Warning: n=%d > %d, falling back to software CG\n",
-                    Q.n, CGHwDriver::MAX_N);
-            cg_solve(Q, c_x, x_pos, CG_MAX_ITER, CG_EPS);
-            cg_solve(Q, c_y, y_pos, CG_MAX_ITER, CG_EPS);
-        }
 #else
         cg_solve(Q, c_x, x_pos, CG_MAX_ITER, CG_EPS);
         cg_solve(Q, c_y, y_pos, CG_MAX_ITER, CG_EPS);
@@ -571,13 +680,17 @@ public:
         int n = nl.num_cells();
         double dx1 = nl.die_area[0], dy1 = nl.die_area[1];
         double dx2 = nl.die_area[2], dy2 = nl.die_area[3];
+        // Most cells stay inside the die after a CG solve, so the
+        // clamp is a no-op for them. set_x / set_y are write-throughs
+        // (one bridge write each on FPGA, one mirror+m10k write in
+        // verilated), so skip the call when the value didn't change.
         for (int i = 0; i < n; ++i) {
             double hw = nl.cell_widths[i] / 2;
             double hh = nl.cell_heights[i] / 2;
-            x_pos[i] = std::max(x_pos[i], dx1 + hw);
-            x_pos[i] = std::min(x_pos[i], dx2 - hw);
-            y_pos[i] = std::max(y_pos[i], dy1 + hh);
-            y_pos[i] = std::min(y_pos[i], dy2 - hh);
+            double cx = std::min(std::max(x_pos[i], dx1 + hw), dx2 - hw);
+            double cy = std::min(std::max(y_pos[i], dy1 + hh), dy2 - hh);
+            if (cx != x_pos[i]) set_x(i, cx);
+            if (cy != y_pos[i]) set_y(i, cy);
         }
     }
 
@@ -671,25 +784,25 @@ public:
             }
         }
 
-        // Anchor weight
-        std::vector<double> diag = csr_diagonal(Q_base);
+        // Anchor weight (averaged over rows that had positive
+        // diagonals in Q_base before any alpha was added).
         double sum_pos = 0.0;
         int count_pos = 0;
-        for (double d : diag) {
+        for (double d : q_base_diag) {
             if (d > 0.0) { sum_pos += d; count_pos++; }
         }
         double avg_diag = count_pos > 0 ? sum_pos / count_pos : 1.0;
         double alpha = avg_diag * 0.1 * std::pow(2.0, partition_level - 1);
 
-        // Q = Q_base + alpha*I
-        Q = csr_add_diagonal(Q_base, alpha);
-
-        // c = c_base - alpha * anchors
-        c_x.resize(n);
-        c_y.resize(n);
+        // Q = Q_base + alpha*I and c = c_base - alpha*anchors. Q
+        // already lives in m10k (HW) or in the placer's mirror (SW)
+        // with all diagonal slots present, so we just update the
+        // diagonal vals in place. The c-setters write through to the
+        // SRAM mirror.
         for (int i = 0; i < n; ++i) {
-            c_x[i] = c_base_x[i] - alpha * anchors_x[i];
-            c_y[i] = c_base_y[i] - alpha * anchors_y[i];
+            set_q_diag(i, q_base_diag[i] + alpha);
+            set_cx(i, c_base_x[i] - alpha * anchors_x[i]);
+            set_cy(i, c_base_y[i] - alpha * anchors_y[i]);
         }
 
         std::printf("  Partition level %d: %d regions, alpha=%.2f\n",

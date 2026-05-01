@@ -30,8 +30,11 @@ function(add_verilator_tb VERSION RTL_DIR)
     list(APPEND RTL_SRCS ${RTL_DIR}/M10KLoader.v)
   endif()
 
+  # --trace enables VCD support so the testbench can call $dumpfile /
+  # $dumpvars and emit a waveform when invoked with the +vcd=<file>
+  # plusarg. With no +vcd, runtime cost is negligible.
   add_custom_target(${TARGET} ALL
-    COMMAND verilator --cc --exe --build --timing --main
+    COMMAND verilator --cc --exe --build --timing --main --trace
       -Wall -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSEDSIGNAL
       -Wno-UNUSEDPARAM -Wno-BLKSEQ -Wno-DECLFILENAME
       --top-module ${TB}
@@ -50,8 +53,9 @@ function(add_verilator_tb VERSION RTL_DIR)
   )
 endfunction()
 
-# v3 needs the NR-divide DPI golden so compares stay bit-exact against the
-# v3 RTL's NR FpDiv. v1 and v2 use the default shift-subtract divide.
+# v3 / v4 need the NR-divide DPI golden so compares stay bit-exact against
+# the NR FpDiv. v1 and v2 use the default shift-subtract divide.
 add_verilator_tb(v1 ${CMAKE_CURRENT_SOURCE_DIR}/../v1)
 add_verilator_tb(v2 ${CMAKE_CURRENT_SOURCE_DIR}/../v2)
 add_verilator_tb(v3 ${CMAKE_CURRENT_SOURCE_DIR}/../v3 -DCG_GOLDEN_USE_NR)
+add_verilator_tb(v4 ${CMAKE_CURRENT_SOURCE_DIR}/../v4 -DCG_GOLDEN_USE_NR)

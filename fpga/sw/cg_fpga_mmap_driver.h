@@ -75,6 +75,18 @@ public:
     // cg_status bit positions
     static constexpr uint32_t STATUS_SW_DONE   = 1u << 0;
 
+    // Public mirrors -- canonical storage for the placer's working
+    // state. Reads come from these directly; writes go through the
+    // setters below, which keep the matching SRAM word in lockstep so
+    // we never have to "pack" anything at solve time. After CG,
+    // refresh_xy_from_sram() pulls the new x / y back in one bulk pass.
+    std::vector<double> c_x, c_y, x_pos, y_pos;
+    // Active Q. load_q_initial() pushes structure + values to SRAM
+    // once; subsequent diagonal-only updates go through set_q_diag().
+    // Mirror is what the placer reads (e.g. for the SW fallback's
+    // cg_solve, which expects a CSRMatrix).
+    CSRMatrix Q;
+
     CGHwDriver() {
         mem_fd_ = open("/dev/mem", O_RDWR | O_SYNC);
         if (mem_fd_ < 0) {
@@ -108,6 +120,12 @@ public:
         *ctrl_ = CTRL_SOFT_RST;
         usleep(1000);
         *ctrl_ = 0;
+
+        // SRAM contents at boot are unspecified -- zero our footprint
+        // once so the FSM never reads garbage. We rely on this zero
+        // being durable; subsequent solves only update the regions
+        // they own.
+        for (int i = 0; i < TOTAL_WORDS; ++i) sram_[i] = 0;
     }
 
     ~CGHwDriver() {
@@ -116,17 +134,71 @@ public:
         if (mem_fd_ >= 0) close(mem_fd_);
     }
 
-    // Solve Qx = -cx and Qy = -cy via the FPGA. Modifies x and y in place.
-    void solve(const CSRMatrix& Q,
-               const std::vector<double>& cx,
-               const std::vector<double>& cy,
-               std::vector<double>& x,
-               std::vector<double>& y,
-               int max_iter, double eps) {
+    void resize_n(int n) {
+        c_x.assign(n, 0.0);
+        c_y.assign(n, 0.0);
+        x_pos.assign(n, 0.0);
+        y_pos.assign(n, 0.0);
+    }
+
+    void set_cx(int i, double v) {
+        c_x[i] = v;
+        sram_[CX_X_BASE + i] = static_cast<uint32_t>(double_to_fp(v));
+    }
+    void set_cy(int i, double v) {
+        c_y[i] = v;
+        sram_[CX_Y_BASE + i] = static_cast<uint32_t>(double_to_fp(v));
+    }
+    void set_x(int i, double v) {
+        x_pos[i] = v;
+        sram_[X_BASE + i] = static_cast<uint32_t>(double_to_fp(v));
+    }
+    void set_y(int i, double v) {
+        y_pos[i] = v;
+        sram_[Y_BASE + i] = static_cast<uint32_t>(double_to_fp(v));
+    }
+
+    // One-time bulk upload of Q (structure + values). Caller must
+    // ensure src has a diagonal entry in every row -- the placer feeds
+    // csr_add_diagonal(Q_base, 0.0) so missing diagonals are inserted
+    // with val=0; subsequent set_q_diag() calls update those slots.
+    void load_q_initial(const CSRMatrix& src) {
+        Q = src;
+        int nnz = Q.nnz();
+        assert(nnz <= MAX_N * MAX_N);
+        q_diag_pos_.assign(Q.n, -1);
+        for (int i = 0; i < Q.n; ++i) {
+            for (int j = Q.row_ptr[i]; j < Q.row_ptr[i + 1]; ++j) {
+                if (Q.col_idx[j] == i) {
+                    q_diag_pos_[i] = j;
+                    break;
+                }
+            }
+        }
+        for (int j = 0; j < nnz; ++j) {
+            sram_[Q_VAL_BASE + j] =
+                static_cast<uint32_t>(double_to_fp(Q.vals[j]));
+            sram_[Q_COL_BASE + j] = static_cast<uint32_t>(Q.col_idx[j]);
+        }
+        for (int i = 0; i <= Q.n; ++i)
+            sram_[Q_ROWP_BASE + i] = static_cast<uint32_t>(Q.row_ptr[i]);
+    }
+
+    // Update the diagonal entry of row i (mirror + SRAM).
+    void set_q_diag(int i, double v) {
+        int j = q_diag_pos_[i];
+        assert(j >= 0);
+        Q.vals[j] = v;
+        sram_[Q_VAL_BASE + j] = static_cast<uint32_t>(double_to_fp(v));
+    }
+
+    // Solve Qx = -cx and Qy = -cy via the FPGA. Q + c_x + c_y +
+    // x_pos + y_pos already live in SRAM via the setters; this just
+    // runs the FSM. x_pos / y_pos mirrors are refreshed from SRAM on
+    // completion.
+    void solve(int max_iter, double eps) {
         int n = Q.n;
         assert(n <= MAX_N);
-
-        pack_memory(Q, cx, cy, x, y, n);
 
         *max_iter_ = static_cast<uint32_t>(max_iter);
         *eps_sq_   = static_cast<uint32_t>(double_to_fp(eps * eps));
@@ -142,7 +214,7 @@ public:
         while ((*status_ & STATUS_SW_DONE) != 0) { /* spin */ }
         *ctrl_ = 0;
 
-        unpack_results(x, y, n);
+        refresh_xy_from_sram(n);
     }
 
     // No on-FPGA cycle counter is wired up (no PIO for it in Qsys/FPGATop).
@@ -159,6 +231,10 @@ private:
     volatile uint32_t* eps_sq_   = nullptr;
     volatile uint32_t* n_reg_    = nullptr;
     volatile uint32_t* status_   = nullptr;
+
+    // Cached diagonal-entry index per row: Q.col_idx[q_diag_pos_[i]] == i.
+    // Populated by load_q_initial; consumed by set_q_diag.
+    std::vector<int> q_diag_pos_;
 
     static int32_t double_to_fp(double v) {
         int32_t raw = static_cast<int32_t>(v * FRAC_SCALE);
@@ -177,36 +253,10 @@ private:
         return v;
     }
 
-    void pack_memory(const CSRMatrix& Q,
-                     const std::vector<double>& cx,
-                     const std::vector<double>& cy,
-                     const std::vector<double>& x,
-                     const std::vector<double>& y,
-                     int n) {
-        // Zero the solver's footprint in the SRAM.
-        for (int i = 0; i < TOTAL_WORDS; ++i) sram_[i] = 0;
-
-        int nnz = Q.nnz();
-        assert(nnz <= MAX_N * MAX_N);
-        for (int j = 0; j < nnz; ++j) {
-            sram_[Q_VAL_BASE + j] = static_cast<uint32_t>(double_to_fp(Q.vals[j]));
-            sram_[Q_COL_BASE + j] = static_cast<uint32_t>(Q.col_idx[j]);
-        }
-        for (int i = 0; i <= n; ++i) {
-            sram_[Q_ROWP_BASE + i] = static_cast<uint32_t>(Q.row_ptr[i]);
-        }
+    void refresh_xy_from_sram(int n) {
         for (int i = 0; i < n; ++i) {
-            sram_[CX_X_BASE + i] = static_cast<uint32_t>(double_to_fp(cx[i]));
-            sram_[CX_Y_BASE + i] = static_cast<uint32_t>(double_to_fp(cy[i]));
-            sram_[X_BASE    + i] = static_cast<uint32_t>(double_to_fp(x[i]));
-            sram_[Y_BASE    + i] = static_cast<uint32_t>(double_to_fp(y[i]));
-        }
-    }
-
-    void unpack_results(std::vector<double>& x, std::vector<double>& y, int n) {
-        for (int i = 0; i < n; ++i) {
-            x[i] = fp_to_double(static_cast<int32_t>(sram_[X_BASE + i]));
-            y[i] = fp_to_double(static_cast<int32_t>(sram_[Y_BASE + i]));
+            x_pos[i] = fp_to_double(static_cast<int32_t>(sram_[X_BASE + i]));
+            y_pos[i] = fp_to_double(static_cast<int32_t>(sram_[Y_BASE + i]));
         }
     }
 };
