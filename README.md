@@ -36,26 +36,44 @@ mkdir -p build && cd build
 
 # --- Software placers (no FPGA needed) ---
 uv run run-placer python ../benchmarks/iccad04/DMA      # Python baseline (algorithmic spec)
-uv run run-placer sw     ../benchmarks/iccad04/DMA      # C++ double-precision CG
-uv run run-placer golden ../benchmarks/iccad04/DMA      # C++ fixed-point golden CG (SW model of the FPGA)
+uv run run-placer sw     ../benchmarks/iccad04/DMA      # C++ double-precision CG (any size)
+uv run run-placer golden ../benchmarks/custom/parallel_chains_50  # C++ fixed-point golden CG (SW model of the FPGA)
 
 # --- Hardware-in-the-loop simulation (Verilator) ---
 uv run run-placer verilated    ../benchmarks/custom/parallel_chains_50   # Verilated RTL CG, default v6
 uv run run-placer verilated v3 ../benchmarks/custom/parallel_chains_50   # any of v2|v3|v4|v5|v5_deep|v6
 
 # --- DE1-SoC board (needs .env with BOARD/PASS) ---
-uv run run-placer arm  ../benchmarks/iccad04/DMA        # cross-compile + run SW CG on the board's ARM
-uv run run-placer fpga ../benchmarks/iccad04/DMA        # cross-compile + run FPGA-accelerated CG
+uv run run-placer arm  ../benchmarks/iccad04/DMA                  # cross-compile + run SW CG on the board's ARM (any size)
+uv run run-placer fpga ../benchmarks/custom/parallel_chains_50    # cross-compile + run FPGA-accelerated CG
+
+# --- Batch: point at a parent dir to run every benchmark inside it ---
+uv run run-placer verilated v6 ../benchmarks/custom     # runs every benchmark in custom/
+uv run run-placer fpga         ../benchmarks/custom     # runs every custom benchmark on the board
 
 # --- Iter sweep + slideshow (every mode except python) ---
 uv run run-placer verilated ../benchmarks/custom/parallel_chains_50 --sweep
 ```
 
-Each run writes `<design>-initial.json` and `<design>-final.json` to the
-build dir. `arm`/`fpga` additionally need a gitignored `.env` at the repo
+`golden` and `verilated` both accept `--frac-bits B` (default 14, range
+`[1, 26]`) to sweep precision; total stays at 27 bits, so `int_bits =
+27 - frac_bits`. The other backends ignore it.
+
+`golden`, `verilated`, and `fpga` are capped at `MAX_N=50` cells (the
+synthesized bitstream + the C++ driver mirrors are sized for it). Use
+[`benchmarks/custom/`](benchmarks/custom/) for those modes; ICCAD04 only
+fits on `python`, `sw`, and `arm`.
+
+Each run writes `<design>-initial.json`, `<design>-final.json`, and a
+`<design>-final.png` rendering of the final placement to the build dir.
+`arm`/`fpga` additionally need a gitignored `.env` at the repo
 root with `BOARD='root@<ip>'` and `PASS='...'` (see
 [Running the placer](#running-the-placer)). `fpga` also requires the CG
 bitstream to already be programmed onto the DE1-SoC.
+
+If `run-placer` is invoked from a directory whose name starts with
+`build`, that directory is wiped at the start of each invocation so
+stale binaries / JSONs from a previous run never bleed into the next one.
 
 ### Tests
 
@@ -262,8 +280,8 @@ the headline changes from v1 are:
 - **Sequential FSM** in [`CGCtrl.v`](fpga/hw/v2/CGCtrl.v) driving every mux,
   register write-enable, and val/rdy handshake -- one flat FSM, no nested
   control.
-- **DSP-mapped multipliers** -- `FpMul`/`FpMulWide` carry
-  `(* multstyle = "dsp" *)` so Quartus targets the Cyclone V's 27x27 DSPs.
+- **DSP-mapped multipliers** -- `FpMul`/`FpMulWide` target the Cyclone V's 27x27
+  DSPs.
 - **Parameterized SIMD** -- `p_lanes` (default 2) governs the width of
   `VecDot` and `AXPY` (`p_lanes` DSPs each); `SPMV` stays single-lane
   because it's memory-bandwidth bound at the single-port SRAM.
@@ -416,11 +434,11 @@ mkdir -p build && cd build
 
 uv run run-placer python       ../benchmarks/iccad04/DMA               # Python baseline
 uv run run-placer sw           ../benchmarks/iccad04/DMA               # SW CG (double precision)
-uv run run-placer golden       ../benchmarks/iccad04/DMA               # FP golden CG (SW)
-uv run run-placer verilated    ../benchmarks/iccad04/DMA               # Verilator CG (default v6)
+uv run run-placer golden       ../benchmarks/custom/parallel_chains_50 # FP golden CG (SW); --frac-bits B (default 14)
+uv run run-placer verilated    ../benchmarks/custom/parallel_chains_50 # Verilator CG (default v6); --frac-bits B
 uv run run-placer verilated v3 ../benchmarks/custom/parallel_chains_50 # Verilator CG (older version)
 uv run run-placer arm          ../benchmarks/iccad04/DMA               # SW CG on the DE1-SoC ARM
-uv run run-placer fpga         ../benchmarks/iccad04/DMA               # Real FPGA bitstream (default v6)
+uv run run-placer fpga         ../benchmarks/custom/parallel_chains_50 # Real FPGA bitstream (default v6); MAX_N=50
 ```
 
 The `arm` and `fpga` modes need `arm-linux-gnueabihf-g++` on the host;
@@ -436,6 +454,40 @@ bitstream to already be programmed onto the DE1-SoC.
 BOARD='root@10.253.17.19'
 PASS='greatpassword123!'
 ```
+
+## Batch mode -- run every benchmark in a directory
+
+If `<benchmark-path>` is a single benchmark directory (one with `lef/`
+and `def/` subdirs that contain at least one `.lef` and one `.def`),
+`run-placer` runs that one design and prints a per-run summary. If
+the path is a *parent* directory whose immediate children are
+benchmark dirs (e.g. `benchmarks/custom`, `benchmarks/iccad04`),
+`run-placer` automatically:
+
+1. Builds the placer once (the binary is the same for every benchmark).
+2. For remote modes (`arm`, `fpga`), opens **one** SSH session and
+   reuses it across every benchmark.
+3. Runs each benchmark in the parent dir in alphabetical order.
+4. Prints a per-run summary block after each benchmark and a fixed-width
+   cross-benchmark comparison table at the end (cells, iters, outcome,
+   final HPWL, density, CG avg/total ms, and -- for hardware modes --
+   HW CG cycles).
+
+Batch mode is detected from the directory structure -- there is no
+extra flag. `python` mode does not support batch (use `sw` instead).
+
+```bash
+# Run every custom benchmark on the v6 RTL through Verilator
+uv run run-placer verilated v6 ../benchmarks/custom
+
+# Run every custom benchmark on the FPGA in a single SSH session
+uv run run-placer fpga ../benchmarks/custom
+```
+
+When `run-placer` is invoked from a directory whose name starts with
+`build`, the directory is wiped at the start of each run. This keeps
+batch invocations from accidentally mixing artifacts from different
+modes / RTL versions in the same build dir.
 
 ## Iteration sweep + animation
 
@@ -465,8 +517,9 @@ uv run visualizer DMA-final.json
 ```
 
 Controls: scroll to zoom, drag to pan, F to fit-all, Q to quit. A
-`--png <out.png> <in.json>` flag renders the same view headlessly (used by
-the sweep above).
+`--png <out.png> <in.json>` flag renders the same view headlessly (used
+by `run-placer` to produce `<design>-final.png` after every run, and
+the per-iter frames in sweep mode).
 
 ## Running the tests
 

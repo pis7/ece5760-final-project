@@ -11,7 +11,7 @@ option(STATIC_BUILD "Build with static linking" OFF)
 option(USE_HW_CG "Use Verilator CGTop for CG solve" OFF)
 # Use C++ fixed-point golden model instead of Verilator (faster, no Verilog needed)
 option(USE_FP_GOLDEN "Use C++ fixed-point golden model instead of Verilator" OFF)
-set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
+set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits). int_bits = 27 - FRAC_BITS; total stays at 27.")
 set(HW_CG_VERSION "v6" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide), v3 (NR divide + rp_lo/rp_hi collapse), v4 (v3 + parallel x/r AXPY), v5 (v4 + multi-block on-chip RAM), v5_deep (v5 + 1 cycle/nz pipelined SPMV), or v6 (v5 + parallel x/y solve datapaths)")
 set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3 v4 v5 v5_deep v6)
 
@@ -78,7 +78,7 @@ elseif(USE_HW_CG)
         ${VERILOG_DIR}/FpMath.v
         ${VERILOG_DIR}/LinAlg.v
         ${EXTRA_RTL}
-      COMMENT "Verilating CGTop (${HW_CG_VERSION})"
+      COMMENT "Verilating CGTop (${HW_CG_VERSION}, p_frac_bits=${FRAC_BITS})"
     )
     add_custom_target(verilator_model DEPENDS ${VDIR}/VCGTop__ALL.a)
 

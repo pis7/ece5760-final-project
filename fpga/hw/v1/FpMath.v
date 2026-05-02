@@ -1,5 +1,4 @@
 // Fixed-point signed multiply
-// Uses MandelbrotSignedMult pattern: {sign, high bits}
 
 module FpMul #(
   parameter p_int_bits   = 13,

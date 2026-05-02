@@ -11,9 +11,7 @@
 // both.
 
 module CGTop #(
-  // Per-engine SIMD width. Defaults to 4 so two engines together fit
-  // in roughly the same compute fabric a single 8-lane engine would.
-  parameter p_lanes            = 4,
+  parameter p_lanes            = 8,
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,

@@ -10,7 +10,7 @@ design that runs against Qsys on-chip SRAM via an Avalon slave port.
 | Area | v1 | v2 | Win |
 | --- | --- | --- | --- |
 | Datapath structure | fully combinational; one CG iteration is one giant fan-out | sequential FSM; one cycle per mux/latch/handshake step | synthesizable on Cyclone V |
-| Multipliers | inferred logic | DSP-mapped via `(* multstyle = "dsp" *)` (Cyclone V 27x27 DSP block) | maps to silicon multipliers |
+| Multipliers | inferred logic | DSP-mapped (Cyclone V 27x27 DSP block) | maps to silicon multipliers |
 | SIMD | implicit (combinational mass) | parameterized `p_lanes` for VecDot/AXPY (`p_lanes` DSPs each); SPMV stays single-lane (memory-bandwidth bound) | tunable area/throughput |
 | `FpDiv` | combinational restoring divide | shift-subtract restoring divide with val/rdy (~63 cycles) | timing-closed at 50 MHz |
 | Bus | direct combinational reads | single Avalon slave port arbitrated between CGCtrl and SPMV via `ctrl_mem_src_spmv` | matches Qsys on-chip RAM IP |
@@ -52,7 +52,7 @@ same 16 testbench cases bit-exactly against the golden.
 ## Fixed-point format
 
 - 27-bit total (`p_int_bits=13`, `p_frac_bits=14`), targeting the
-  Cyclone V 27x27 DSP block via `(* multstyle = "dsp" *)`.
+  Cyclone V 27x27 DSP block.
 - `p_acc_bits = 48` for VecDot/SPMV accumulators and FpDiv operands -
   products accumulate without early truncation.
 

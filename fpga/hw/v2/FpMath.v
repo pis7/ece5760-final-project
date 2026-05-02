@@ -1,8 +1,5 @@
 // Fixed-point signed multiply
-// Uses MandelbrotSignedMult pattern: {sign, high bits}
-// multstyle="dsp" so Quartus targets the 27x27 DSP block on Cyclone V.
 
-(* multstyle = "dsp" *)
 module FpMul #(
   parameter p_int_bits   = 13,
   parameter p_frac_bits  = 14,
@@ -27,7 +24,6 @@ endmodule
 // with the frac-bits right shift applied. Used so products can
 // accumulate without early truncation.
 
-(* multstyle = "dsp" *)
 module FpMulWide #(
   parameter p_int_bits   = 13,
   parameter p_frac_bits  = 14,
@@ -49,7 +45,7 @@ module FpMulWide #(
 endmodule
 
 // Sequential fixed-point signed divide (restoring shift-subtract) with
-// val/rdy handshake matching the MandelbrotHandler istream/ostream
+// val/rdy handshake
 // convention.
 //   istream_msg = {a, b}          sent together on one handshake
 //   ostream_msg = quotient        one handshake per completed divide

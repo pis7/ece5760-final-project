@@ -8,62 +8,62 @@ END UNITS
 MACRO HUGE
     CLASS CORE ;
     ORIGIN 0.000 0.000 ;
-    SIZE 1.5 BY 1.5 ;
+    SIZE 0.375 BY 0.375 ;
     SYMMETRY x y ;
     PIN Y0
         DIRECTION OUTPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END Y0
     PIN Y1
         DIRECTION OUTPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END Y1
     PIN Y2
         DIRECTION OUTPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END Y2
     PIN Y3
         DIRECTION OUTPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END Y3
     PIN A0
         DIRECTION INPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END A0
     PIN A1
         DIRECTION INPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END A1
     PIN A2
         DIRECTION INPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END A2
     PIN A3
         DIRECTION INPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 1.5 1.5 ;
+        RECT 0.0 0.0 0.375 0.375 ;
         END
     END A3
 END HUGE
@@ -71,20 +71,20 @@ END HUGE
 MACRO TINY
     CLASS CORE ;
     ORIGIN 0.000 0.000 ;
-    SIZE 0.05 BY 0.05 ;
+    SIZE 0.0125 BY 0.0125 ;
     SYMMETRY x y ;
     PIN Y
         DIRECTION OUTPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 0.05 0.05 ;
+        RECT 0.0 0.0 0.0125 0.0125 ;
         END
     END Y
     PIN A
         DIRECTION INPUT ;
         PORT
         LAYER metal1 ;
-        RECT 0.0 0.0 0.05 0.05 ;
+        RECT 0.0 0.0 0.0125 0.0125 ;
         END
     END A
 END TINY
