@@ -26,9 +26,9 @@ End-to-end on Verilator HW CG (27-bit fixed-point throughout, 13 int
 
 | Benchmark | v2 cycles | v3 cycles | Speedup |
 | --- | --- | --- | --- |
-| tiny1 | 54672 | 38762 | **1.41x** |
-| tiny2 | 60112 | 42234 | **1.42x** |
-| tiny3 | 238216 | 188640 | **1.26x** |
+| simple_logic_10    | 54672  | 38762  | **1.41x** |
+| mixed_macro_10     | 60112  | 42234  | **1.42x** |
+| parallel_chains_50 | 238216 | 188640 | **1.26x** |
 
 HPWL trajectories are bit-exact with v2 (and the golden CG via
 `-DCG_GOLDEN_USE_NR`). Cycle counts are the total of all
@@ -63,7 +63,7 @@ cmake ../fpga/hw/test && make
 End-to-end against the Verilator placer:
 
 ```
-./run-placer.sh verilated benchmarks/custom/tiny3 v3
+./run-placer.sh verilated benchmarks/custom/parallel_chains_50 v3
 ```
 
 ## Silicon

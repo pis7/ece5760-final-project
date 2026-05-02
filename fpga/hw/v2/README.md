@@ -133,7 +133,7 @@ convention. Each is `{Kernel}Ctrl` + `{Kernel}Dpath` wrapped in a
   and `rp_hi` (2-cycle ADDR/CAPT pairs), then for each nnz read val,
   read col, MAC into a 48-bit accumulator. Emits `(row_idx, row_val)`
   per output handshake. A pipelined inner loop (2 cycles/nnz) was
-  attempted but caused correctness regressions on tiny3 - reverted
+  attempted but caused correctness regressions on parallel_chains_50 - reverted
   (see comment in [LinAlg.v](LinAlg.v)).
 - **VecNegSub_seq** - `result = -(a + b)`. Used inline by CGCtrl's
   `S_VNS_R` phase via the `WD_VNS` write-data mux source rather than

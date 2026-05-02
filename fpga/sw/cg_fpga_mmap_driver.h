@@ -31,7 +31,11 @@
 class CGHwDriver {
 public:
     // -- Fixed-point config (must match Verilog CGTop parameters) -------------
+#ifndef HW_MAX_N
     static constexpr int MAX_N       = 50;
+#else
+    static constexpr int MAX_N       = HW_MAX_N;
+#endif
     static constexpr int TOTAL_BITS  = 27;
 #ifndef HW_FRAC_BITS
     static constexpr int FRAC_BITS   = 14;

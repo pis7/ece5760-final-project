@@ -1,0 +1,94 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN dense_pack_36 ;
+UNITS DISTANCE MICRONS 100 ;
+
+DIEAREA ( 0 0 ) ( 500 500 ) ;
+
+COMPONENTS 36 ;
+- U1 MED + PLACED ( 30 30 ) N ;
+- U2 MED + PLACED ( 105 30 ) N ;
+- U3 MED + PLACED ( 180 30 ) N ;
+- U4 MED + PLACED ( 255 30 ) N ;
+- U5 MED + PLACED ( 330 30 ) N ;
+- U6 MED + PLACED ( 405 30 ) N ;
+- U7 MED + PLACED ( 30 105 ) N ;
+- U8 MED + PLACED ( 105 105 ) N ;
+- U9 MED + PLACED ( 180 105 ) N ;
+- U10 MED + PLACED ( 255 105 ) N ;
+- U11 MED + PLACED ( 330 105 ) N ;
+- U12 MED + PLACED ( 405 105 ) N ;
+- U13 MED + PLACED ( 30 180 ) N ;
+- U14 MED + PLACED ( 105 180 ) N ;
+- U15 MED + PLACED ( 180 180 ) N ;
+- U16 MED + PLACED ( 255 180 ) N ;
+- U17 MED + PLACED ( 330 180 ) N ;
+- U18 MED + PLACED ( 405 180 ) N ;
+- U19 MED + PLACED ( 30 255 ) N ;
+- U20 MED + PLACED ( 105 255 ) N ;
+- U21 MED + PLACED ( 180 255 ) N ;
+- U22 MED + PLACED ( 255 255 ) N ;
+- U23 MED + PLACED ( 330 255 ) N ;
+- U24 MED + PLACED ( 405 255 ) N ;
+- U25 MED + PLACED ( 30 330 ) N ;
+- U26 MED + PLACED ( 105 330 ) N ;
+- U27 MED + PLACED ( 180 330 ) N ;
+- U28 MED + PLACED ( 255 330 ) N ;
+- U29 MED + PLACED ( 330 330 ) N ;
+- U30 MED + PLACED ( 405 330 ) N ;
+- U31 MED + PLACED ( 30 405 ) N ;
+- U32 MED + PLACED ( 105 405 ) N ;
+- U33 MED + PLACED ( 180 405 ) N ;
+- U34 MED + PLACED ( 255 405 ) N ;
+- U35 MED + PLACED ( 330 405 ) N ;
+- U36 MED + PLACED ( 405 405 ) N ;
+END COMPONENTS
+
+PINS 2 ;
+- in0 + NET in0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 250 ) N ;
+- out0 + NET n35 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 250 ) N ;
+END PINS
+
+NETS 37 ;
+- in0 ( PIN in0 ) ( U1 A ) ;
+- n0 ( U1 Y ) ( U2 A ) ;
+- n1 ( U2 Y ) ( U3 A ) ;
+- n2 ( U3 Y ) ( U4 A ) ;
+- n3 ( U4 Y ) ( U5 A ) ;
+- n4 ( U5 Y ) ( U6 A ) ;
+- n5 ( U6 Y ) ( U7 A ) ;
+- n6 ( U7 Y ) ( U8 A ) ;
+- n7 ( U8 Y ) ( U9 A ) ;
+- n8 ( U9 Y ) ( U10 A ) ;
+- n9 ( U10 Y ) ( U11 A ) ;
+- n10 ( U11 Y ) ( U12 A ) ;
+- n11 ( U12 Y ) ( U13 A ) ;
+- n12 ( U13 Y ) ( U14 A ) ;
+- n13 ( U14 Y ) ( U15 A ) ;
+- n14 ( U15 Y ) ( U16 A ) ;
+- n15 ( U16 Y ) ( U17 A ) ;
+- n16 ( U17 Y ) ( U18 A ) ;
+- n17 ( U18 Y ) ( U19 A ) ;
+- n18 ( U19 Y ) ( U20 A ) ;
+- n19 ( U20 Y ) ( U21 A ) ;
+- n20 ( U21 Y ) ( U22 A ) ;
+- n21 ( U22 Y ) ( U23 A ) ;
+- n22 ( U23 Y ) ( U24 A ) ;
+- n23 ( U24 Y ) ( U25 A ) ;
+- n24 ( U25 Y ) ( U26 A ) ;
+- n25 ( U26 Y ) ( U27 A ) ;
+- n26 ( U27 Y ) ( U28 A ) ;
+- n27 ( U28 Y ) ( U29 A ) ;
+- n28 ( U29 Y ) ( U30 A ) ;
+- n29 ( U30 Y ) ( U31 A ) ;
+- n30 ( U31 Y ) ( U32 A ) ;
+- n31 ( U32 Y ) ( U33 A ) ;
+- n32 ( U33 Y ) ( U34 A ) ;
+- n33 ( U34 Y ) ( U35 A ) ;
+- n34 ( U35 Y ) ( U36 A ) ;
+- n35 ( U36 Y ) ( PIN out0 ) ;
+END NETS
+
+END DESIGN

@@ -28,7 +28,7 @@ If `vals[]` and `col_idx[]` lived in **separate** M10K-backed banks (not in the 
 - Replace the 4-state `vals`/`cols` fetch with a 1-state issue + 1-state capture (or a 2-cycle pipeline) reading both banks.
 - Costs: M10K blocks for Q (sized by max-nnz across designs); a separate load path. Frees the Qsys SRAM for vector traffic only.
 
-This is the same lesson the v3 pipelined-SPMV attempt was reaching toward — see the comment block around [../v3/LinAlg.v](../v3/LinAlg.v) lines 549-553, which notes a prior attempt regressed on `tiny3`. Splitting into separate read ports rather than time-multiplexing one port avoids the hazard that likely caused the regression.
+This is the same lesson the v3 pipelined-SPMV attempt was reaching toward — see the comment block around [../v3/LinAlg.v](../v3/LinAlg.v) lines 549-553, which notes a prior attempt regressed on `parallel_chains_50`. Splitting into separate read ports rather than time-multiplexing one port avoids the hazard that likely caused the regression.
 
 **Estimated payoff**: ~2x SPMV throughput, which since SPMV is the per-iteration time-dominant operation translates to a ~1.5-1.8x overall iteration speedup.
 
@@ -81,4 +81,95 @@ This is a non-trivial rewrite (state machine + scoreboard for in-flight scalars)
 - Repurpose the existing `S_LD_*` states to fan-out Q load writes into both new banks.
 - Rewrite SPMV's per-nonzero fetch states from 4 cycles (`VAL_ADDR -> VAL_CAPT -> COL_ADDR -> COL_CAPT`) to 2 (`ADDR -> CAPT`, both banks in parallel).
 - Run the v3/v4 testbenches (`./VCGTop_tb_v3`, `./VCGTop_tb_v4`) — they must remain bit-exact against DPI golden.
-- Run `uv run run-placer verilated v4 ../benchmarks/custom/tiny3` and the larger ICCAD04 cases; compare wall-clock per CG iteration before/after.
+- Run `uv run run-placer verilated v4 ../benchmarks/custom/parallel_chains_50` and the larger ICCAD04 cases; compare wall-clock per CG iteration before/after.
+
+## v5 baseline: shipped state
+
+- Seven dedicated Qsys on-chip RAM slaves: `q_val_ram`, `q_col_ram`,
+  `q_rowp_ram`, `cx_ram`, `cy_ram`, `x_ram`, `y_ram`. Each has its own
+  RTL-facing port (no bus mux).
+- SPMV inner loop: `S_NZ_ADDR -> S_NZ_CAPT -> S_ACC` (3 cycles/nz, down
+  from v4's 5).
+- `cx_reg` removed from the central RF; `S_LD_CX_*` states removed;
+  `S_VNS_R` serialized to `S_VNS_R_ADDR -> S_VNS_R_CAPT` reading
+  cx directly from `cx_ram` (single-element, single-lane writeback).
+- x/y still live in `x_vec_reg` (banked flop array). `S_LD_X_*` and
+  `S_WB_WRITE` survive structurally; addresses are local-base 0 in the
+  dedicated `x_ram` / `y_ram` slaves (sel_y muxed at the CGTop level).
+- Per-version drivers: `cg_verilator_driver_v5.h`, `cg_fpga_mmap_driver_v5.h`.
+  Old v4 driver is to `cg_fpga_mmap_driver.h`. CMake variables `HW_CG_VERSION` /
+  `HW_FPGA_VERSION` select between v4 and v5 builds.
+- Bit-exact against DPI golden (16/16 tests pass).
+- ~1.42x cycle-count speedup measured on `parallel_chains_50` Verilator run vs v4.
+
+## Future work (deferred from the v5 baseline)
+
+### A. Deeper SPMV pipeline (toward 1 cycle/nz)
+
+Today's `S_NZ_ADDR -> S_NZ_CAPT -> S_ACC` is 3 cycles/nz. With per-port
+M10K and a careful pipeline, this can shrink toward 1 cycle/nz by
+overlapping `ADDR(j+1)` with `CAPT(j)` and possibly with the MAC. The
+v3 attempt at this kind of pipeline regressed on `parallel_chains_50` despite passing
+the bit-exact tests, so the rework needs:
+- Careful handling of the last-nz tail (no spurious read past `rp_hi`).
+- Pipeline of `vec[col]` lookup: today's combinational `vec_rd_data` on
+  the just-captured `col_reg` becomes a 1-cycle-delayed read if we want
+  to overlap. Adding a `vec_addr` register one stage ahead solves this.
+- `val_reg` / `col_reg` register reuse across pipeline stages.
+
+Land only after the v5 baseline is benchmark-validated end-to-end on the
+DE1-SoC and the regression suite covers the corner cases (already 16
+tests; consider adding random-stress with a self-checking comparator).
+
+### B. Overlap x and y solves (parallel dimension solves)
+
+With cx/cy/x/y in dedicated M10K slaves and Q's read ports owned solely
+by SPMV, the only resource shared between an x-solve and a y-solve is the
+Q matrix itself, which is read-only. Approach:
+- Duplicate the entire CG datapath (`CGCtrl` + `CGDpath` + linalg kernels
+  + `FpDiv`) so two independent CG engines share a single FPGA.
+- Halve `p_lanes` per copy to keep the area roughly constant.
+- Each copy owns its own cx/x (or cy/y) slaves; both copies share the
+  q_val/q_col/q_rowp slaves. The shared Q ports need either:
+  - a 2:1 read mux per Q port (with a small arbiter), or
+  - Qsys true-dual-port on-chip RAM with two RTL-facing read ports
+    (preferred; no contention at all).
+- Driver and FSM changes: `solve()` issues both x- and y- solves
+  concurrently and waits for both `sw_done` signals.
+
+Expected end-to-end speedup is close to 2x (modulo any contention on the
+shared Q ports). Implement after this v5 baseline is verified bit-exact
+on the board.
+
+### C. Concurrent kernel firing within a single solve
+
+Same as PLAN.md "option 3" above — orthogonal to (A) and (B), enabled by
+v5's multi-port topology. Rework `CGCtrl` so VecDot/AXPY/SPMV can fire
+concurrently when dependencies are satisfied (e.g. start `delta_new = r^T r`
+the moment the first lane of `r` is updated). Significant FSM rewrite
+plus a scoreboard for in-flight scalars.
+
+### D. Bank x/y across `p_lanes` M10Ks
+
+Only relevant when problem sizes force x/y out of the central RF (above
+~thousands of cells per dimension). Not triggered at `p_max_n=50`.
+
+## Required Qsys changes (manual)
+
+`Computer_System.qsys` needs to expose seven on-chip RAM IPs whose
+FPGA-facing slave port names match the bundles in `fpga/hw/v5/FPGATop.v`:
+
+| Slave | Words | RTL-facing slave name |
+|---|---|---|
+| `q_val_ram`  | `MAX_N*MAX_N` (2500) | `q_val_ram_*` |
+| `q_col_ram`  | `MAX_N*MAX_N` (2500) | `q_col_ram_*` |
+| `q_rowp_ram` | `MAX_N+1` (51)        | `q_rowp_ram_*` |
+| `cx_ram`     | `MAX_N` (50)          | `cx_ram_*` |
+| `cy_ram`     | `MAX_N` (50)          | `cy_ram_*` |
+| `x_ram`      | `MAX_N` (50)          | `x_ram_*` |
+| `y_ram`      | `MAX_N` (50)          | `y_ram_*` |
+
+Each is dual-port: one FPGA-facing slave (driven by CGTop), one ARM-facing
+slave on the h2f bridge (driven by `cg_fpga_mmap_driver_v5.h`). Update
+the bridge base addresses in the v5 mmap driver if the regenerated Qsys
+system places them differently from the defaults.

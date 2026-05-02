@@ -1,0 +1,99 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN mesh_grid_25 ;
+UNITS DISTANCE MICRONS 100 ;
+
+DIEAREA ( 0 0 ) ( 500 500 ) ;
+
+COMPONENTS 25 ;
+- U1 GATE2 + PLACED ( 50 50 ) N ;
+- U2 GATE2 + PLACED ( 140 50 ) N ;
+- U3 GATE2 + PLACED ( 230 50 ) N ;
+- U4 GATE2 + PLACED ( 320 50 ) N ;
+- U5 GATE2 + PLACED ( 410 50 ) N ;
+- U6 GATE2 + PLACED ( 50 140 ) N ;
+- U7 GATE2 + PLACED ( 140 140 ) N ;
+- U8 GATE2 + PLACED ( 230 140 ) N ;
+- U9 GATE2 + PLACED ( 320 140 ) N ;
+- U10 GATE2 + PLACED ( 410 140 ) N ;
+- U11 GATE2 + PLACED ( 50 230 ) N ;
+- U12 GATE2 + PLACED ( 140 230 ) N ;
+- U13 GATE2 + PLACED ( 230 230 ) N ;
+- U14 GATE2 + PLACED ( 320 230 ) N ;
+- U15 GATE2 + PLACED ( 410 230 ) N ;
+- U16 GATE2 + PLACED ( 50 320 ) N ;
+- U17 GATE2 + PLACED ( 140 320 ) N ;
+- U18 GATE2 + PLACED ( 230 320 ) N ;
+- U19 GATE2 + PLACED ( 320 320 ) N ;
+- U20 GATE2 + PLACED ( 410 320 ) N ;
+- U21 GATE2 + PLACED ( 50 410 ) N ;
+- U22 GATE2 + PLACED ( 140 410 ) N ;
+- U23 GATE2 + PLACED ( 230 410 ) N ;
+- U24 GATE2 + PLACED ( 320 410 ) N ;
+- U25 GATE2 + PLACED ( 410 410 ) N ;
+END COMPONENTS
+
+PINS 20 ;
+- in_t0 + NET in_t0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 50 500 ) N ;
+- in_t1 + NET in_t1 + DIRECTION INPUT + USE SIGNAL + PLACED ( 140 500 ) N ;
+- in_t2 + NET in_t2 + DIRECTION INPUT + USE SIGNAL + PLACED ( 230 500 ) N ;
+- in_t3 + NET in_t3 + DIRECTION INPUT + USE SIGNAL + PLACED ( 320 500 ) N ;
+- in_t4 + NET in_t4 + DIRECTION INPUT + USE SIGNAL + PLACED ( 410 500 ) N ;
+- in_l0 + NET in_l0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 50 ) N ;
+- in_l1 + NET in_l1 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 140 ) N ;
+- in_l2 + NET in_l2 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 230 ) N ;
+- in_l3 + NET in_l3 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 320 ) N ;
+- in_l4 + NET in_l4 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 410 ) N ;
+- out_r0 + NET n_0_4 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 50 ) N ;
+- out_r1 + NET n_1_4 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 140 ) N ;
+- out_r2 + NET n_2_4 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 230 ) N ;
+- out_r3 + NET n_3_4 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 320 ) N ;
+- out_r4 + NET n_4_4 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 410 ) N ;
+- out_b0 + NET n_4_0 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 50 0 ) N ;
+- out_b1 + NET n_4_1 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 140 0 ) N ;
+- out_b2 + NET n_4_2 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 230 0 ) N ;
+- out_b3 + NET n_4_3 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 320 0 ) N ;
+- out_b4 + NET n_4_4 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 410 0 ) N ;
+END PINS
+
+NETS 35 ;
+- in_t0 ( PIN in_t0 ) ( U1 A ) ;
+- in_t1 ( PIN in_t1 ) ( U2 A ) ;
+- in_t2 ( PIN in_t2 ) ( U3 A ) ;
+- in_t3 ( PIN in_t3 ) ( U4 A ) ;
+- in_t4 ( PIN in_t4 ) ( U5 A ) ;
+- in_l0 ( PIN in_l0 ) ( U1 B ) ;
+- in_l1 ( PIN in_l1 ) ( U6 B ) ;
+- in_l2 ( PIN in_l2 ) ( U11 B ) ;
+- in_l3 ( PIN in_l3 ) ( U16 B ) ;
+- in_l4 ( PIN in_l4 ) ( U21 B ) ;
+- n_0_0 ( U1 Y ) ( U6 A ) ( U2 B ) ;
+- n_0_1 ( U2 Y ) ( U7 A ) ( U3 B ) ;
+- n_0_2 ( U3 Y ) ( U8 A ) ( U4 B ) ;
+- n_0_3 ( U4 Y ) ( U9 A ) ( U5 B ) ;
+- n_0_4 ( U5 Y ) ( U10 A ) ( PIN out_r0 ) ;
+- n_1_0 ( U6 Y ) ( U11 A ) ( U7 B ) ;
+- n_1_1 ( U7 Y ) ( U12 A ) ( U8 B ) ;
+- n_1_2 ( U8 Y ) ( U13 A ) ( U9 B ) ;
+- n_1_3 ( U9 Y ) ( U14 A ) ( U10 B ) ;
+- n_1_4 ( U10 Y ) ( U15 A ) ( PIN out_r1 ) ;
+- n_2_0 ( U11 Y ) ( U16 A ) ( U12 B ) ;
+- n_2_1 ( U12 Y ) ( U17 A ) ( U13 B ) ;
+- n_2_2 ( U13 Y ) ( U18 A ) ( U14 B ) ;
+- n_2_3 ( U14 Y ) ( U19 A ) ( U15 B ) ;
+- n_2_4 ( U15 Y ) ( U20 A ) ( PIN out_r2 ) ;
+- n_3_0 ( U16 Y ) ( U21 A ) ( U17 B ) ;
+- n_3_1 ( U17 Y ) ( U22 A ) ( U18 B ) ;
+- n_3_2 ( U18 Y ) ( U23 A ) ( U19 B ) ;
+- n_3_3 ( U19 Y ) ( U24 A ) ( U20 B ) ;
+- n_3_4 ( U20 Y ) ( U25 A ) ( PIN out_r3 ) ;
+- n_4_0 ( U21 Y ) ( U22 B ) ( PIN out_b0 ) ;
+- n_4_1 ( U22 Y ) ( U23 B ) ( PIN out_b1 ) ;
+- n_4_2 ( U23 Y ) ( U24 B ) ( PIN out_b2 ) ;
+- n_4_3 ( U24 Y ) ( U25 B ) ( PIN out_b3 ) ;
+- n_4_4 ( U25 Y ) ( PIN out_r4 ) ( PIN out_b4 ) ;
+END NETS
+
+END DESIGN

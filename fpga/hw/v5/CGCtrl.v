@@ -1,22 +1,16 @@
-// v4 CGCtrl: parallel x-AXPY and r-AXPY, plus fused S_VNS_R that
-// writes r_reg and d_reg in the same cycle.
+// v5 CGCtrl: cx/cy live in dedicated M10K slaves (not in the central
+// RF). The S_LD_CX_* state pair is gone; cx is read directly from
+// cx_ram (or cy_ram via sel_y) during a serialized S_VNS_R that walks
+// stream_idx 0..n-1 and writes one (r_reg, d_reg) element per element.
 //
-// v3 ran S_AXPY_X_FEED then S_AXPY_R_FEED sequentially, sharing one
-// AXPY unit. v4 fires both updates in lockstep in a single merged
-// state S_AXPY_XR_FEED, using two AXPY units in CGDpath:
-//   u_axpy_x: x += alpha * d   (ADD, reads via rd_a/rd_b)
-//   u_axpy_r: r -= alpha * q   (SUB, reads via rd_c/rd_d)
-// Both consume the same alpha coef; both produce a p_lanes-wide z per
-// handshake; both write back through independent write paths in the
-// same cycle (x_vec_reg via primary, r_reg via secondary).
+// x and y still live in the x_vec_reg banked RF (AXPY_X writes them
+// p_lanes-wide every iter, so M10K-banking is left to a future v).
+// S_LD_X_* and S_WB_WRITE survive structurally but their address is
+// now a flat stream_idx (no base-addr add) -- CGDpath routes ctrl_xy_*
+// to x_ram or y_ram based on sel_y.
 //
-// The secondary write port is also reused in S_VNS_R: the computed
-// r_new = -(cx + q) is written into both r_reg (primary) and d_reg
-// (secondary) on the same cycle, eliminating v3's separate S_COPY_D
-// pass and saving num_groups cycles per CG run.
-//
-// S_AXPY_D_FEED is unchanged structurally and reuses u_axpy_x only;
-// u_axpy_r idles outside S_AXPY_XR_FEED.
+// All other v4 features (parallel x/r AXPY, fused S_VNS_R writing both
+// r_reg and d_reg, init_rr_reg fast-path) carry over unchanged.
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -25,11 +19,7 @@ module CGCtrl #(
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
   parameter p_acc_bits         = 48,
-  parameter p_m10k_addr_bits   = 32,
-  parameter p_cx_x_base_addr   = 2 * p_max_n * p_max_n + p_max_n + 1,
-  parameter p_cx_y_base_addr   = 2 * p_max_n * p_max_n + 2 * p_max_n + 1,
-  parameter p_x_base_addr      = 2 * p_max_n * p_max_n + 3 * p_max_n + 1,
-  parameter p_y_base_addr      = 2 * p_max_n * p_max_n + 4 * p_max_n + 1
+  parameter p_m10k_addr_bits   = 32
 ) (
   input  logic clk,
   input  logic rst,
@@ -49,13 +39,23 @@ module CGCtrl #(
   input  logic signed [p_acc_bits-1:0] rr_new,
   input  logic signed [p_acc_bits-1:0] rr_old,
 
-  // -- Control outputs to CGDpath ------------------------------------------
+  // -- x/y load + writeback bus (CGDpath routes to x_ram or y_ram by sel_y).
+  // Read-back into the X_VEC_REG RF in S_LD_X_CAPT goes through CGDpath's
+  // WD_MEM mux, so we don't need ctrl_xy_rdata here.
+  output logic [p_m10k_addr_bits-1:0] ctrl_xy_addr,
+  output logic                        ctrl_xy_wr_en,
+  output logic [31:0]                 ctrl_xy_wdata,
 
-  // Memory bus driven by CGCtrl during LD / WB
-  output logic [p_m10k_addr_bits-1:0] ctrl_mem_addr,
-  output logic                        ctrl_mem_wr_en,
-  output logic [31:0]                 ctrl_mem_wdata,
-  output logic                        ctrl_mem_src_spmv,
+  // -- VNS_R cx serial-read port (CGDpath routes to cx_ram or cy_ram).
+  // The capture is consumed by CGDpath's WD_VNS_SCALAR mux; CGCtrl
+  // only drives addr/rd_en.
+  output logic [p_m10k_addr_bits-1:0] vns_cx_addr,
+  output logic                        vns_cx_rd_en,
+
+  // sel_y is exposed so CGDpath/CGTop can route x_ram vs y_ram and
+  // cx_ram vs cy_ram. Held by CGCtrl across the whole second-dimension
+  // pass.
+  output logic                        sel_y,
 
   // RF read ports (p_lanes-wide). rd_a/rd_b are shared across all states;
   // rd_c/rd_d are only used in S_AXPY_XR_FEED to feed u_axpy_r.
@@ -154,19 +154,21 @@ module CGCtrl #(
   localparam BANK_SEL_W  = (CLOG2_LANES == 0) ? 1 : CLOG2_LANES;
 
   //----------------------------------------------------------------------
-  // RF select encodings (match CGDpath's rf_read function)
+  // RF select encodings (match CGDpath's rf_read function). Note:
+  // RF_CX_REG is gone in v5 -- cx now lives in cx_ram (M10K).
   //----------------------------------------------------------------------
   localparam [2:0] RF_D_REG     = 3'd0;
   localparam [2:0] RF_R_REG     = 3'd1;
   localparam [2:0] RF_X_VEC_REG = 3'd2;
-  localparam [2:0] RF_CX_REG    = 3'd3;
   localparam [2:0] RF_Q_BUF     = 3'd4;
 
-  localparam [2:0] WD_MEM    = 3'd0;
-  localparam [2:0] WD_AXPY   = 3'd1;
-  localparam [2:0] WD_SPMV   = 3'd2;
-  localparam [2:0] WD_VNS    = 3'd4;
-  localparam [2:0] WD_AXPY_R = 3'd5;
+  localparam [2:0] WD_MEM         = 3'd0;
+  localparam [2:0] WD_AXPY        = 3'd1;
+  localparam [2:0] WD_SPMV        = 3'd2;
+  // WD_VNS_SCALAR (v5): wr_data[k] = -(vns_cx_rdata + rd_b_data[k]).
+  // Single-lane writeback during the serialized S_VNS_R_CAPT.
+  localparam [2:0] WD_VNS_SCALAR  = 3'd3;
+  localparam [2:0] WD_AXPY_R      = 3'd5;
 
   //----------------------------------------------------------------------
   // State enum
@@ -177,15 +179,15 @@ module CGCtrl #(
 
     S_LD_X_ADDR,
     S_LD_X_CAPT,
-    S_LD_CX_ADDR,
-    S_LD_CX_CAPT,
 
     S_SPMV_INIT_FIRE,
     S_SPMV_INIT_COLLECT,
 
-    // Fused: writes r_reg (primary) and d_reg (secondary) with the
-    // same -(cx+q) value -- replaces v3's S_VNS_R + S_COPY_D pair.
-    S_VNS_R,
+    // Serialized in v5: read cx[stream_idx] from M10K (1-cycle latency),
+    // then in CAPT compute -(cx + q_buf[stream_idx]) and writeback to
+    // r_reg (primary) + d_reg (secondary) at single-lane index.
+    S_VNS_R_ADDR,
+    S_VNS_R_CAPT,
 
     // init_rr_reg fires on vdot_out_hs to bypass S_RR_REG_COPY.
     S_VDOT_INIT_FEED,
@@ -220,9 +222,11 @@ module CGCtrl #(
   //----------------------------------------------------------------------
   // Auxiliary registers
   //----------------------------------------------------------------------
-  logic                               sel_y;
+  logic                               sel_y_reg;
   logic [$clog2(p_max_n+1)-1:0]       stream_idx;
   logic [$clog2(p_max_n+1)-1:0]       out_idx;
+
+  assign sel_y = sel_y_reg;
 
   //----------------------------------------------------------------------
   // Handshake wires. We use u_axpy_x's handshakes as canonical for FSM
@@ -245,9 +249,6 @@ module CGCtrl #(
   logic [N_W-1:0] n_narrow;
   logic [N_W-1:0] num_groups_calc;
   assign n_narrow        = n[N_W-1:0];
-  // Round-up add in 32 bits, then truncate. n_narrow + (p_lanes - 1) can
-  // exceed N_W bits (e.g. n=50, p_lanes=16, N_W=6 -> 65 wraps to 1).
-  // Real divide (not shift) so p_lanes can be any positive integer.
   assign num_groups_calc = N_W'((n + unsigned'(p_lanes - 1)) / unsigned'(p_lanes));
 
   logic [N_W-1:0] n_reg;
@@ -281,33 +282,18 @@ module CGCtrl #(
                       || (iter > 32'd1 && rr_new >= rr_old);
 
   //----------------------------------------------------------------------
-  // Base-address selection via sel_y
-  //----------------------------------------------------------------------
-  logic [p_m10k_addr_bits-1:0] x_base_sel;
-  logic [p_m10k_addr_bits-1:0] cx_base_sel;
-  assign x_base_sel  = sel_y ? p_m10k_addr_bits'(p_y_base_addr)
-                             : p_m10k_addr_bits'(p_x_base_addr);
-  assign cx_base_sel = sel_y ? p_m10k_addr_bits'(p_cx_y_base_addr)
-                             : p_m10k_addr_bits'(p_cx_x_base_addr);
-
-  //----------------------------------------------------------------------
   // Per-lane index / valid helpers
   //----------------------------------------------------------------------
   logic [p_lanes*IDX_W-1:0] group_in_idx_packed;
   logic [p_lanes-1:0]       group_in_valid;
   logic [p_lanes*IDX_W-1:0] group_out_idx_packed;
   logic [p_lanes-1:0]       group_out_valid;
-  // Single-element accesses go through whichever lane owns the bank for
-  // stream_idx (= stream_idx mod p_lanes). single_idx_packed replicates
-  // stream_idx so any active lane sees the same bank-internal address;
-  // single_active_mask gates the write/valid to just that lane.
   logic [p_lanes*IDX_W-1:0] single_idx_packed;
   logic [p_lanes-1:0]       single_active_mask;
   logic [BANK_SEL_W-1:0]    single_active_lane;
 
   logic [N_W-1:0] stream_elem_base;
   logic [N_W-1:0] out_elem_base;
-  // Real multiply (not shift) so p_lanes can be any positive integer.
   logic [N_W-1:0] p_lanes_narrow;
   assign p_lanes_narrow = N_W'(unsigned'(p_lanes));
   assign stream_elem_base = stream_idx * p_lanes_narrow;
@@ -335,11 +321,6 @@ module CGCtrl #(
     end
   end
 
-  // Active lane for single-element accesses = stream_idx mod p_lanes.
-  // The mask is tight: only the active lane drives we/valid. The packed
-  // index replicates stream_idx so any lane's bank-internal address
-  // (idx / p_lanes) is correct. Real mod (not bit-AND) so p_lanes can be
-  // any positive integer.
   assign single_active_lane = BANK_SEL_W'(stream_idx % p_lanes_narrow);
 
   always_comb begin
@@ -379,23 +360,22 @@ module CGCtrl #(
       S_IDLE:            if (sw_go)                                           next_state = S_PREP;
       S_PREP:                                                                 next_state = S_LD_X_ADDR;
 
-      // LD x vector (1 elem / cycle)
+      // LD x vector (1 elem / cycle). v5: no S_LD_CX_* -- jump straight
+      // to SPMV_INIT after loading x.
       S_LD_X_ADDR:                                                            next_state = S_LD_X_CAPT;
-      S_LD_X_CAPT:       if (stream_idx == n_minus_1_reg)                         next_state = S_LD_CX_ADDR;
+      S_LD_X_CAPT:       if (stream_idx == n_minus_1_reg)                    next_state = S_SPMV_INIT_FIRE;
                          else                                                 next_state = S_LD_X_ADDR;
-
-      // LD cx vector (1 elem / cycle)
-      S_LD_CX_ADDR:                                                           next_state = S_LD_CX_CAPT;
-      S_LD_CX_CAPT:      if (stream_idx == n_minus_1_reg)                         next_state = S_SPMV_INIT_FIRE;
-                         else                                                 next_state = S_LD_CX_ADDR;
 
       // INIT SPMV (1 row / handshake)
       S_SPMV_INIT_FIRE:  if (spmv_in_hs)                                      next_state = S_SPMV_INIT_COLLECT;
       S_SPMV_INIT_COLLECT:
-                         if (spmv_out_hs && stream_idx == n_minus_1_reg)          next_state = S_VNS_R;
+                         if (spmv_out_hs && stream_idx == n_minus_1_reg)     next_state = S_VNS_R_ADDR;
 
-      // r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i])  (fused VNS + COPY_D)
-      S_VNS_R:           if (stream_idx == num_groups_minus_1_reg)                next_state = S_VDOT_INIT_FEED;
+      // r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i]). v5: serialized,
+      // 1 element per (ADDR, CAPT) pair. cx comes from M10K.
+      S_VNS_R_ADDR:                                                           next_state = S_VNS_R_CAPT;
+      S_VNS_R_CAPT:      if (stream_idx == n_minus_1_reg)                    next_state = S_VDOT_INIT_FEED;
+                         else                                                 next_state = S_VNS_R_ADDR;
 
       // VDOT r.r -> rr_new_latched, and (via init_rr_reg) -> rr_reg
       S_VDOT_INIT_FEED:  if (vdot_out_hs)                                     next_state = S_SPMV_RUN_FIRE;
@@ -403,7 +383,7 @@ module CGCtrl #(
       // RUN: SPMV (Q * d_reg) -> q_buf (1 row / handshake)
       S_SPMV_RUN_FIRE:   if (spmv_in_hs)                                      next_state = S_SPMV_RUN_COLLECT;
       S_SPMV_RUN_COLLECT:
-                         if (spmv_out_hs && stream_idx == n_minus_1_reg)          next_state = S_VDOT_DQ_FEED;
+                         if (spmv_out_hs && stream_idx == n_minus_1_reg)     next_state = S_VDOT_DQ_FEED;
 
       // dq = d . q_buf
       S_VDOT_DQ_FEED:    if (vdot_out_hs)                                     next_state = S_DIV_A_SEND;
@@ -430,8 +410,8 @@ module CGCtrl #(
 
       S_WB_WRITE: begin
         if (stream_idx == n_minus_1_reg) begin
-          if (sel_y)   next_state = S_CG_DONE;
-          else         next_state = S_LD_X_ADDR;
+          if (sel_y_reg) next_state = S_CG_DONE;
+          else           next_state = S_LD_X_ADDR;
         end
       end
 
@@ -446,9 +426,8 @@ module CGCtrl #(
   function automatic logic [4:0] phase_of(state_t s);
     case (s)
       S_LD_X_ADDR,         S_LD_X_CAPT:          phase_of = 5'd1;
-      S_LD_CX_ADDR,        S_LD_CX_CAPT:         phase_of = 5'd2;
       S_SPMV_INIT_FIRE,    S_SPMV_INIT_COLLECT:  phase_of = 5'd3;
-      S_VNS_R:                                   phase_of = 5'd4;
+      S_VNS_R_ADDR,        S_VNS_R_CAPT:         phase_of = 5'd4;
       S_VDOT_INIT_FEED:                          phase_of = 5'd6;
       S_SPMV_RUN_FIRE,     S_SPMV_RUN_COLLECT:   phase_of = 5'd8;
       S_VDOT_DQ_FEED:                            phase_of = 5'd9;
@@ -468,24 +447,24 @@ module CGCtrl #(
 
   always_ff @(posedge clk) begin
     if (rst) begin
-      sel_y      <= 1'b0;
+      sel_y_reg  <= 1'b0;
       stream_idx <= '0;
       out_idx    <= '0;
     end else begin
       if (state == S_PREP)
-        sel_y <= 1'b0;
-      else if (state == S_WB_WRITE && stream_idx == n_minus_1_reg && !sel_y)
-        sel_y <= 1'b1;
+        sel_y_reg <= 1'b0;
+      else if (state == S_WB_WRITE && stream_idx == n_minus_1_reg && !sel_y_reg)
+        sel_y_reg <= 1'b1;
 
       if (reset_counters)
         stream_idx <= '0;
       else begin
         case (state)
-          S_LD_X_CAPT, S_LD_CX_CAPT, S_WB_WRITE:
+          S_LD_X_CAPT, S_WB_WRITE:
             stream_idx <= stream_idx + 1;
           S_SPMV_INIT_COLLECT, S_SPMV_RUN_COLLECT:
             if (spmv_out_hs) stream_idx <= stream_idx + 1;
-          S_VNS_R:
+          S_VNS_R_CAPT:
             stream_idx <= stream_idx + 1;
           S_VDOT_INIT_FEED, S_VDOT_DQ_FEED, S_VDOT_RR_FEED:
             if (vdot_in_hs) stream_idx <= stream_idx + 1;
@@ -509,10 +488,12 @@ module CGCtrl #(
   always_comb begin
     sw_done = 1'b0;
 
-    ctrl_mem_addr     = '0;
-    ctrl_mem_wr_en    = 1'b0;
-    ctrl_mem_wdata    = '0;
-    ctrl_mem_src_spmv = 1'b0;
+    ctrl_xy_addr      = '0;
+    ctrl_xy_wr_en     = 1'b0;
+    ctrl_xy_wdata     = '0;
+
+    vns_cx_addr       = '0;
+    vns_cx_rd_en      = 1'b0;
 
     rd_a_sel            = '0;
     rd_a_idx_packed     = '0;
@@ -565,34 +546,21 @@ module CGCtrl #(
       S_PREP:            reset_iter = 1'b1;
 
       S_LD_X_ADDR: begin
-        ctrl_mem_addr = x_base_sel + p_m10k_addr_bits'(stream_idx);
+        ctrl_xy_addr = p_m10k_addr_bits'(stream_idx);
       end
       S_LD_X_CAPT: begin
-        ctrl_mem_addr      = x_base_sel + p_m10k_addr_bits'(stream_idx);
+        ctrl_xy_addr       = p_m10k_addr_bits'(stream_idx);
         wr_sel             = RF_X_VEC_REG;
         wr_idx_ctrl_packed = single_idx_packed;
         we                 = single_active_mask;
         wdata_src          = WD_MEM;
       end
 
-      S_LD_CX_ADDR: begin
-        ctrl_mem_addr = cx_base_sel + p_m10k_addr_bits'(stream_idx);
-      end
-      S_LD_CX_CAPT: begin
-        ctrl_mem_addr      = cx_base_sel + p_m10k_addr_bits'(stream_idx);
-        wr_sel             = RF_CX_REG;
-        wr_idx_ctrl_packed = single_idx_packed;
-        we                 = single_active_mask;
-        wdata_src          = WD_MEM;
-      end
-
       S_SPMV_INIT_FIRE: begin
-        ctrl_mem_src_spmv = 1'b1;
         spmv_istream_val  = 1'b1;
         rd_vec_sel        = RF_X_VEC_REG;
       end
       S_SPMV_INIT_COLLECT: begin
-        ctrl_mem_src_spmv = 1'b1;
         spmv_ostream_rdy  = 1'b1;
         rd_vec_sel        = RF_X_VEC_REG;
         wr_sel            = RF_Q_BUF;
@@ -601,23 +569,27 @@ module CGCtrl #(
         we[0]             = spmv_out_hs;
       end
 
-      // Fused VNS + COPY_D: r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i]).
-      // Primary writes r_reg via the WD_VNS mux; secondary writes the
-      // same value to d_reg by selecting WD_VNS through wdata_src_sec.
-      S_VNS_R: begin
-        rd_a_sel           = RF_CX_REG;
-        rd_a_idx_packed    = group_in_idx_packed;
-        rd_a_valid         = group_in_valid;
+      // Serialized VNS_R: ADDR drives cx_addr; CAPT latches the writeback.
+      S_VNS_R_ADDR: begin
+        vns_cx_addr  = p_m10k_addr_bits'(stream_idx);
+        vns_cx_rd_en = 1'b1;
+      end
+      S_VNS_R_CAPT: begin
+        vns_cx_addr        = p_m10k_addr_bits'(stream_idx);
+        vns_cx_rd_en       = 1'b1;
+        // q_buf read at stream_idx via single_active_lane.
         rd_b_sel           = RF_Q_BUF;
-        rd_b_idx_packed    = group_in_idx_packed;
-        rd_b_valid         = group_in_valid;
+        rd_b_idx_packed    = single_idx_packed;
+        rd_b_valid         = single_active_mask;
+        // Primary writes r_reg, secondary writes d_reg, both using the
+        // WD_VNS_SCALAR mux (-(vns_cx_rdata + rd_b)).
         wr_sel             = RF_R_REG;
-        wr_idx_ctrl_packed = group_in_idx_packed;
-        we                 = group_in_valid;
-        wdata_src          = WD_VNS;
+        wr_idx_ctrl_packed = single_idx_packed;
+        we                 = single_active_mask;
+        wdata_src          = WD_VNS_SCALAR;
         wr_sel_sec         = RF_D_REG;
-        wdata_src_sec      = WD_VNS;
-        we_sec             = group_in_valid;
+        wdata_src_sec      = WD_VNS_SCALAR;
+        we_sec             = single_active_mask;
       end
 
       S_VDOT_INIT_FEED: begin
@@ -630,16 +602,14 @@ module CGCtrl #(
         vdot_istream_val = (stream_idx < num_groups_reg);
         vdot_ostream_rdy = 1'b1;
         latch_rr_new     = vdot_out_hs;
-        init_rr_reg      = vdot_out_hs;  // bypass S_RR_REG_COPY: rr_reg <= vdot_result this cycle
+        init_rr_reg      = vdot_out_hs;
       end
 
       S_SPMV_RUN_FIRE: begin
-        ctrl_mem_src_spmv = 1'b1;
         spmv_istream_val  = 1'b1;
         rd_vec_sel        = RF_D_REG;
       end
       S_SPMV_RUN_COLLECT: begin
-        ctrl_mem_src_spmv = 1'b1;
         spmv_ostream_rdy  = 1'b1;
         rd_vec_sel        = RF_D_REG;
         wr_sel            = RF_Q_BUF;
@@ -670,9 +640,6 @@ module CGCtrl #(
         latch_alpha       = fpdiv_out_hs;
       end
 
-      // Parallel x and r AXPY in one merged state.
-      // u_axpy_x: x_vec += alpha*d   (rd_a=x_vec, rd_b=d)
-      // u_axpy_r: r    -= alpha*q   (rd_c=r,     rd_d=q)
       S_AXPY_XR_FEED: begin
         rd_a_sel           = RF_X_VEC_REG;
         rd_a_idx_packed    = group_in_idx_packed;
@@ -691,12 +658,10 @@ module CGCtrl #(
         axpy_r_istream_val = (stream_idx < num_groups_reg);
         axpy_r_ostream_rdy = 1'b1;
         axpy_coef_src_beta = 1'b0;
-        // Primary write: x_vec_reg from u_axpy_x.
         wr_sel             = RF_X_VEC_REG;
         wr_idx_ctrl_packed = group_out_idx_packed;
         we                 = axpy_x_out_hs ? group_out_valid : '0;
         wdata_src          = WD_AXPY;
-        // Secondary write: r_reg from u_axpy_r (data routed via WD_AXPY_R).
         wr_sel_sec         = RF_R_REG;
         wdata_src_sec      = WD_AXPY_R;
         we_sec             = axpy_x_out_hs ? group_out_valid : '0;
@@ -724,7 +689,6 @@ module CGCtrl #(
         latch_beta        = fpdiv_out_hs;
       end
 
-      // d update: only u_axpy_x. u_axpy_r idles (no handshakes).
       S_AXPY_D_FEED: begin
         rd_a_sel           = RF_R_REG;
         rd_a_idx_packed    = group_in_idx_packed;
@@ -747,13 +711,13 @@ module CGCtrl #(
       end
 
       S_WB_WRITE: begin
-        ctrl_mem_addr   = x_base_sel + p_m10k_addr_bits'(stream_idx);
-        ctrl_mem_wr_en  = 1'b1;
+        ctrl_xy_addr    = p_m10k_addr_bits'(stream_idx);
+        ctrl_xy_wr_en   = 1'b1;
         rd_a_sel        = RF_X_VEC_REG;
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_active_mask;
-        ctrl_mem_wdata  = 32'($signed(rd_a_data_active));
-        if (stream_idx == n_minus_1_reg && !sel_y)
+        ctrl_xy_wdata   = 32'($signed(rd_a_data_active));
+        if (stream_idx == n_minus_1_reg && !sel_y_reg)
           reset_iter = 1'b1;
       end
 

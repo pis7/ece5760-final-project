@@ -1,0 +1,99 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN size_extremes_mix ;
+UNITS DISTANCE MICRONS 100 ;
+
+DIEAREA ( 0 0 ) ( 500 500 ) ;
+
+COMPONENTS 34 ;
+- H1 HUGE + PLACED ( 75 75 ) N ;
+- H2 HUGE + PLACED ( 325 75 ) N ;
+- H3 HUGE + PLACED ( 75 325 ) N ;
+- H4 HUGE + PLACED ( 325 325 ) N ;
+- T1 TINY + PLACED ( 10 480 ) N ;
+- T2 TINY + PLACED ( 25 480 ) N ;
+- T3 TINY + PLACED ( 40 480 ) N ;
+- T4 TINY + PLACED ( 55 480 ) N ;
+- T5 TINY + PLACED ( 70 480 ) N ;
+- T6 TINY + PLACED ( 85 480 ) N ;
+- T7 TINY + PLACED ( 100 480 ) N ;
+- T8 TINY + PLACED ( 115 480 ) N ;
+- T9 TINY + PLACED ( 130 480 ) N ;
+- T10 TINY + PLACED ( 145 480 ) N ;
+- T11 TINY + PLACED ( 160 480 ) N ;
+- T12 TINY + PLACED ( 175 480 ) N ;
+- T13 TINY + PLACED ( 190 480 ) N ;
+- T14 TINY + PLACED ( 205 480 ) N ;
+- T15 TINY + PLACED ( 220 480 ) N ;
+- T16 TINY + PLACED ( 235 480 ) N ;
+- T17 TINY + PLACED ( 250 480 ) N ;
+- T18 TINY + PLACED ( 265 480 ) N ;
+- T19 TINY + PLACED ( 280 480 ) N ;
+- T20 TINY + PLACED ( 295 480 ) N ;
+- T21 TINY + PLACED ( 310 480 ) N ;
+- T22 TINY + PLACED ( 325 480 ) N ;
+- T23 TINY + PLACED ( 340 480 ) N ;
+- T24 TINY + PLACED ( 355 480 ) N ;
+- T25 TINY + PLACED ( 370 480 ) N ;
+- T26 TINY + PLACED ( 385 480 ) N ;
+- T27 TINY + PLACED ( 400 480 ) N ;
+- T28 TINY + PLACED ( 415 480 ) N ;
+- T29 TINY + PLACED ( 430 480 ) N ;
+- T30 TINY + PLACED ( 445 480 ) N ;
+END COMPONENTS
+
+PINS 8 ;
+- in0 + NET in0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 50 ) N ;
+- in1 + NET in1 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 150 ) N ;
+- in2 + NET in2 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 250 ) N ;
+- in3 + NET in3 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 350 ) N ;
+- out0 + NET o0 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 50 ) N ;
+- out1 + NET o1 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 150 ) N ;
+- out2 + NET o2 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 250 ) N ;
+- out3 + NET o3 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 350 ) N ;
+END PINS
+
+NETS 38 ;
+- in0 ( PIN in0 ) ( H1 A0 ) ( H1 A1 ) ( H1 A2 ) ( H1 A3 ) ;
+- in1 ( PIN in1 ) ( H2 A0 ) ( H2 A1 ) ( H2 A2 ) ( H2 A3 ) ;
+- in2 ( PIN in2 ) ( H3 A0 ) ( H3 A1 ) ( H3 A2 ) ( H3 A3 ) ;
+- in3 ( PIN in3 ) ( H4 A0 ) ( H4 A1 ) ( H4 A2 ) ( H4 A3 ) ;
+- h0_y0 ( H1 Y0 ) ( T1 A ) ;
+- c0_n0 ( T1 Y ) ( T2 A ) ;
+- h0_y1 ( H1 Y1 ) ( T3 A ) ;
+- h0_y2 ( H1 Y2 ) ( T4 A ) ;
+- c0_n1 ( T4 Y ) ( T5 A ) ;
+- h0_y3 ( H1 Y3 ) ( T6 A ) ;
+- c0_n2 ( T6 Y ) ( T7 A ) ;
+- o0 ( T7 Y ) ( PIN out0 ) ;
+- h1_y0 ( H2 Y0 ) ( T8 A ) ;
+- c1_n0 ( T8 Y ) ( T9 A ) ;
+- h1_y1 ( H2 Y1 ) ( T10 A ) ;
+- h1_y2 ( H2 Y2 ) ( T11 A ) ;
+- c1_n1 ( T11 Y ) ( T12 A ) ;
+- h1_y3 ( H2 Y3 ) ( T13 A ) ;
+- c1_n2 ( T13 Y ) ( T14 A ) ;
+- o1 ( T14 Y ) ( PIN out1 ) ;
+- h2_y0 ( H3 Y0 ) ( T15 A ) ;
+- c2_n0 ( T15 Y ) ( T16 A ) ;
+- h2_y1 ( H3 Y1 ) ( T17 A ) ;
+- h2_y2 ( H3 Y2 ) ( T18 A ) ;
+- c2_n1 ( T18 Y ) ( T19 A ) ;
+- h2_y3 ( H3 Y3 ) ( T20 A ) ;
+- c2_n2 ( T20 Y ) ( T21 A ) ;
+- o2 ( T21 Y ) ( PIN out2 ) ;
+- h3_y0 ( H4 Y0 ) ( T22 A ) ;
+- c3_n0 ( T22 Y ) ( T23 A ) ;
+- h3_y1 ( H4 Y1 ) ( T24 A ) ;
+- h3_y2 ( H4 Y2 ) ( T25 A ) ;
+- c3_n1 ( T25 Y ) ( T26 A ) ;
+- h3_y3 ( H4 Y3 ) ( T27 A ) ;
+- c3_n2 ( T27 Y ) ( T28 A ) ;
+- o3 ( T28 Y ) ( PIN out3 ) ;
+- extra_a ( T2 Y ) ( T29 A ) ;
+- extra_b ( T29 Y ) ( T30 A ) ;
+END NETS
+
+END DESIGN

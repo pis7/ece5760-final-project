@@ -11,9 +11,11 @@ Modes:
   python                 Baseline Python placer                                (run-only)
   sw                     Full software C++ placer (double precision)           (run + sweep)
   golden                 C++ placer with fixed-point golden CG                 (run + sweep)
-  verilated [v2|v3|v4]   C++ placer with Verilator RTL CG (default v4)         (run + sweep)
+  verilated [v2|v3|v4|v5|v5_deep] C++ placer with Verilator RTL CG (default v5) (run + sweep)
   arm                    Cross-compile SW placer, run on DE1-SoC ARM           (run + sweep)
-  fpga                   Cross-compile FPGA-accelerated placer, run on DE1-SoC (run + sweep)
+  fpga      [v4|v5]      Cross-compile FPGA-accelerated placer, run on DE1-SoC (run + sweep)
+                         (default v5; selects the mmap driver to link in)
+                         --p-max-n N   bitstream's p_max_n (default 50; rebuilds driver)
 
 Sweep mode runs the placer with max_outer_iter from 1..MAX_SWEEP_ITER,
 captures the per-iter final placement, renders one PNG frame per
@@ -143,8 +145,8 @@ _ARM_DEFINES = [
 ]
 
 
-def build_spec_for(mode: str, hw_version: str) -> BuildSpec:
-    """Map a mode (and hw_version for verilated) to its BuildSpec."""
+def build_spec_for(mode: str, hw_version: str, p_max_n: int) -> BuildSpec:
+    """Map a mode (and hw_version / p_max_n for verilated|fpga) to its BuildSpec."""
     if mode == "sw":
         return BuildSpec(_SW_C, [])
     if mode == "golden":
@@ -154,7 +156,10 @@ def build_spec_for(mode: str, hw_version: str) -> BuildSpec:
     if mode == "arm":
         return BuildSpec(_SW_C, list(_ARM_DEFINES))
     if mode == "fpga":
-        return BuildSpec(_FPGA_SW, list(_ARM_DEFINES))
+        return BuildSpec(
+            _FPGA_SW,
+            [*_ARM_DEFINES, f"-DHW_FPGA_VERSION={hw_version}", f"-DMAX_N={p_max_n}"],
+        )
     raise ValueError(f"build_spec_for: unsupported mode {mode!r}")
 
 
@@ -374,7 +379,8 @@ class SlideshowMaker:
 class _Args:
     mode: str
     benchmark_path: Path
-    hw_version: str   # only used when mode == "verilated"
+    hw_version: str   # only used when mode == "verilated" / "fpga"
+    p_max_n: int      # only used when mode == "fpga" (must match bitstream p_max_n)
     sweep: bool
 
 
@@ -400,7 +406,9 @@ class RunPlacer:
     def build(self) -> None:
         if self.args.mode == "python":
             return  # No build needed for the Python baseline.
-        spec: BuildSpec = build_spec_for(self.args.mode, self.args.hw_version)
+        spec: BuildSpec = build_spec_for(
+            self.args.mode, self.args.hw_version, self.args.p_max_n
+        )
         step(self._build_banner())
         cmake_build(spec, self.repo_root, self.build_dir)
 
@@ -565,7 +573,10 @@ class RunPlacer:
             return f"Building C++ placer (Verilator CG, {self.args.hw_version})"
         if m == "arm":
             return "Cross-compiling placer for ARM"
-        return "Cross-compiling FPGA placer for ARM"
+        return (
+            f"Cross-compiling FPGA placer for ARM "
+            f"({self.args.hw_version} mmap driver, p_max_n={self.args.p_max_n})"
+        )
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -598,7 +609,6 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
         ("sw", "Full software C++ placer (double precision)"),
         ("golden", "C++ placer with fixed-point golden CG"),
         ("arm", "Cross-compile SW placer, run on DE1-SoC ARM"),
-        ("fpga", "Cross-compile FPGA-accelerated placer, run on DE1-SoC"),
     ]
     for mode_name, help_text in plain_modes:
         sp = sub.add_parser(mode_name, help=help_text)
@@ -612,14 +622,14 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
 
     sp_ver = sub.add_parser(
         "verilated",
-        help="C++ placer with Verilator RTL CG. Optional [v2|v3|v4] before path.",
+        help="C++ placer with Verilator RTL CG. Optional [v2|v3|v4|v5|v5_deep] before path.",
     )
     sp_ver.add_argument(
         "hw_version",
         nargs="?",
-        choices=["v2", "v3", "v4"],
-        default="v4",
-        help="Verilator RTL version (default v4).",
+        choices=["v2", "v3", "v4", "v5", "v5_deep"],
+        default="v5",
+        help="Verilator RTL version (default v5).",
     )
     sp_ver.add_argument(
         "benchmark_path",
@@ -628,15 +638,48 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
     )
     _add_common(sp_ver)
 
+    sp_fpga = sub.add_parser(
+        "fpga",
+        help="Cross-compile FPGA-accelerated placer, run on DE1-SoC. Optional [v4|v5] before path.",
+    )
+    sp_fpga.add_argument(
+        "hw_version",
+        nargs="?",
+        choices=["v4", "v5"],
+        default="v5",
+        help="FPGA mmap driver version (default v5).",
+    )
+    sp_fpga.add_argument(
+        "benchmark_path",
+        type=Path,
+        help="Path to a benchmark directory (containing lef/ and def/).",
+    )
+    sp_fpga.add_argument(
+        "--p-max-n",
+        type=int,
+        default=50,
+        help=(
+            "Max cell count the bitstream supports (default 50). Must match "
+            "the synthesized Verilog p_max_n; the mmap driver is rebuilt "
+            "with HW_MAX_N set to this value."
+        ),
+    )
+    _add_common(sp_fpga)
+
     args = parser.parse_args(argv)
 
     if args.sweep and args.mode == "python":
         parser.error("--sweep is not supported with mode=python")
 
+    p_max_n = getattr(args, "p_max_n", 50)
+    if p_max_n <= 0:
+        parser.error("--p-max-n must be a positive integer")
+
     return _Args(
         mode=args.mode,
         benchmark_path=args.benchmark_path,
         hw_version=args.hw_version,
+        p_max_n=p_max_n,
         sweep=args.sweep,
     )
 

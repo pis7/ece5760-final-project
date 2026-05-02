@@ -1,0 +1,50 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+
+UNITS
+    DATABASE MICRONS 100 ;
+END UNITS
+
+MACRO DRIVER
+    CLASS CORE ;
+    ORIGIN 0.000 0.000 ;
+    SIZE 0.2 BY 0.1 ;
+    SYMMETRY x y ;
+    PIN Y
+        DIRECTION OUTPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 0.2 0.1 ;
+        END
+    END Y
+    PIN A
+        DIRECTION INPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 0.2 0.1 ;
+        END
+    END A
+END DRIVER
+
+MACRO RECV
+    CLASS CORE ;
+    ORIGIN 0.000 0.000 ;
+    SIZE 0.1 BY 0.1 ;
+    SYMMETRY x y ;
+    PIN Y
+        DIRECTION OUTPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 0.1 0.1 ;
+        END
+    END Y
+    PIN A
+        DIRECTION INPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 0.1 0.1 ;
+        END
+    END A
+END RECV
+
+END LIBRARY

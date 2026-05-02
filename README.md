@@ -40,15 +40,15 @@ uv run run-placer sw     ../benchmarks/iccad04/DMA      # C++ double-precision C
 uv run run-placer golden ../benchmarks/iccad04/DMA      # C++ fixed-point golden CG (SW model of the FPGA)
 
 # --- Hardware-in-the-loop simulation (Verilator) ---
-uv run run-placer verilated    ../benchmarks/custom/tiny3   # Verilated RTL CG, default v3
-uv run run-placer verilated v2 ../benchmarks/custom/tiny3   # v2 reference
+uv run run-placer verilated    ../benchmarks/custom/parallel_chains_50   # Verilated RTL CG, default v3
+uv run run-placer verilated v2 ../benchmarks/custom/parallel_chains_50   # v2 reference
 
 # --- DE1-SoC board (needs .env with BOARD/PASS) ---
 uv run run-placer arm  ../benchmarks/iccad04/DMA        # cross-compile + run SW CG on the board's ARM
 uv run run-placer fpga ../benchmarks/iccad04/DMA        # cross-compile + run FPGA-accelerated CG
 
 # --- Iter sweep + slideshow (every mode except python) ---
-uv run run-placer verilated ../benchmarks/custom/tiny3 --sweep
+uv run run-placer verilated ../benchmarks/custom/parallel_chains_50 --sweep
 ```
 
 Each run writes `<design>-initial.json` and `<design>-final.json` to the
@@ -91,9 +91,14 @@ benchmarks/
     RISC1/ ...
     RISC2/ ...
   custom/
-    tiny1/ { lef/tiny1.lef, def/tiny1.def }   # ~10 cells, hand-written
-    tiny2/ ...
-    tiny3/ ...
+    simple_logic_10/      { lef/simple_logic_10.lef, def/simple_logic_10.def }
+    mixed_macro_10/       ...
+    parallel_chains_50/   ...
+    mesh_grid_25/         ...
+    dense_pack_36/        ...
+    size_extremes_mix/    ...
+    star_fanout_31/       ...
+    two_clusters_bridge/  ...   # see benchmarks/custom/README.md
 ```
 
 The `iccad04/` set is the ICCAD 2004 Faraday mixed-size suite -- real ASIC
@@ -282,7 +287,7 @@ short version:
    `p_max_n=50`), which fixed a long combinational fanout from the PIOs.
 
 End-to-end this gives ~1.26x-1.41x cycle-count speedup on the small
-benchmarks (e.g., `tiny1`: 54672 -> 38762 cycles). The 16 testbench cases
+benchmarks (e.g., `simple_logic_10`: 54672 -> 38762 cycles). The 16 testbench cases
 still pass bit-exactly -- the v3 testbench target is built with
 `-DCG_GOLDEN_USE_NR` so the DPI golden uses the same NR divide as the RTL.
 
@@ -338,7 +343,7 @@ uv run run-placer python    ../benchmarks/iccad04/DMA   # Python baseline
 uv run run-placer sw        ../benchmarks/iccad04/DMA   # SW CG (double precision)
 uv run run-placer golden    ../benchmarks/iccad04/DMA   # FP golden CG (SW)
 uv run run-placer verilated    ../benchmarks/iccad04/DMA   # Verilator CG (default v3)
-uv run run-placer verilated v2 ../benchmarks/custom/tiny3   # Verilator CG (v2 reference)
+uv run run-placer verilated v2 ../benchmarks/custom/parallel_chains_50   # Verilator CG (v2 reference)
 uv run run-placer arm       ../benchmarks/iccad04/DMA   # SW CG on the DE1-SoC ARM
 uv run run-placer fpga      ../benchmarks/iccad04/DMA   # Real FPGA bitstream
 ```

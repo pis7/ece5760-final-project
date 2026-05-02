@@ -1,0 +1,65 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN star_fanout_31 ;
+UNITS DISTANCE MICRONS 100 ;
+
+DIEAREA ( 0 0 ) ( 500 500 ) ;
+
+COMPONENTS 31 ;
+- D1 DRIVER + PLACED ( 245 245 ) N ;
+- R1 RECV + PLACED ( 30 30 ) N ;
+- R2 RECV + PLACED ( 105 30 ) N ;
+- R3 RECV + PLACED ( 180 30 ) N ;
+- R4 RECV + PLACED ( 255 30 ) N ;
+- R5 RECV + PLACED ( 330 30 ) N ;
+- R6 RECV + PLACED ( 405 30 ) N ;
+- R7 RECV + PLACED ( 30 105 ) N ;
+- R8 RECV + PLACED ( 105 105 ) N ;
+- R9 RECV + PLACED ( 180 105 ) N ;
+- R10 RECV + PLACED ( 255 105 ) N ;
+- R11 RECV + PLACED ( 330 105 ) N ;
+- R12 RECV + PLACED ( 405 105 ) N ;
+- R13 RECV + PLACED ( 30 180 ) N ;
+- R14 RECV + PLACED ( 105 180 ) N ;
+- R15 RECV + PLACED ( 180 180 ) N ;
+- R16 RECV + PLACED ( 255 180 ) N ;
+- R17 RECV + PLACED ( 330 180 ) N ;
+- R18 RECV + PLACED ( 405 180 ) N ;
+- R19 RECV + PLACED ( 30 255 ) N ;
+- R20 RECV + PLACED ( 105 255 ) N ;
+- R21 RECV + PLACED ( 180 255 ) N ;
+- R22 RECV + PLACED ( 255 255 ) N ;
+- R23 RECV + PLACED ( 330 255 ) N ;
+- R24 RECV + PLACED ( 405 255 ) N ;
+- R25 RECV + PLACED ( 30 330 ) N ;
+- R26 RECV + PLACED ( 105 330 ) N ;
+- R27 RECV + PLACED ( 180 330 ) N ;
+- R28 RECV + PLACED ( 255 330 ) N ;
+- R29 RECV + PLACED ( 330 330 ) N ;
+- R30 RECV + PLACED ( 405 330 ) N ;
+END COMPONENTS
+
+PINS 7 ;
+- in0 + NET in0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 250 ) N ;
+- out0 + NET o0 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 50 ) N ;
+- out1 + NET o1 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 130 ) N ;
+- out2 + NET o2 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 210 ) N ;
+- out3 + NET o3 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 290 ) N ;
+- out4 + NET o4 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 370 ) N ;
+- out5 + NET o5 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 450 ) N ;
+END PINS
+
+NETS 8 ;
+- in0 ( PIN in0 ) ( D1 A ) ;
+- fanout ( D1 Y ) ( R1 A ) ( R2 A ) ( R3 A ) ( R4 A ) ( R5 A ) ( R6 A ) ( R7 A ) ( R8 A ) ( R9 A ) ( R10 A ) ( R11 A ) ( R12 A ) ( R13 A ) ( R14 A ) ( R15 A ) ( R16 A ) ( R17 A ) ( R18 A ) ( R19 A ) ( R20 A ) ( R21 A ) ( R22 A ) ( R23 A ) ( R24 A ) ( R25 A ) ( R26 A ) ( R27 A ) ( R28 A ) ( R29 A ) ( R30 A ) ;
+- o0 ( PIN out0 ) ( R1 Y ) ( R2 Y ) ( R3 Y ) ( R4 Y ) ( R5 Y ) ;
+- o1 ( PIN out1 ) ( R6 Y ) ( R7 Y ) ( R8 Y ) ( R9 Y ) ( R10 Y ) ;
+- o2 ( PIN out2 ) ( R11 Y ) ( R12 Y ) ( R13 Y ) ( R14 Y ) ( R15 Y ) ;
+- o3 ( PIN out3 ) ( R16 Y ) ( R17 Y ) ( R18 Y ) ( R19 Y ) ( R20 Y ) ;
+- o4 ( PIN out4 ) ( R21 Y ) ( R22 Y ) ( R23 Y ) ( R24 Y ) ( R25 Y ) ;
+- o5 ( PIN out5 ) ( R26 Y ) ( R27 Y ) ( R28 Y ) ( R29 Y ) ( R30 Y ) ;
+END NETS
+
+END DESIGN

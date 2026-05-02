@@ -12,15 +12,23 @@ option(USE_HW_CG "Use Verilator CGTop for CG solve" OFF)
 # Use C++ fixed-point golden model instead of Verilator (faster, no Verilog needed)
 option(USE_FP_GOLDEN "Use C++ fixed-point golden model instead of Verilator" OFF)
 set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
-set(HW_CG_VERSION "v4" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide), v3 (NR divide + rp_lo/rp_hi collapse), or v4 (v3 + parallel x/r AXPY)")
-set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3 v4)
+set(HW_CG_VERSION "v5" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide), v3 (NR divide + rp_lo/rp_hi collapse), v4 (v3 + parallel x/r AXPY), v5 (v4 + multi-block on-chip RAM), or v5_deep (v5 + 1 cycle/nz pipelined SPMV)")
+set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3 v4 v5 v5_deep)
 
 # NR-divide variants need the NR DPI golden to stay bit-exact. v2 uses
 # shift-subtract so it falls through to the empty define.
-if(HW_CG_VERSION STREQUAL "v3" OR HW_CG_VERSION STREQUAL "v4")
+if(HW_CG_VERSION STREQUAL "v3" OR HW_CG_VERSION STREQUAL "v4" OR HW_CG_VERSION STREQUAL "v5" OR HW_CG_VERSION STREQUAL "v5_deep")
     set(CG_GOLDEN_DEFINE "CG_GOLDEN_USE_NR")
 else()
     set(CG_GOLDEN_DEFINE "")
+endif()
+
+# v5 / v5_deep share the multi-block memory topology -- placer.cpp needs
+# to pick cg_verilator_driver_v5.h instead of cg_verilator_driver.h.
+if(HW_CG_VERSION STREQUAL "v5" OR HW_CG_VERSION STREQUAL "v5_deep")
+    set(CG_VERILATOR_DEFINE "CG_VERILATOR_V5")
+else()
+    set(CG_VERILATOR_DEFINE "")
 endif()
 
 if(USE_FP_GOLDEN)
@@ -68,7 +76,7 @@ elseif(USE_HW_CG)
       ${VERILATOR_ROOT}/include/verilated_threads.cpp
     )
     add_dependencies(placer verilator_model)
-    target_compile_definitions(placer PRIVATE USE_HW_CG HW_FRAC_BITS=${FRAC_BITS} ${CG_GOLDEN_DEFINE})
+    target_compile_definitions(placer PRIVATE USE_HW_CG HW_FRAC_BITS=${FRAC_BITS} ${CG_GOLDEN_DEFINE} ${CG_VERILATOR_DEFINE})
     target_include_directories(placer SYSTEM PRIVATE ${VDIR} ${VERILATOR_ROOT}/include)
     target_link_libraries(placer PRIVATE ${VDIR}/VCGTop__ALL.a pthread)
     set_source_files_properties(

@@ -8,7 +8,7 @@
 // External (FPGATop-facing) ports are unchanged from v3.
 
 module CGTop #(
-  parameter p_lanes            = 16,
+  parameter p_lanes            = 8,
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,

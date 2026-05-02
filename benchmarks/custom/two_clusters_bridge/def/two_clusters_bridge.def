@@ -1,0 +1,89 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN two_clusters_bridge ;
+UNITS DISTANCE MICRONS 100 ;
+
+DIEAREA ( 0 0 ) ( 500 500 ) ;
+
+COMPONENTS 32 ;
+- A1 CELL + PLACED ( 30 30 ) N ;
+- A2 CELL + PLACED ( 70 30 ) N ;
+- A3 CELL + PLACED ( 110 30 ) N ;
+- A4 CELL + PLACED ( 150 30 ) N ;
+- A5 CELL + PLACED ( 30 70 ) N ;
+- A6 CELL + PLACED ( 70 70 ) N ;
+- A7 CELL + PLACED ( 110 70 ) N ;
+- A8 CELL + PLACED ( 150 70 ) N ;
+- A9 CELL + PLACED ( 30 110 ) N ;
+- A10 CELL + PLACED ( 70 110 ) N ;
+- A11 CELL + PLACED ( 110 110 ) N ;
+- A12 CELL + PLACED ( 150 110 ) N ;
+- A13 CELL + PLACED ( 30 150 ) N ;
+- A14 CELL + PLACED ( 70 150 ) N ;
+- A15 CELL + PLACED ( 110 150 ) N ;
+- A16 CELL + PLACED ( 150 150 ) N ;
+- B1 CELL + PLACED ( 290 30 ) N ;
+- B2 CELL + PLACED ( 330 30 ) N ;
+- B3 CELL + PLACED ( 370 30 ) N ;
+- B4 CELL + PLACED ( 410 30 ) N ;
+- B5 CELL + PLACED ( 290 70 ) N ;
+- B6 CELL + PLACED ( 330 70 ) N ;
+- B7 CELL + PLACED ( 370 70 ) N ;
+- B8 CELL + PLACED ( 410 70 ) N ;
+- B9 CELL + PLACED ( 290 110 ) N ;
+- B10 CELL + PLACED ( 330 110 ) N ;
+- B11 CELL + PLACED ( 370 110 ) N ;
+- B12 CELL + PLACED ( 410 110 ) N ;
+- B13 CELL + PLACED ( 290 150 ) N ;
+- B14 CELL + PLACED ( 330 150 ) N ;
+- B15 CELL + PLACED ( 370 150 ) N ;
+- B16 CELL + PLACED ( 410 150 ) N ;
+END COMPONENTS
+
+PINS 4 ;
+- inA + NET inA + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 250 ) N ;
+- inB + NET inB + DIRECTION INPUT + USE SIGNAL + PLACED ( 500 250 ) N ;
+- outA + NET outA + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 0 100 ) N ;
+- outB + NET outB + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 100 ) N ;
+END PINS
+
+NETS 34 ;
+- inA ( PIN inA ) ( A1 A ) ;
+- hubA_fan ( A1 Y ) ( A2 B ) ( A3 B ) ( A4 B ) ( A5 B ) ( A6 B ) ( A7 B ) ( A8 B ) ( A9 B ) ( A10 B ) ( A11 B ) ( A12 B ) ( A13 B ) ( A14 B ) ( A15 B ) ( A16 B ) ;
+- ringA0 ( A2 Y ) ( A3 A ) ;
+- ringA1 ( A3 Y ) ( A4 A ) ;
+- ringA2 ( A4 Y ) ( A5 A ) ;
+- ringA3 ( A5 Y ) ( A6 A ) ;
+- ringA4 ( A6 Y ) ( A7 A ) ;
+- ringA5 ( A7 Y ) ( A8 A ) ;
+- ringA6 ( A8 Y ) ( A9 A ) ;
+- ringA7 ( A9 Y ) ( A10 A ) ;
+- ringA8 ( A10 Y ) ( A11 A ) ;
+- ringA9 ( A11 Y ) ( A12 A ) ;
+- ringA10 ( A12 Y ) ( A13 A ) ;
+- ringA11 ( A13 Y ) ( A14 A ) ;
+- ringA12 ( A14 Y ) ( A15 A ) ;
+- ringA13 ( A15 Y ) ( A16 A ) ;
+- inB ( PIN inB ) ( B1 A ) ;
+- hubB_fan ( B1 Y ) ( B2 B ) ( B3 B ) ( B4 B ) ( B5 B ) ( B6 B ) ( B7 B ) ( B8 B ) ( B9 B ) ( B10 B ) ( B11 B ) ( B12 B ) ( B13 B ) ( B14 B ) ( B15 B ) ( B16 B ) ;
+- ringB0 ( B2 Y ) ( B3 A ) ;
+- ringB1 ( B3 Y ) ( B4 A ) ;
+- ringB2 ( B4 Y ) ( B5 A ) ;
+- ringB3 ( B5 Y ) ( B6 A ) ;
+- ringB4 ( B6 Y ) ( B7 A ) ;
+- ringB5 ( B7 Y ) ( B8 A ) ;
+- ringB6 ( B8 Y ) ( B9 A ) ;
+- ringB7 ( B9 Y ) ( B10 A ) ;
+- ringB8 ( B10 Y ) ( B11 A ) ;
+- ringB9 ( B11 Y ) ( B12 A ) ;
+- ringB10 ( B12 Y ) ( B13 A ) ;
+- ringB11 ( B13 Y ) ( B14 A ) ;
+- ringB12 ( B14 Y ) ( B15 A ) ;
+- ringB13 ( B15 Y ) ( B16 A ) ;
+- outB ( B16 Y ) ( PIN outB ) ;
+- outA ( A16 Y ) ( PIN outA ) ( B1 B ) ;
+END NETS
+
+END DESIGN

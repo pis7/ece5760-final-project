@@ -29,6 +29,11 @@ static constexpr int MAX_OUTER_ITER = 16;
 static constexpr int CG_MAX_ITER = 1000;
 static constexpr double CG_EPS = 1e-5;
 static constexpr double TARGET_DENSITY = 0.75;
+// Revert if HPWL more than doubles in a single outer iter once partitioning
+// has matured -- catches partition_and_anchor blow-ups (e.g., size_extremes_mix
+// at level 7) that the density-based revert misses.
+static constexpr double HPWL_REVERT_RATIO = 2.0;
+static constexpr int    HPWL_REVERT_MIN_LEVEL = 4;
 
 // -- Data structures ----------------------------------------------------------
 
@@ -97,8 +102,12 @@ struct CSRMatrix {
 #ifdef USE_HW_CG
 #if defined(USE_FP_GOLDEN)
 #include "cg_golden_driver.h"
+#elif defined(CG_DRIVER_FPGA_MMAP_V5)
+#include "cg_fpga_mmap_driver_v5.h"
 #elif defined(CG_DRIVER_FPGA_MMAP)
 #include "cg_fpga_mmap_driver.h"
+#elif defined(CG_VERILATOR_V5)
+#include "cg_verilator_driver_v5.h"
 #else
 #include "cg_verilator_driver.h"
 #endif
@@ -958,13 +967,15 @@ int main(int argc, char* argv[]) {
     // Step 2: Initial CG solve
     std::printf("Step 2: Initial CG solve...\n");
     placer.solve_cg();
-    std::printf("  HPWL: %.0f\n", placer.compute_hpwl());
+    double init_hpwl = placer.compute_hpwl();
+    std::printf("  HPWL: %.0f\n", init_hpwl);
 
     // Steps 3-4: Iterative spreading
     bool converged = false;
     bool reverted = false;
     int iters_kept = 0;
     double prev_density = placer.max_bin_density();
+    double prev_hpwl = init_hpwl;
     for (int iter = 1; iter <= max_iter; ++iter) {
         std::printf("Iteration %d:\n", iter);
         placer.partition_and_anchor();
@@ -974,7 +985,24 @@ int main(int argc, char* argv[]) {
         auto y_saved = placer.y_pos;
 
         placer.solve_cg();
-        std::printf("  HPWL: %.0f\n", placer.compute_hpwl());
+        double new_hpwl = placer.compute_hpwl();
+        std::printf("  HPWL: %.0f\n", new_hpwl);
+
+        // HPWL-spike revert: catches partition_and_anchor blow-ups (e.g.
+        // size_extremes_mix at level 7) that the density check misses.
+        // Gated on partition_level so legitimate iter-1/2 spreading bursts
+        // (cells leaving the centroid) don't trip it. Runs before the
+        // density check because a positions-blew-up failure mode can leave
+        // density looking fine.
+        if (placer.partition_level >= HPWL_REVERT_MIN_LEVEL &&
+            new_hpwl > HPWL_REVERT_RATIO * prev_hpwl) {
+            std::printf("  HPWL spiked %.2fx (worse than %.2fx), reverting\n",
+                        new_hpwl / prev_hpwl, HPWL_REVERT_RATIO);
+            placer.x_pos = x_saved;
+            placer.y_pos = y_saved;
+            reverted = true;
+            break;
+        }
 
         double new_density = placer.max_bin_density();
         // Only revert once spreading has started working (density meaningfully
@@ -982,8 +1010,12 @@ int main(int argc, char* argv[]) {
         // temporarily. The 1.5x factor matters for inits that start cells at
         // the die center -- their initial density can already be near 2x
         // target before any spreading happens, which would trip a looser
-        // threshold and end the placer after one iteration.
-        if (prev_density < 1.5 * TARGET_DENSITY && new_density > prev_density) {
+        // threshold and end the placer after one iteration. Treat a flat
+        // plateau (new == prev) as "done" too: once the placer settles at a
+        // density floor, further partition_and_anchor iters only add anchor
+        // pull on cells that have nowhere better to go (HPWL regresses ~13%
+        // on dense_pack_36 if we keep going).
+        if (prev_density < 1.5 * TARGET_DENSITY && new_density >= prev_density) {
             std::printf("  Max bin density: %.2f (worse than %.2f, reverting)\n",
                         new_density, prev_density);
             placer.x_pos = x_saved;
@@ -993,6 +1025,7 @@ int main(int argc, char* argv[]) {
         }
         std::printf("  Max bin density: %.2f\n", new_density);
         prev_density = new_density;
+        prev_hpwl = new_hpwl;
         iters_kept = iter;
         if (new_density <= TARGET_DENSITY) {
             std::printf("Overlap acceptable -- placement complete.\n");

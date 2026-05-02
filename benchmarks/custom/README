@@ -1,0 +1,149 @@
+# Custom placement benchmarks
+
+Hand-written LEF/DEF designs used to exercise specific placement conditions
+that the ICCAD04 suite cannot isolate. Most benchmarks fit the FPGA CG
+accelerator's default `MAX_N = 50` cell limit; `parallel_chains_75`
+intentionally exceeds that to exercise larger `p_max_n` bitstreams (rebuild
+the mmap driver via `run-placer fpga --p-max-n N`). All benchmarks stay
+within the +/-4096 range of the Q13.14 fixed-point format used on the
+board.
+
+The HPS C++ placer reinitializes every cell to the die center on each run
+([`init_cell_positions()`](../../sw-baseline-c/placer.cpp)), so the `PLACED`
+coordinates inside each DEF are cosmetic -- only the die area, cell sizes,
+and netlist connectivity drive the placement result.
+
+Each benchmark is laid out as `<name>/{lef,def}/<name>.{lef,def}`. Run any
+of them with:
+
+```bash
+uv run run-placer sw        ../benchmarks/custom/<name>      # CPU double-precision CG
+uv run run-placer golden    ../benchmarks/custom/<name>      # CPU fixed-point golden CG
+uv run run-placer verilated ../benchmarks/custom/<name>      # Verilator HW CG
+uv run run-placer fpga      ../benchmarks/custom/<name>      # DE1-SoC HW CG
+```
+
+## At a glance
+
+| Benchmark | Cells | Cell sizes (microns) | Die (DBU) | IOs | Nets | What it stresses |
+| --- | --- | --- | --- | --- | --- | --- |
+| [simple_logic_10](simple_logic_10/) | 10 | INV 1.0x1.0, BUF/NAND2 2.0x1.0 | 2000x2000 | 6 | 13 | smallest end-to-end test, branching netlist |
+| [mixed_macro_10](mixed_macro_10/) | 10 | INV/AND2/OR2 + WIDE 4.0x2.0 macro | 3000x2000 | 8 | 14 | one large macro mixed with std cells |
+| [parallel_chains_50](parallel_chains_50/) | 50 | INV 0.1x0.1, BUF/NAND2 0.2x0.1 | 500x500 | 10 | 55 | five pipelined chains, cross-coupled at every stage |
+| [parallel_chains_75](parallel_chains_75/) | 75 | INV 0.1x0.1, BUF/NAND2 0.2x0.1 | 500x500 | 10 | 84 | parallel_chains_50 extended to 15 stages (>MAX_N=50) |
+| [mesh_grid_25](mesh_grid_25/) | 25 | GATE2 0.1x0.1 | 500x500 | 20 | 35 | 5x5 2D mesh -- each cell pulled by its top + left neighbor |
+| [dense_pack_36](dense_pack_36/) | 36 | MED 0.4x0.4 | 500x500 | 2 | 37 | uniform medium cells, ~23% area utilization |
+| [size_extremes_mix](size_extremes_mix/) | 34 | HUGE 1.5x1.5 + TINY 0.05x0.05 | 500x500 | 8 | 38 | 4 large macros each anchoring a cluster of tinies |
+| [star_fanout_31](star_fanout_31/) | 31 | DRIVER 0.2x0.1 + 30 RECV 0.1x0.1 | 500x500 | 7 | 8 | single 31-pin fanout net (high net degree) |
+| [two_clusters_bridge](two_clusters_bridge/) | 32 | CELL 0.1x0.1 | 500x500 | 4 | 34 | two 16-cell cliques joined by exactly one bridge net |
+
+The first three are the original hand-written tests (formerly `tiny1`,
+`tiny2`, `tiny3`); the rest are size/topology probes added later.
+
+## Per-benchmark notes
+
+### simple_logic_10
+
+Ten gates -- a few INVs and a couple of BUF/NAND2 -- arranged on a
+4x10^6 DBU^2 die so that the placer is essentially unconstrained by
+density. Fanout is shallow (most nets are 2-3 pins), with a small amount of
+re-convergence (`U6 -> U8/U9`). Useful as the smallest end-to-end smoke
+test for any new backend.
+
+### mixed_macro_10
+
+Same scale as `simple_logic_10` but introduces a `WIDE` 4.0x2.0 macro
+(4x bigger than INV in each dimension) alongside the std cells. Two `WIDE`
+instances act as the chain endpoints, so the placer has to treat them as
+strong "anchors" that the surrounding std cells migrate toward. Smallest
+benchmark with a real macro/std-cell size disparity.
+
+### parallel_chains_50
+
+Fifty cells split into five parallel 10-stage pipelines. Each pipeline
+takes one input pin on the left edge, runs a chain of INV/BUF/NAND2, and
+drives one output pin on the right. Adjacent chains share a NAND2 input
+pin per stage, creating mild cross-coupling. This is the primary "default"
+benchmark referenced throughout the v2/v3/v4/v5 dev notes -- it's the
+largest design that fits in the FPGA's 50-cell cap and exercises both
+SPMV (50 rows) and AXPY/VecDot at full `p_lanes` width.
+
+### parallel_chains_75
+
+Same five-chain layout as `parallel_chains_50`, extended to 15 stages per
+chain (75 cells, 84 nets). The chain-internal connectivity matches the
+50-cell version: chain 0 has the BUF feeding the first NAND2's B locally;
+chains 1-4 use the parallel-path entry pattern (BUF skips the first NAND2,
+the first NAND2's B is fed exclusively by cross-coupling). Designed to
+exceed the default `MAX_N = 50` so it only runs on bitstreams synthesized
+with a larger `p_max_n` (and the matching `--p-max-n` driver rebuild).
+
+### mesh_grid_25
+
+A 5x5 grid of identical 0.1x0.1 GATE2 cells (A, B inputs, Y output).
+Each cell at row `r`, col `c` takes its A from cell `(r-1, c)` (or top
+input pin if `r == 0`) and its B from cell `(r, c-1)` (or left input
+pin if `c == 0`). Y drives the cell below, the cell to the right, and
+any matching right-edge or bottom-edge output pin. Stresses 2D placement
+structure: no chain ordering, just a balanced lattice with 20 IO anchors
+distributed around all four edges.
+
+### dense_pack_36
+
+Thirty-six 0.4x0.4 cells in a 36-stage pipelined chain on a 5x5-micron
+die. Total cell area is ~5.76 microns^2 of a 25-micron^2 die -- ~23%
+utilization. Cells are individually large enough that the placer cannot
+collapse them all near the centroid; spreading happens naturally during
+the legalization phase. The straight chain plus the high per-cell density
+makes this the closest custom analogue to the ICCAD04 row-bound layouts.
+
+### size_extremes_mix
+
+Four 1.5x1.5 HUGE macros plus thirty 0.05x0.05 TINY std cells. Each HUGE
+macro fans out from its 4-bit input bus to a cluster of seven tinies via
+short Y0/Y1/Y2/Y3 chains; the cluster terminus drives one output pin.
+Two extra tinies bridge cluster 0's leaf to cluster 1's via a short
+`extra_a -> extra_b` chain. Exercises the placer's handling of extreme
+size disparity (30x linear in each dimension) and clustered hub-and-spoke
+attraction.
+
+### star_fanout_31
+
+One 0.2x0.1 DRIVER cell whose Y output drives a single 31-pin net
+spanning all thirty 0.1x0.1 RECV cells. The receivers are split into six
+groups of five, each group's Y outputs collected into one of six output
+pins on the right edge. The high-degree fanout net is the dominant term
+in the Q matrix, so the placer should park the driver near the centroid
+of the receivers -- which themselves are pulled toward their respective
+right-edge output pins. CG takes noticeably more iterations to converge
+here than on the chain/mesh designs because of the dense fanout clique.
+
+### two_clusters_bridge
+
+Thirty-two 0.1x0.1 CELL instances split into two clusters of sixteen
+(`A1..A16` and `B1..B16`). Within each cluster, a hub cell (`A1`/`B1`)
+fans out to all fifteen siblings (the `hubA_fan` / `hubB_fan` nets),
+and the siblings form a daisy-chained ring back through `A_N.Y` /
+`B_N.Y`. Inputs `inA`/`inB` and outputs `outA`/`outB` are pinned on
+opposite die edges. The single bridge connection is the `outA` net
+itself -- it terminates at the left output pin **and** at `B1.B`,
+weakly coupling the two clusters. The expected solution is two dense
+blobs, with the bridge cells (`A_N` and `B1`) drawn toward each other.
+
+## Adding a new benchmark
+
+1. Create `benchmarks/custom/<name>/{lef,def}` and write `<name>.lef`
+   (one MACRO per cell type) and `<name>.def` (with `DESIGN <name>;`,
+   matching `DIEAREA`, COMPONENTS / PINS / NETS sections).
+2. Verify the LEF/DEF parses with
+   `uv run lefdef-parser benchmarks/custom/<name>` (writes
+   `<name>.json` with the canonical schema).
+3. Sanity-check on the SW placer with
+   `uv run run-placer sw ../benchmarks/custom/<name>` from a `build/`
+   directory; the run should print `=== Done ===` and write
+   `<name>-initial.json` + `<name>-final.json`.
+4. Visualize with `uv run visualizer build/<name>-final.json`.
+5. Keep the bitstream's synthesized `p_max_n` (default 50) in mind if you
+   plan to run on the FPGA or Verilator HW CG. Designs with more cells
+   require either the SW solver or a bitstream + driver rebuilt at a
+   larger `--p-max-n`.

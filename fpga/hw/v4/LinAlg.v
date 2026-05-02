@@ -167,16 +167,13 @@ module VecDot_seq #(
   output logic signed [p_acc_bits-1:0]           ostream_msg_result
 );
 
-  // $clog2(1) returns 0, so this handles p_lanes==1 degenerately.
-  localparam CLOG2_LANES = $clog2(p_lanes);
-
   logic        acc_en, acc_clear;
   logic [31:0] compute_counter;
   logic [31:0] n_groups;
 
-  // num_groups = ceil(n / p_lanes). Shift works for any p_lanes >= 1
-  // because we only ever instantiate with power-of-two p_lanes.
-  assign n_groups = (n + p_lanes - 1) >> CLOG2_LANES;
+  // num_groups = ceil(n / p_lanes). Real divide so p_lanes can be any
+  // positive integer; synthesizes as a constant divide.
+  assign n_groups = (n + unsigned'(p_lanes) - 32'd1) / unsigned'(p_lanes);
 
   VecDotCtrl u_ctrl (
     .clk, .rst,
@@ -341,13 +338,13 @@ module AXPY_seq #(
   output logic [p_lanes*p_total_bits-1:0]        ostream_msg_z
 );
 
-  localparam CLOG2_LANES = $clog2(p_lanes);
-
   logic        advance;
   logic [31:0] compute_counter;
   logic [31:0] n_groups;
 
-  assign n_groups = (n + p_lanes[31:0] - 32'd1) >> CLOG2_LANES;
+  // num_groups = ceil(n / p_lanes). Real divide so p_lanes can be any
+  // positive integer; synthesizes as a constant divide.
+  assign n_groups = (n + unsigned'(p_lanes) - 32'd1) / unsigned'(p_lanes);
 
   AXPYCtrl u_ctrl (
     .clk, .rst,
@@ -434,7 +431,7 @@ module SPMVCtrl #(
   //
   // NOTE: a pipelined version (2 cycles/nnz instead of 5) was attempted
   // but caused correctness regressions on real placement benchmarks
-  // (tiny3) despite passing all 8 DPI golden tests bit-exact. Left the
+  // (parallel_chains_50) despite passing all 8 DPI golden tests bit-exact. Left the
   // non-pipelined version in place for now; pipelining is a future
   // optimization that needs a deeper correctness investigation.
 

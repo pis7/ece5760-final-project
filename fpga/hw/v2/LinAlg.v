@@ -547,7 +547,7 @@ module SPMVCtrl #(
   //
   // NOTE: a pipelined version (2 cycles/nnz instead of 5) was attempted
   // but caused correctness regressions on real placement benchmarks
-  // (tiny3) despite passing all 8 DPI golden tests bit-exact. Left the
+  // (parallel_chains_50) despite passing all 8 DPI golden tests bit-exact. Left the
   // non-pipelined version in place for now; pipelining is a future
   // optimization that needs a deeper correctness investigation.
 

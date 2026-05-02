@@ -1,0 +1,92 @@
+VERSION 5.4 ;
+NAMESCASESENSITIVE ON ;
+
+UNITS
+    DATABASE MICRONS 100 ;
+END UNITS
+
+MACRO HUGE
+    CLASS CORE ;
+    ORIGIN 0.000 0.000 ;
+    SIZE 1.5 BY 1.5 ;
+    SYMMETRY x y ;
+    PIN Y0
+        DIRECTION OUTPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END Y0
+    PIN Y1
+        DIRECTION OUTPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END Y1
+    PIN Y2
+        DIRECTION OUTPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END Y2
+    PIN Y3
+        DIRECTION OUTPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END Y3
+    PIN A0
+        DIRECTION INPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END A0
+    PIN A1
+        DIRECTION INPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END A1
+    PIN A2
+        DIRECTION INPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END A2
+    PIN A3
+        DIRECTION INPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 1.5 1.5 ;
+        END
+    END A3
+END HUGE
+
+MACRO TINY
+    CLASS CORE ;
+    ORIGIN 0.000 0.000 ;
+    SIZE 0.05 BY 0.05 ;
+    SYMMETRY x y ;
+    PIN Y
+        DIRECTION OUTPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 0.05 0.05 ;
+        END
+    END Y
+    PIN A
+        DIRECTION INPUT ;
+        PORT
+        LAYER metal1 ;
+        RECT 0.0 0.0 0.05 0.05 ;
+        END
+    END A
+END TINY
+
+END LIBRARY

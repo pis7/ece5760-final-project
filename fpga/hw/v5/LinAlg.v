@@ -29,120 +29,6 @@
 // is 9 DSPs total.
 
 //======================================================================
-// VecNegSub: result[i] = -(a[i] + b[i]).
-// Per-handshake streaming, same val/rdy convention as AXPY.
-//======================================================================
-
-module VecNegSubCtrl (
-  input  logic        clk,
-  input  logic        rst,
-  input  logic        istream_val,
-  output logic        istream_rdy,
-  output logic        ostream_val,
-  input  logic        ostream_rdy,
-  input  logic [31:0] n,
-  input  logic [31:0] compute_counter,
-  output logic        advance
-);
-
-  typedef enum logic [1:0] { INIT, COMPUTE, UPDATE, DONE } state_t;
-  state_t state, next_state;
-
-  wire input_handshake  = istream_val  && istream_rdy;
-  wire output_handshake = ostream_val  && ostream_rdy;
-
-  assign istream_rdy = (state == COMPUTE);
-  assign ostream_val = (state == UPDATE);
-  assign advance     = input_handshake;
-
-  always_ff @(posedge clk) begin
-    if (rst) state <= INIT;
-    else     state <= next_state;
-  end
-
-  always_comb begin
-    next_state = state;
-    case (state)
-      INIT:    next_state = COMPUTE;
-      COMPUTE: if (input_handshake)                    next_state = UPDATE;
-      UPDATE:  if (output_handshake) begin
-                 if (compute_counter == n) next_state  = DONE;
-                 else                      next_state  = COMPUTE;
-               end
-      DONE:                                            next_state  = COMPUTE;
-      default:                                         next_state  = INIT;
-    endcase
-  end
-
-endmodule
-
-
-module VecNegSubDpath #(
-  parameter p_total_bits = 27
-) (
-  input  logic                           clk,
-  input  logic                           rst,
-  input  logic                           advance,
-  input  logic signed [p_total_bits-1:0] a,
-  input  logic signed [p_total_bits-1:0] b,
-  output logic signed [p_total_bits-1:0] z,
-  output logic [31:0]                    compute_counter
-);
-
-  always_ff @(posedge clk) begin
-    if (rst) begin
-      z               <= '0;
-      compute_counter <= '0;
-    end else if (advance) begin
-      z               <= -(a + b);
-      compute_counter <= compute_counter + 1;
-    end
-  end
-
-endmodule
-
-
-module VecNegSub_seq #(
-  parameter p_total_bits = 27
-) (
-  input  logic                           clk,
-  input  logic                           rst,
-  input  logic        [31:0]             n,
-
-  input  logic                           istream_val,
-  output logic                           istream_rdy,
-  input  logic signed [p_total_bits-1:0] istream_msg_a,
-  input  logic signed [p_total_bits-1:0] istream_msg_b,
-
-  output logic                           ostream_val,
-  input  logic                           ostream_rdy,
-  output logic signed [p_total_bits-1:0] ostream_msg_z
-);
-
-  logic [31:0] compute_counter;
-  logic        advance;
-
-  VecNegSubCtrl u_ctrl (
-    .clk, .rst,
-    .istream_val, .istream_rdy,
-    .ostream_val, .ostream_rdy,
-    .n, .compute_counter,
-    .advance (advance)
-  );
-
-  VecNegSubDpath #(.p_total_bits(p_total_bits)) u_dpath (
-    .clk, .rst,
-    .advance,
-    .a (istream_msg_a),
-    .b (istream_msg_b),
-    .z (ostream_msg_z),
-    .compute_counter
-  );
-
-endmodule
-
-
-//======================================================================
 // VecDot: result = sum_{i=0..n-1}(a[i] * b[i])
 // Parallelized to p_lanes lanes: istream carries p_lanes (a,b) pairs
 // per handshake, and the internal FSM runs for num_groups =
@@ -281,16 +167,13 @@ module VecDot_seq #(
   output logic signed [p_acc_bits-1:0]           ostream_msg_result
 );
 
-  // $clog2(1) returns 0, so this handles p_lanes==1 degenerately.
-  localparam CLOG2_LANES = $clog2(p_lanes);
-
   logic        acc_en, acc_clear;
   logic [31:0] compute_counter;
   logic [31:0] n_groups;
 
-  // num_groups = ceil(n / p_lanes). Shift works for any p_lanes >= 1
-  // because we only ever instantiate with power-of-two p_lanes.
-  assign n_groups = (n + p_lanes - 1) >> CLOG2_LANES;
+  // num_groups = ceil(n / p_lanes). Real divide so p_lanes can be any
+  // positive integer; synthesizes as a constant divide.
+  assign n_groups = (n + unsigned'(p_lanes) - 32'd1) / unsigned'(p_lanes);
 
   VecDotCtrl u_ctrl (
     .clk, .rst,
@@ -455,13 +338,13 @@ module AXPY_seq #(
   output logic [p_lanes*p_total_bits-1:0]        ostream_msg_z
 );
 
-  localparam CLOG2_LANES = $clog2(p_lanes);
-
   logic        advance;
   logic [31:0] compute_counter;
   logic [31:0] n_groups;
 
-  assign n_groups = (n + p_lanes[31:0] - 32'd1) >> CLOG2_LANES;
+  // num_groups = ceil(n / p_lanes). Real divide so p_lanes can be any
+  // positive integer; synthesizes as a constant divide.
+  assign n_groups = (n + unsigned'(p_lanes) - 32'd1) / unsigned'(p_lanes);
 
   AXPYCtrl u_ctrl (
     .clk, .rst,
@@ -502,6 +385,18 @@ endmodule
 // and MACs into a wide accumulator via one FpMulWide.
 //======================================================================
 
+// v5 SPMV controller: three independent M10K read ports.
+//
+// Per-nz cost drops from 5 cycles (v4: VAL_ADDR -> VAL_CAPT -> COL_ADDR
+// -> COL_CAPT -> ACC) to 3 cycles: NZ_ADDR drives q_val_addr=j and
+// q_col_addr=j in the same cycle; NZ_CAPT latches val_reg and col_reg
+// from the two slaves in the same cycle; ACC does the MAC.
+//
+// Row-pointer reads use the q_rowp port. Row 0 walks RP_ADDR_FIRST ->
+// RP_CAPT_FIRST (rp_lo) then RP_ADDR_HI -> RP_CAPT_HI (rp_hi). Rows 1+
+// use RP_ADDR_NEXT -> RP_CAPT_NEXT, carrying the previous rp_hi into
+// the new rp_lo and reading rp_ptr[row+1] into rp_hi (v3 collapse).
+
 module SPMVCtrl #(
   parameter p_m10k_addr_bits  = 32
 ) (
@@ -514,11 +409,9 @@ module SPMVCtrl #(
   output logic                           ostream_val,
   input  logic                           ostream_rdy,
 
-  // Loop bounds + CSR layout (quasi-static from caller)
+  // Loop bound (quasi-static from caller). Each slave is local-base 0
+  // so no base addresses are needed.
   input  logic [31:0]                    n,
-  input  logic [p_m10k_addr_bits-1:0]    q_val_base,
-  input  logic [p_m10k_addr_bits-1:0]    q_col_base,
-  input  logic [p_m10k_addr_bits-1:0]    q_rowp_base,
 
   // From dpath
   input  logic [31:0]                    row_idx,
@@ -532,40 +425,27 @@ module SPMVCtrl #(
   output logic                           d_capture_rphi,
   output logic                           d_capture_rphi_next, // carry rp_hi -> rp_lo, read new rp_hi
   output logic                           d_init_row,          // acc <- 0, j_idx <- rp_lo
-  output logic                           d_capture_val,
-  output logic                           d_capture_col,
+  output logic                           d_capture_nz,        // latch val_reg, col_reg from both ports
   output logic                           d_acc_en,            // MAC step
   output logic                           d_bump_row,          // advance row after ostream handshake
 
-  // Memory bus
-  output logic [p_m10k_addr_bits-1:0]    mem_addr,
-  output logic                           mem_rd_en
+  // Three independent M10K read ports (each slave is local-base 0)
+  output logic [p_m10k_addr_bits-1:0]    q_val_addr,
+  output logic [p_m10k_addr_bits-1:0]    q_col_addr,
+  output logic [p_m10k_addr_bits-1:0]    q_rowp_addr
 );
 
-  // Two-cycle reads: ADDR state drives mem_addr; the CAPTURE state
-  // in the next cycle latches mem_rdata. We hold the same address
-  // across both cycles so Quartus sees a clean inferred timing path.
-  //
-  // NOTE: a pipelined version (2 cycles/nnz instead of 5) was attempted
-  // but caused correctness regressions on real placement benchmarks
-  // (parallel_chains_50) despite passing all 8 DPI golden tests bit-exact. Left the
-  // non-pipelined version in place for now; pipelining is a future
-  // optimization that needs a deeper correctness investigation.
-
-  // v3 rp_lo/rp_hi collapse on top of v2's serial inner loop. For row 0
-  // we walk RPLO_ADDR/CAPT then RPHI_ADDR/CAPT. For rows 1..n-1 the
-  // previous row's rp_hi is exactly this row's rp_lo, so we skip the
-  // rp_lo read and just carry rp_hi -> rp_lo while reading the new
-  // rp_ptr[row+1] into rp_hi (states S_RPHI_ADDR_NEXT / _CAPT_NEXT).
-  // Saves 2 cycles per row except row 0.
+  // States: row-pointer phase + collapsed inner loop.
+  // Row 0:    RP_ADDR_FIRST -> RP_CAPT_FIRST -> RP_ADDR_HI -> RP_CAPT_HI
+  // Rows 1+:  RP_ADDR_NEXT  -> RP_CAPT_NEXT  (rp_lo<-old rp_hi, rp_hi<-new)
+  // Inner:    NZ_ADDR -> NZ_CAPT -> ACC, repeat for each non-zero
   typedef enum logic [3:0] {
     S_IDLE,
-    S_RPLO_ADDR,        S_RPLO_CAPT,
-    S_RPHI_ADDR,        S_RPHI_CAPT,
-    S_RPHI_ADDR_NEXT,   S_RPHI_CAPT_NEXT,
+    S_RP_ADDR_FIRST,    S_RP_CAPT_FIRST,
+    S_RP_ADDR_HI,       S_RP_CAPT_HI,
+    S_RP_ADDR_NEXT,     S_RP_CAPT_NEXT,
     S_ROW_INIT,
-    S_VAL_ADDR,         S_VAL_CAPT,
-    S_COL_ADDR,         S_COL_CAPT,
+    S_NZ_ADDR,          S_NZ_CAPT,
     S_ACC,
     S_EMIT,
     S_DONE
@@ -584,30 +464,26 @@ module SPMVCtrl #(
     else     state <= next_state;
   end
 
-  // ---- Memory address + rd_en ---------------------------------------------
+  // ---- Per-port addresses -------------------------------------------------
+  // Each slave is local-base 0 in v5, so the address is just the
+  // appropriate index. q_rowp_addr is row_idx for *_FIRST and
+  // (row_idx + 1) for *_HI / *_NEXT. q_val/col addresses follow j_idx
+  // during the inner loop.
   always_comb begin
-    mem_addr  = '0;
-    mem_rd_en = 1'b0;
+    q_val_addr  = '0;
+    q_col_addr  = '0;
+    q_rowp_addr = '0;
     case (state)
-      S_RPLO_ADDR, S_RPLO_CAPT: begin
-        mem_addr  = q_rowp_base + p_m10k_addr_bits'(row_idx);
-        mem_rd_en = 1'b1;
+      S_RP_ADDR_FIRST, S_RP_CAPT_FIRST: begin
+        q_rowp_addr = p_m10k_addr_bits'(row_idx);
       end
-      S_RPHI_ADDR, S_RPHI_CAPT: begin
-        mem_addr  = q_rowp_base + p_m10k_addr_bits'(row_idx) + p_m10k_addr_bits'(1);
-        mem_rd_en = 1'b1;
+      S_RP_ADDR_HI, S_RP_CAPT_HI,
+      S_RP_ADDR_NEXT, S_RP_CAPT_NEXT: begin
+        q_rowp_addr = p_m10k_addr_bits'(row_idx) + p_m10k_addr_bits'(1);
       end
-      S_RPHI_ADDR_NEXT, S_RPHI_CAPT_NEXT: begin
-        mem_addr  = q_rowp_base + p_m10k_addr_bits'(row_idx) + p_m10k_addr_bits'(1);
-        mem_rd_en = 1'b1;
-      end
-      S_VAL_ADDR,  S_VAL_CAPT: begin
-        mem_addr  = q_val_base + p_m10k_addr_bits'(j_idx);
-        mem_rd_en = 1'b1;
-      end
-      S_COL_ADDR,  S_COL_CAPT: begin
-        mem_addr  = q_col_base + p_m10k_addr_bits'(j_idx);
-        mem_rd_en = 1'b1;
+      S_NZ_ADDR, S_NZ_CAPT: begin
+        q_val_addr  = p_m10k_addr_bits'(j_idx);
+        q_col_addr  = p_m10k_addr_bits'(j_idx);
       end
       default: ;
     endcase
@@ -617,30 +493,25 @@ module SPMVCtrl #(
   always_comb begin
     next_state = state;
     case (state)
-      S_IDLE:      if (input_handshake)             next_state = S_RPLO_ADDR;
-      S_RPLO_ADDR:                                  next_state = S_RPLO_CAPT;
-      S_RPLO_CAPT:                                  next_state = S_RPHI_ADDR;
-      S_RPHI_ADDR:                                  next_state = S_RPHI_CAPT;
-      S_RPHI_CAPT:                                  next_state = S_ROW_INIT;
-      S_RPHI_ADDR_NEXT:                             next_state = S_RPHI_CAPT_NEXT;
-      S_RPHI_CAPT_NEXT:                             next_state = S_ROW_INIT;
-      S_ROW_INIT:  if (rp_lo == rp_hi)              next_state = S_EMIT;
-                   else                             next_state = S_VAL_ADDR;
-      S_VAL_ADDR:                                   next_state = S_VAL_CAPT;
-      S_VAL_CAPT:                                   next_state = S_COL_ADDR;
-      S_COL_ADDR:                                   next_state = S_COL_CAPT;
-      S_COL_CAPT:                                   next_state = S_ACC;
-      S_ACC:       if (j_idx + 1 == rp_hi)          next_state = S_EMIT;
-                   else                             next_state = S_VAL_ADDR;
-      S_EMIT:      if (output_handshake) begin
-                     if (row_idx + 1 == n)          next_state = S_DONE;
-                     // Skip the rp_lo read for non-first rows: previous
-                     // row's rp_hi is exactly this row's rp_lo. Carry it
-                     // and read only the new row's rp_ptr[row+1].
-                     else                           next_state = S_RPHI_ADDR_NEXT;
-                   end
-      S_DONE:                                       next_state = S_IDLE;
-      default:                                      next_state = S_IDLE;
+      S_IDLE:           if (input_handshake)             next_state = S_RP_ADDR_FIRST;
+      S_RP_ADDR_FIRST:                                   next_state = S_RP_CAPT_FIRST;
+      S_RP_CAPT_FIRST:                                   next_state = S_RP_ADDR_HI;
+      S_RP_ADDR_HI:                                      next_state = S_RP_CAPT_HI;
+      S_RP_CAPT_HI:                                      next_state = S_ROW_INIT;
+      S_RP_ADDR_NEXT:                                    next_state = S_RP_CAPT_NEXT;
+      S_RP_CAPT_NEXT:                                    next_state = S_ROW_INIT;
+      S_ROW_INIT:       if (rp_lo == rp_hi)              next_state = S_EMIT;
+                        else                             next_state = S_NZ_ADDR;
+      S_NZ_ADDR:                                         next_state = S_NZ_CAPT;
+      S_NZ_CAPT:                                         next_state = S_ACC;
+      S_ACC:            if (j_idx + 1 == rp_hi)          next_state = S_EMIT;
+                        else                             next_state = S_NZ_ADDR;
+      S_EMIT:           if (output_handshake) begin
+                          if (row_idx + 1 == n)          next_state = S_DONE;
+                          else                           next_state = S_RP_ADDR_NEXT;
+                        end
+      S_DONE:                                            next_state = S_IDLE;
+      default:                                           next_state = S_IDLE;
     endcase
   end
 
@@ -651,19 +522,17 @@ module SPMVCtrl #(
     d_capture_rphi      = 1'b0;
     d_capture_rphi_next = 1'b0;
     d_init_row          = 1'b0;
-    d_capture_val       = 1'b0;
-    d_capture_col       = 1'b0;
+    d_capture_nz        = 1'b0;
     d_acc_en            = 1'b0;
     d_bump_row          = 1'b0;
 
     case (state)
       S_IDLE:           d_begin_op          = input_handshake;
-      S_RPLO_CAPT:      d_capture_rplo      = 1'b1;
-      S_RPHI_CAPT:      d_capture_rphi      = 1'b1;
-      S_RPHI_CAPT_NEXT: d_capture_rphi_next = 1'b1;
+      S_RP_CAPT_FIRST:  d_capture_rplo      = 1'b1;
+      S_RP_CAPT_HI:     d_capture_rphi      = 1'b1;
+      S_RP_CAPT_NEXT:   d_capture_rphi_next = 1'b1;
       S_ROW_INIT:       d_init_row          = 1'b1;
-      S_VAL_CAPT:       d_capture_val       = 1'b1;
-      S_COL_CAPT:       d_capture_col       = 1'b1;
+      S_NZ_CAPT:        d_capture_nz        = 1'b1;
       S_ACC:            d_acc_en            = 1'b1;
       S_EMIT:           d_bump_row          = output_handshake;
       default: ;
@@ -683,8 +552,12 @@ module SPMVDpath #(
   input  logic                           clk,
   input  logic                           rst,
 
-  // From memory
-  input  logic [31:0]                    mem_rdata,
+  // From the three M10K read ports (q_val, q_col, q_rowp) -- each
+  // produces a 32-bit rdata one cycle after the corresponding addr is
+  // driven by SPMVCtrl.
+  input  logic [31:0]                    q_val_rdata,
+  input  logic [31:0]                    q_col_rdata,
+  input  logic [31:0]                    q_rowp_rdata,
 
   // From RF read port (combinational lookup of vec[col_reg])
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -696,8 +569,7 @@ module SPMVDpath #(
   input  logic                           d_capture_rphi,
   input  logic                           d_capture_rphi_next,
   input  logic                           d_init_row,
-  input  logic                           d_capture_val,
-  input  logic                           d_capture_col,
+  input  logic                           d_capture_nz,
   input  logic                           d_acc_en,
   input  logic                           d_bump_row,
 
@@ -716,7 +588,6 @@ module SPMVDpath #(
   logic signed [p_total_bits-1:0] col_reg;
   logic signed [p_acc_bits-1:0]   acc;
 
-  // Combinational MAC: product is full-precision, accumulator adds it.
   logic signed [p_acc_bits-1:0] product_wide;
 
   FpMulWide #(
@@ -730,10 +601,8 @@ module SPMVDpath #(
     .result(product_wide)
   );
 
-  // Drive vec RF lookup with the currently captured col.
   assign vec_rd_idx = col_reg[$clog2(p_max_n)-1:0];
 
-  // Output payload: emit row_idx and row_val (truncated from acc).
   assign ostream_msg_row_idx = row_idx;
   assign ostream_msg_row_val = p_total_bits'(acc);
 
@@ -750,22 +619,26 @@ module SPMVDpath #(
       if (d_begin_op) begin
         row_idx <= '0;
       end
-      if (d_capture_rplo) rp_lo <= mem_rdata;
-      if (d_capture_rphi) rp_hi <= mem_rdata;
+      if (d_capture_rplo) rp_lo <= q_rowp_rdata;
+      if (d_capture_rphi) rp_hi <= q_rowp_rdata;
       // Non-first row prologue: previous row's rp_hi becomes new row's
       // rp_lo, and the new rp_ptr[row+1] read from memory becomes the
       // new rp_hi. NBA: rp_lo gets the pre-edge rp_hi (previous row's
-      // value) while rp_hi gets the new mem_rdata. Both fire same cycle.
+      // value) while rp_hi gets the new q_rowp_rdata. Both fire same cycle.
       if (d_capture_rphi_next) begin
         rp_lo <= rp_hi;
-        rp_hi <= mem_rdata;
+        rp_hi <= q_rowp_rdata;
       end
       if (d_init_row) begin
         j_idx <= rp_lo;
         acc   <= '0;
       end
-      if (d_capture_val) val_reg <= p_total_bits'($signed(mem_rdata));
-      if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata));
+      // Single capture state: both M10K slaves return their values in
+      // the same cycle, so we latch val and col together.
+      if (d_capture_nz) begin
+        val_reg <= p_total_bits'($signed(q_val_rdata));
+        col_reg <= p_total_bits'($signed(q_col_rdata));
+      end
       if (d_acc_en) begin
         acc   <= acc + product_wide;
         j_idx <= j_idx + 1;
@@ -802,14 +675,15 @@ module SPMV_seq #(
 
   // Quasi-static (held by caller across the operation)
   input  logic [31:0]                    n,
-  input  logic [p_m10k_addr_bits-1:0]    q_val_base,
-  input  logic [p_m10k_addr_bits-1:0]    q_col_base,
-  input  logic [p_m10k_addr_bits-1:0]    q_rowp_base,
 
-  // Memory bus (SPMV drives addr; mem returns rdata 1 cycle later)
-  output logic [p_m10k_addr_bits-1:0]    mem_addr,
-  output logic                           mem_rd_en,
-  input  logic [31:0]                    mem_rdata,
+  // Three independent M10K read ports (each slave is local-base 0).
+  // SPMV drives the address; rdata returns 1 cycle later.
+  output logic [p_m10k_addr_bits-1:0]    q_val_addr,
+  input  logic [31:0]                    q_val_rdata,
+  output logic [p_m10k_addr_bits-1:0]    q_col_addr,
+  input  logic [31:0]                    q_col_rdata,
+  output logic [p_m10k_addr_bits-1:0]    q_rowp_addr,
+  input  logic [31:0]                    q_rowp_rdata,
 
   // RF read port for vec[col]
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -818,7 +692,7 @@ module SPMV_seq #(
 
   // Ctrl <-> Dpath connections
   logic        d_begin_op, d_capture_rplo, d_capture_rphi, d_capture_rphi_next, d_init_row;
-  logic        d_capture_val, d_capture_col, d_acc_en, d_bump_row;
+  logic        d_capture_nz, d_acc_en, d_bump_row;
   logic [31:0] row_idx, j_idx, rp_lo, rp_hi;
 
   SPMVCtrl #(
@@ -827,11 +701,11 @@ module SPMV_seq #(
     .clk, .rst,
     .istream_val, .istream_rdy,
     .ostream_val, .ostream_rdy,
-    .n, .q_val_base, .q_col_base, .q_rowp_base,
+    .n,
     .row_idx, .j_idx, .rp_lo, .rp_hi,
     .d_begin_op, .d_capture_rplo, .d_capture_rphi, .d_capture_rphi_next, .d_init_row,
-    .d_capture_val, .d_capture_col, .d_acc_en, .d_bump_row,
-    .mem_addr, .mem_rd_en
+    .d_capture_nz, .d_acc_en, .d_bump_row,
+    .q_val_addr, .q_col_addr, .q_rowp_addr
   );
 
   SPMVDpath #(
@@ -842,10 +716,10 @@ module SPMV_seq #(
     .p_max_n     (p_max_n)
   ) u_dpath (
     .clk, .rst,
-    .mem_rdata,
+    .q_val_rdata, .q_col_rdata, .q_rowp_rdata,
     .vec_rd_idx, .vec_rd_data,
     .d_begin_op, .d_capture_rplo, .d_capture_rphi, .d_capture_rphi_next, .d_init_row,
-    .d_capture_val, .d_capture_col, .d_acc_en, .d_bump_row,
+    .d_capture_nz, .d_acc_en, .d_bump_row,
     .row_idx, .j_idx, .rp_lo, .rp_hi,
     .ostream_msg_row_idx, .ostream_msg_row_val
   );

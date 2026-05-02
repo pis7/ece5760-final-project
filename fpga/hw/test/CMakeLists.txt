@@ -2,18 +2,20 @@ cmake_minimum_required(VERSION 3.14)
 project(CGTop_tb LANGUAGES CXX)
 
 set(DPI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/cg_golden_dpi.cpp")
-set(TB CGTop_tb)
 
 # Build one Verilator testbench target for an RTL version directory.
 #
-# Usage:  add_verilator_tb(<version> <rtl_dir> [extra_cflags])
+# Usage:  add_verilator_tb(<version> <rtl_dir> <tb_name> [extra_cflags])
 #   <version>    -- e.g. v1, v2, v3. Used as the target suffix.
 #   <rtl_dir>    -- absolute path to the directory holding CGTop.v et al.
+#   <tb_name>    -- testbench file basename (without .v). Allows a
+#                   per-version testbench when memory topology differs.
 #   [extra_cflags] -- optional extra -CFLAGS string (e.g. for v3 NR golden).
 #
-# Builds VCGTop_tb_<version> as an ALL target and stages the binary as
-# V<TB>_<version> in the top of the build dir for easy invocation.
-function(add_verilator_tb VERSION RTL_DIR)
+# The Verilator output binary V<tb_name> is staged as VCGTop_tb_<version>
+# regardless of the underlying tb_name, so consumers always invoke
+# ./VCGTop_tb_<version>.
+function(add_verilator_tb VERSION RTL_DIR TB)
   set(EXTRA_CFLAGS "${ARGN}")
   set(VDIR "${CMAKE_CURRENT_BINARY_DIR}/vobj_${VERSION}")
   set(TARGET "VCGTop_tb_${VERSION}")
@@ -25,19 +27,15 @@ function(add_verilator_tb VERSION RTL_DIR)
     ${RTL_DIR}/FpMath.v
     ${RTL_DIR}/LinAlg.v
   )
-  # v1 also has a separate M10K loader module.
   if(EXISTS "${RTL_DIR}/M10KLoader.v")
     list(APPEND RTL_SRCS ${RTL_DIR}/M10KLoader.v)
   endif()
 
-  # --trace enables VCD support so the testbench can call $dumpfile /
-  # $dumpvars and emit a waveform when invoked with the +vcd=<file>
-  # plusarg. With no +vcd, runtime cost is negligible.
   add_custom_target(${TARGET} ALL
     COMMAND verilator --cc --exe --build --timing --main --trace
       -Wall -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSEDSIGNAL
       -Wno-UNUSEDPARAM -Wno-BLKSEQ -Wno-DECLFILENAME
-      --top-module ${TB}
+      --top-module CGTop_tb
       --Mdir ${VDIR}
       ${CMAKE_CURRENT_SOURCE_DIR}/${TB}.v
       ${RTL_SRCS}
@@ -49,13 +47,18 @@ function(add_verilator_tb VERSION RTL_DIR)
 
   add_custom_command(TARGET ${TARGET} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      ${VDIR}/V${TB} ${CMAKE_CURRENT_BINARY_DIR}/V${TB}_${VERSION}
+      ${VDIR}/VCGTop_tb ${CMAKE_CURRENT_BINARY_DIR}/VCGTop_tb_${VERSION}
   )
 endfunction()
 
-# v3 / v4 need the NR-divide DPI golden so compares stay bit-exact against
-# the NR FpDiv. v1 and v2 use the default shift-subtract divide.
-add_verilator_tb(v1 ${CMAKE_CURRENT_SOURCE_DIR}/../v1)
-add_verilator_tb(v2 ${CMAKE_CURRENT_SOURCE_DIR}/../v2)
-add_verilator_tb(v3 ${CMAKE_CURRENT_SOURCE_DIR}/../v3 -DCG_GOLDEN_USE_NR)
-add_verilator_tb(v4 ${CMAKE_CURRENT_SOURCE_DIR}/../v4 -DCG_GOLDEN_USE_NR)
+# v1 / v2 use the shift-subtract divide; v3 / v4 use NR FpDiv (DPI golden
+# needs CG_GOLDEN_USE_NR). v5 uses the same NR FpDiv as v4 but has a
+# separate testbench because its memory topology is multi-block. v5_deep
+# inherits v5's memory topology and reuses CGTop_tb_v5 -- only its SPMV
+# inner loop is pipelined.
+add_verilator_tb(v1      ${CMAKE_CURRENT_SOURCE_DIR}/../v1      CGTop_tb)
+add_verilator_tb(v2      ${CMAKE_CURRENT_SOURCE_DIR}/../v2      CGTop_tb)
+add_verilator_tb(v3      ${CMAKE_CURRENT_SOURCE_DIR}/../v3      CGTop_tb    -DCG_GOLDEN_USE_NR)
+add_verilator_tb(v4      ${CMAKE_CURRENT_SOURCE_DIR}/../v4      CGTop_tb    -DCG_GOLDEN_USE_NR)
+add_verilator_tb(v5      ${CMAKE_CURRENT_SOURCE_DIR}/../v5      CGTop_tb_v5 -DCG_GOLDEN_USE_NR)
+add_verilator_tb(v5_deep ${CMAKE_CURRENT_SOURCE_DIR}/../v5_deep CGTop_tb_v5 -DCG_GOLDEN_USE_NR)
