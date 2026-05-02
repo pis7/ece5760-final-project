@@ -15,7 +15,7 @@ and pass through unchanged.
 | Q SRAM count | 3 slaves (`q_val`, `q_col`, `q_rowp`) | 6 slaves (3 per engine; Q duplicated) | engines never contend on Q reads |
 | `CGCtrl` FSM | flips `sel_y_reg` after first writeback, loops back to `S_LD_X_ADDR` for y pass | single-dimension solver; `S_WB_WRITE -> S_CG_DONE` unconditional | simpler control |
 | `CGTop` | wires one CGCtrl + CGDpath, muxes `cx_ram`/`cy_ram` and `x_ram`/`y_ram` by `sel_y` | thin wrapper that instantiates `CGEngine` twice; no muxing | each slave port has exactly one consumer |
-| Per-engine `p_lanes` | 8 (one engine) | **4** per engine (two engines) | total compute area roughly constant |
+| Per-engine `p_lanes` | 8 (one engine) | 8 per engine (two engines) | same throughput |
 | Avalon slave count | 7 (`q_val,q_col,q_rowp,cx,cy,x,y`) | 10 (6 Q + cx,cy,x,y) | -- |
 | ARM driver protocol | one `sw_go`/`sw_done` cycle | **identical** -- one go, one done | no software flow change |
 | Q load on ARM side | one memcpy into `q_val_ram` etc. | two memcpys (one per engine's Q copy) | trivial cost (Q load is one-shot) |

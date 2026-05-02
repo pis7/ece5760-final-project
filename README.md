@@ -376,9 +376,7 @@ ARM driver's perspective the protocol is identical to v5 -- one
 `sw_go` pulse, one `sw_done` (= AND of both engines' dones).
 
 End-to-end **~1.86x cycle-count speedup over v5** on
-`parallel_chains_50` (131,088 -> 70,316 total HW CG cycles). Per-engine
-`p_lanes` defaults to 4 (vs v5's 8) so total compute area stays roughly
-constant.
+`parallel_chains_50` (131,088 -> 70,316 total HW CG cycles).
 
 ### 11. One `placer.cpp`, many backends
 
