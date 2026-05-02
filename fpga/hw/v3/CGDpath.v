@@ -1,4 +1,4 @@
-// v2 datapath -- pure datapath, no FSM.
+// v3 datapath -- pure datapath, no FSM.
 //
 // Owns all register files, scalar registers, linalg submodule
 // instances (each with its own Ctrl+Dpath internally), and a small

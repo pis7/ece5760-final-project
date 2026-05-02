@@ -21,10 +21,12 @@
 //   - SPMV: single istream "start" handshake, then one row result per
 //     ostream handshake. SPMV owns three independent M10K read ports
 //     (q_val, q_col, q_rowp) and an external vec-RF read port. Stays
-//     single-lane (per-nz inner loop is bound by Q port latency).
+//     single-lane because the per-nz inner loop is bound by Q port
+//     latency, not lane width.
 //
 // Every internal multiply uses FpMul / FpMulWide (DSP-mapped). DSP
-// count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1.
+// count per engine: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes +
+// SPMV 1. v6 instantiates this kernel set twice (one per engine).
 
 //======================================================================
 // VecDot: result = sum_{i=0..n-1}(a[i] * b[i])
@@ -461,10 +463,10 @@ module SPMVCtrl #(
   end
 
   // ---- Per-port addresses -------------------------------------------------
-  // Each slave is local-base 0, so the address is just the
-  // appropriate index. q_rowp_addr is row_idx for *_FIRST and
-  // (row_idx + 1) for *_HI / *_NEXT. q_val/col addresses follow j_idx
-  // during the inner loop.
+  // Each slave is local-base 0, so the address is just the appropriate
+  // index. q_rowp_addr is row_idx for *_FIRST and (row_idx + 1) for
+  // *_HI / *_NEXT. q_val/col addresses follow j_idx during the inner
+  // loop.
   always_comb begin
     q_val_addr  = '0;
     q_col_addr  = '0;

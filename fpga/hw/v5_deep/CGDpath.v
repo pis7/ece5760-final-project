@@ -1,19 +1,16 @@
-// v5 datapath -- multi-block on-chip RAM topology.
+// v5_deep datapath -- multi-block on-chip RAM topology.
 //
 // SPMV owns three independent read ports (q_val, q_col, q_rowp), wired
-// directly out to dedicated Qsys M10K slaves. CGCtrl owns a private
+// directly to dedicated Qsys M10K slaves. CGCtrl owns a private
 // load+writeback bus to the x_ram / y_ram slaves (sel_y picks which),
 // and a separate serial cx-read port for S_VNS_R that goes to cx_ram /
-// cy_ram. There is no shared bus mux -- every slave's RTL port has
-// exactly one consumer.
+// cy_ram. Every slave port has exactly one consumer; no shared bus mux.
 //
-// cx_reg disappears from the central RF; the WD_VNS source is replaced
-// by WD_VNS_SCALAR which reads vns_cx_rdata (M10K) for the cx side and
-// rd_b for the q_buf side. WD_VNS_SCALAR fires only in S_VNS_R_CAPT
-// with single-lane writeback.
+// Central RF: 4 banked flop arrays (d_reg, r_reg, x_vec_reg, q_buf).
+// cx is read directly from M10K via WD_VNS_SCALAR during S_VNS_R_CAPT
+// (single-lane writeback computing -(vns_cx_rdata + rd_b)).
 //
-// DSP count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1
-//   (same as v4 -- multi-block topology is a memory change, not compute).
+// DSP count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1.
 
 module CGDpath #(
   parameter p_lanes            = 4,
@@ -45,7 +42,7 @@ module CGDpath #(
   input  logic [31:0]                 vns_cx_rdata,
 
   // --- Addressed RF read ports (combinational) ---------------------------
-  // 4 RFs in v5: 0=d_reg, 1=r_reg, 2=x_vec_reg, 4=q_buf (cx is in M10K).
+  // 4 RFs: 0=d_reg, 1=r_reg, 2=x_vec_reg, 4=q_buf (cx is in M10K).
   // rd_a/rd_b are general-purpose; rd_c/rd_d feed u_axpy_r in S_AXPY_XR_FEED.
   input  logic [2:0]                              rd_a_sel,
   input  logic [p_lanes*$clog2(p_max_n)-1:0]      rd_a_idx_packed,
@@ -137,7 +134,7 @@ module CGDpath #(
   localparam BANK_SEL_W  = (CLOG2_LANES == 0) ? 1 : CLOG2_LANES;
 
   //----------------------------------------------------------------------
-  // RF select encodings (must match CGCtrl.v). v5 has 4 RFs (no cx_reg).
+  // RF select encodings (must match CGCtrl.v).
   //----------------------------------------------------------------------
   localparam [2:0] RF_D_REG     = 3'd0;
   localparam [2:0] RF_R_REG     = 3'd1;
@@ -152,7 +149,7 @@ module CGDpath #(
 
   //----------------------------------------------------------------------
   // Register files -- banked by lane id. Bank b holds elements with
-  // (idx mod p_lanes) == b. v5 drops cx_reg.
+  // (idx mod p_lanes) == b.
   //----------------------------------------------------------------------
 
   logic signed [p_total_bits-1:0] d_reg     [p_lanes][BANK_DEPTH];
@@ -398,7 +395,7 @@ module CGDpath #(
   );
 
   //----------------------------------------------------------------------
-  // RF write port (per-lane). v5 drops cx_reg from the write case.
+  // RF write port (per-lane).
   //----------------------------------------------------------------------
 
   logic [IDX_W-1:0]                wr_idx_ctrl    [p_lanes];

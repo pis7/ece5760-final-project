@@ -40,8 +40,8 @@ uv run run-placer sw     ../benchmarks/iccad04/DMA      # C++ double-precision C
 uv run run-placer golden ../benchmarks/iccad04/DMA      # C++ fixed-point golden CG (SW model of the FPGA)
 
 # --- Hardware-in-the-loop simulation (Verilator) ---
-uv run run-placer verilated    ../benchmarks/custom/parallel_chains_50   # Verilated RTL CG, default v3
-uv run run-placer verilated v2 ../benchmarks/custom/parallel_chains_50   # v2 reference
+uv run run-placer verilated    ../benchmarks/custom/parallel_chains_50   # Verilated RTL CG, default v6
+uv run run-placer verilated v3 ../benchmarks/custom/parallel_chains_50   # any of v2|v3|v4|v5|v5_deep|v6
 
 # --- DE1-SoC board (needs .env with BOARD/PASS) ---
 uv run run-placer arm  ../benchmarks/iccad04/DMA        # cross-compile + run SW CG on the board's ARM
@@ -65,9 +65,13 @@ uv run fpga/fl/test/CGTop-test.py
 
 # Hardware / RTL -- 16 cases per version, bit-exact vs DPI golden
 mkdir -p build-tb && cd build-tb && cmake ../fpga/hw/test && make
-./VCGTop_tb_v1   # combinational reference
-./VCGTop_tb_v2   # synthesizable
-./VCGTop_tb_v3   # synth + Newton-Raphson FpDiv + SPMV row-prologue collapse
+./VCGTop_tb_v1        # combinational reference (not synthesizable)
+./VCGTop_tb_v2        # first synthesizable design
+./VCGTop_tb_v3        # NR FpDiv + SPMV row-prologue collapse + PIO timing
+./VCGTop_tb_v4        # parallel x/r AXPY + fused VNS_R
+./VCGTop_tb_v5        # multi-block on-chip RAM topology (7 slaves)
+./VCGTop_tb_v5_deep   # v5 + 4-stage SPMV pipeline (1 cyc/nz steady state)
+./VCGTop_tb_v6        # v5 + parallel x/y solve datapaths (10 slaves, 2 engines)
 ```
 
 The Python suite should print `Result: 19/19 tests passed`; each RTL
@@ -181,9 +185,11 @@ representation of the netlist anywhere in the project.
 
 ## How the project was built
 
-The project was built bottom-up in six stages. Each new layer was validated
-against the layer below it before we moved on -- so there is always a known-
-good reference to diff against when something breaks.
+The project was built bottom-up. Each new layer was validated against the
+layer below it before we moved on -- so there is always a known-good
+reference to diff against when something breaks. The RTL went through
+seven versions; each one's `README.md` documents what changed vs the
+previous (`v1` -> `v2` -> `v3` -> `v4` -> `v5` -> `v5_deep` & `v6`).
 
 ### 1. Python baseline placer -- [`sw-baseline-python/`](sw-baseline-python/)
 
@@ -295,7 +301,68 @@ A 2-cyc/nnz pipelined SPMV was tried during v3 work; it passed Verilator
 but failed timing on real silicon and was abandoned (see the v3 README).
 v3's SPMV inner loop is the same serial 5-cyc/nnz walk as v2.
 
-### 7. One `placer.cpp`, four backends
+### 7. v4 RTL -- parallel x/r AXPY + fused VNS_R -- [`fpga/hw/v4/`](fpga/hw/v4/)
+
+[`fpga/hw/v4/README.md`](fpga/hw/v4/README.md) has the full breakdown.
+The headline change is exploiting the fact that the per-iter `x += alpha*d`
+and `r -= alpha*q` updates have **no data dependency** on each other:
+
+1. **Merged `S_AXPY_XR_FEED`** -- two AXPY units (`u_axpy_x` ADD,
+   `u_axpy_r` SUB) run in lockstep, sharing the alpha coefficient.
+   v3 ran the two updates sequentially with a single AXPY unit.
+2. **Fused `S_VNS_R`** -- the RF gains a secondary write port, so the
+   `r = -(cx+q)` and `d = r` writes happen in the same cycle, removing
+   v3's separate `S_COPY_D` pass.
+
+End-to-end this gives ~1.35x-1.40x cycle-count speedup over v3.
+SPMV is unchanged.
+
+### 8. v5 RTL -- multi-block on-chip RAM topology -- [`fpga/hw/v5/`](fpga/hw/v5/)
+
+[`fpga/hw/v5/README.md`](fpga/hw/v5/README.md) explains the changes.
+Headline: split the single shared Avalon SRAM into **seven dedicated
+Qsys on-chip RAM slaves** (`q_val_ram`, `q_col_ram`, `q_rowp_ram`,
+`cx_ram`, `cy_ram`, `x_ram`, `y_ram`). Each slave's FPGA-facing port
+has exactly one consumer, so SPMV can fetch `q_val[j]` and `q_col[j]`
+in the same cycle. Per-nz cost drops from v4's 5 cycles to 3.
+
+Idea drawn from
+[DuBois et al. 2008 (FCCM)](background-knowledge/papers/An_Implementation_of_the_Conjugate_Gradient_Algorithm_on_FPGAs.pdf),
+which striped its CSR arrays across two parallel banks for the same
+reason. End-to-end ~1.42x cycle-count speedup over v4 on
+`parallel_chains_50`.
+
+This requires regenerating `Computer_System.qsys` with seven on-chip
+RAM IPs, and ships a per-version ARM mmap driver
+([`cg_fpga_mmap_driver_v5.h`](fpga/sw/cg_fpga_mmap_driver_v5.h)) that
+mmaps each region independently. v4's drivers stay at the bare
+`cg_fpga_mmap_driver.h` / `cg_verilator_driver.h` paths.
+
+### 9. v5_deep -- pipelined SPMV inner loop -- [`fpga/hw/v5_deep/`](fpga/hw/v5_deep/)
+
+[`fpga/hw/v5_deep/README.md`](fpga/hw/v5_deep/README.md). Forks v5; the only
+architectural change is a 4-stage SPMV pipeline that issues **1 nz per cycle in
+steady state** (vs v5's 3 cycles/nz). On dense rows (`nnz >= 3`, typical for
+placement Q) it asymptotes to a 3x SPMV speedup. Reuses v5's seven-slave Qsys
+layout and v5 mmap driver verbatim. Note: this version works in simulation but
+not on the FPGA - we suspect the issue is related to timing.
+
+### 10. v6 RTL -- parallel x/y solve datapaths -- [`fpga/hw/v6/`](fpga/hw/v6/)
+
+[`fpga/hw/v6/README.md`](fpga/hw/v6/README.md). Forks v5 (not
+v5_deep). Runs the x and y analytical-placement solves on **two
+independent CGEngines simultaneously**. The Q matrix is duplicated
+across two M10K trios (10 Qsys slaves total: 6 Q + cx + cy + x + y)
+so the two SPMVs run fully in parallel with zero contention. From the
+ARM driver's perspective the protocol is identical to v5 -- one
+`sw_go` pulse, one `sw_done` (= AND of both engines' dones).
+
+End-to-end **~1.86x cycle-count speedup over v5** on
+`parallel_chains_50` (131,088 -> 70,316 total HW CG cycles). Per-engine
+`p_lanes` defaults to 4 (vs v5's 8) so total compute area stays roughly
+constant.
+
+### 11. One `placer.cpp`, many backends
 
 This is where everything composes. [`placer.cpp`](sw-baseline-c/placer.cpp)
 contains a single `#include` block that picks the CG backend at compile
@@ -303,30 +370,38 @@ time:
 
 ```cpp
 #ifdef USE_HW_CG
-#if   defined(USE_FP_GOLDEN)        #include "cg_golden_driver.h"
-#elif defined(CG_DRIVER_FPGA_MMAP)  #include "cg_fpga_mmap_driver.h"
-#else                               #include "cg_verilator_driver.h"
+#if   defined(USE_FP_GOLDEN)            #include "cg_golden_driver.h"
+#elif defined(CG_DRIVER_FPGA_MMAP_V6)   #include "cg_fpga_mmap_driver_v6.h"
+#elif defined(CG_DRIVER_FPGA_MMAP_V5)   #include "cg_fpga_mmap_driver_v5.h"
+#elif defined(CG_DRIVER_FPGA_MMAP)      #include "cg_fpga_mmap_driver.h"
+#elif defined(CG_VERILATOR_V6)          #include "cg_verilator_driver_v6.h"
+#elif defined(CG_VERILATOR_V5)          #include "cg_verilator_driver_v5.h"
+#else                                   #include "cg_verilator_driver.h"
 #endif
 #endif
 ```
 
 Each driver header exposes the same `CGHwDriver::solve(Q, cx, cy, x, y, ...)`
-interface, so the rest of the placer is backend-agnostic. The four resulting
+interface, so the rest of the placer is backend-agnostic. The resulting
 backends are:
 
-| Backend                                                        | Macros                              | What it runs                                            | Used for                              |
-| -------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------- | ------------------------------------- |
-| Hand-rolled software CG                                        | (none)                              | Double-precision `cg_solve()` in placer.cpp             | Reference timings, the SW oracle      |
-| [`cg_golden_driver.h`](sw-baseline-c/cg_golden_driver.h)       | `USE_HW_CG`, `USE_FP_GOLDEN`        | Fixed-point [`CGGolden`](sw-baseline-c/cg_golden_model.h) C++ model | Bit-exact SW model of the FPGA        |
-| [`cg_verilator_driver.h`](sw-baseline-c/cg_verilator_driver.h) | `USE_HW_CG` (+ `HW_CG_VERSION=v2/v3`) | Verilated `CGTop` RTL                                   | RTL-in-the-loop placement (slow)      |
-| [`cg_fpga_mmap_driver.h`](fpga/sw/cg_fpga_mmap_driver.h)       | `USE_HW_CG`, `CG_DRIVER_FPGA_MMAP`  | Real DE1-SoC bitstream over `/dev/mem`                  | The actual FPGA-accelerated placer    |
+| Backend                                                                            | Macros                                          | What it runs                                                            | Used for                            |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------- |
+| Hand-rolled software CG                                                            | (none)                                          | Double-precision `cg_solve()` in placer.cpp                             | Reference timings, the SW oracle    |
+| [`cg_golden_driver.h`](sw-baseline-c/cg_golden_driver.h)                           | `USE_HW_CG`, `USE_FP_GOLDEN`                    | Fixed-point [`CGGolden`](sw-baseline-c/cg_golden_model.h) C++ model     | Bit-exact SW model of the FPGA      |
+| [`cg_verilator_driver.h`](sw-baseline-c/cg_verilator_driver.h)                     | `USE_HW_CG` (+ `HW_CG_VERSION=v2/v3/v4`)        | Verilated `CGTop` RTL (single shared SRAM)                              | RTL-in-the-loop, v2-v4              |
+| [`cg_verilator_driver_v5.h`](sw-baseline-c/cg_verilator_driver_v5.h)               | `USE_HW_CG`, `CG_VERILATOR_V5` (v5/v5_deep)     | Verilated v5 RTL (7-slave multi-block topology)                         | RTL-in-the-loop, v5/v5_deep         |
+| [`cg_verilator_driver_v6.h`](sw-baseline-c/cg_verilator_driver_v6.h)               | `USE_HW_CG`, `CG_VERILATOR_V6` (v6)             | Verilated v6 RTL (10-slave parallel x/y solver)                         | RTL-in-the-loop, v6                 |
+| [`cg_fpga_mmap_driver.h`](fpga/sw/cg_fpga_mmap_driver.h)                           | `USE_HW_CG`, `CG_DRIVER_FPGA_MMAP`              | Real DE1-SoC bitstream over `/dev/mem` (single shared SRAM)             | FPGA placer, v4 bitstream           |
+| [`cg_fpga_mmap_driver_v5.h`](fpga/sw/cg_fpga_mmap_driver_v5.h)                     | `USE_HW_CG`, `CG_DRIVER_FPGA_MMAP_V5`           | Real DE1-SoC bitstream over `/dev/mem` (7-slave Qsys)                   | FPGA placer, v5 bitstream           |
+| [`cg_fpga_mmap_driver_v6.h`](fpga/sw/cg_fpga_mmap_driver_v6.h)                     | `USE_HW_CG`, `CG_DRIVER_FPGA_MMAP_V6`           | Real DE1-SoC bitstream over `/dev/mem` (10-slave Qsys)                  | FPGA placer, v6 bitstream           |
 
 The FPGA build doesn't have its own `placer.cpp` --
 [`fpga/sw/placer.cpp`](fpga/sw/placer.cpp) is a symlink to
 [`sw-baseline-c/placer.cpp`](sw-baseline-c/placer.cpp). The FPGA-specific
-bits live entirely in `fpga/sw/cg_fpga_mmap_driver.h`, which the FPGA
-`CMakeLists.txt` selects via `-DCG_DRIVER_FPGA_MMAP`. Same source,
-different driver.
+bits live entirely in the `cg_fpga_mmap_driver*.h` family, picked by
+the FPGA `CMakeLists.txt` via the `HW_FPGA_VERSION` cache variable.
+Same source, different driver.
 
 ---
 
@@ -339,13 +414,13 @@ console-script handles LEF/DEF parse + cmake + make + run for any backend
 ```bash
 mkdir -p build && cd build
 
-uv run run-placer python    ../benchmarks/iccad04/DMA   # Python baseline
-uv run run-placer sw        ../benchmarks/iccad04/DMA   # SW CG (double precision)
-uv run run-placer golden    ../benchmarks/iccad04/DMA   # FP golden CG (SW)
-uv run run-placer verilated    ../benchmarks/iccad04/DMA   # Verilator CG (default v3)
-uv run run-placer verilated v2 ../benchmarks/custom/parallel_chains_50   # Verilator CG (v2 reference)
-uv run run-placer arm       ../benchmarks/iccad04/DMA   # SW CG on the DE1-SoC ARM
-uv run run-placer fpga      ../benchmarks/iccad04/DMA   # Real FPGA bitstream
+uv run run-placer python       ../benchmarks/iccad04/DMA               # Python baseline
+uv run run-placer sw           ../benchmarks/iccad04/DMA               # SW CG (double precision)
+uv run run-placer golden       ../benchmarks/iccad04/DMA               # FP golden CG (SW)
+uv run run-placer verilated    ../benchmarks/iccad04/DMA               # Verilator CG (default v6)
+uv run run-placer verilated v3 ../benchmarks/custom/parallel_chains_50 # Verilator CG (older version)
+uv run run-placer arm          ../benchmarks/iccad04/DMA               # SW CG on the DE1-SoC ARM
+uv run run-placer fpga         ../benchmarks/iccad04/DMA               # Real FPGA bitstream (default v6)
 ```
 
 The `arm` and `fpga` modes need `arm-linux-gnueabihf-g++` on the host;
@@ -399,11 +474,15 @@ the sweep above).
 # Python FL model -- 19 cases vs scipy
 uv run fpga/fl/test/CGTop-test.py
 
-# RTL testbench -- 16 cases vs DPI golden, for each of v1/v2/v3
+# RTL testbench -- 16 cases vs DPI golden, one binary per RTL version
 mkdir -p build-tb && cd build-tb && cmake ../fpga/hw/test && make
 ./VCGTop_tb_v1
 ./VCGTop_tb_v2
 ./VCGTop_tb_v3
+./VCGTop_tb_v4
+./VCGTop_tb_v5
+./VCGTop_tb_v5_deep
+./VCGTop_tb_v6
 ```
 
 Each RTL target should print `ALL 16 TESTS PASSED`. The Python suite should
@@ -416,15 +495,18 @@ print `Result: 19/19 tests passed`.
 | Path                                       | Stage in the narrative |
 | ------------------------------------------ | ---------------------- |
 | [sw-baseline-python/](sw-baseline-python/) | (1) Python reference placer |
-| [sw-baseline-c/](sw-baseline-c/)           | (2) Canonical C++ placer + (7) all SW-only CG drivers (default, golden, Verilator) |
+| [sw-baseline-c/](sw-baseline-c/)           | (2) Canonical C++ placer + (11) all SW-only CG drivers (default, golden, Verilator v2/v3/v4/v5/v5_deep/v6) |
 | [fpga/fl/](fpga/fl/)                       | (3) Python FL model of the CG kernel |
 | [fpga/fl/test/](fpga/fl/test/)             | (3) FL tests vs scipy |
-| [fpga/hw/v1/](fpga/hw/v1/)                 | (4) Combinational reference RTL |
-| [fpga/hw/v2/](fpga/hw/v2/)                 | (5) Synthesizable RTL |
-| [fpga/hw/v3/](fpga/hw/v3/)                 | (6) Performance/timing refinements |
-| [fpga/hw/test/](fpga/hw/test/)             | (4-6) Verilator + DPI golden testbench (one for each of v1/v2/v3) |
-| [fpga/hw/FPGATop.v](fpga/hw/FPGATop.v)     | DE1-SoC top: wires CGTop into Qsys SRAM + control PIOs |
-| [fpga/sw/](fpga/sw/)                       | (7) ARM-side driver and the `cg_fpga_mmap_driver.h` |
+| [fpga/hw/v1/](fpga/hw/v1/)                 | (4) Combinational reference RTL (not synthesizable) |
+| [fpga/hw/v2/](fpga/hw/v2/)                 | (5) First synthesizable RTL |
+| [fpga/hw/v3/](fpga/hw/v3/)                 | (6) NR FpDiv + SPMV row-prologue collapse + PIO timing |
+| [fpga/hw/v4/](fpga/hw/v4/)                 | (7) Parallel x/r AXPY + fused VNS_R |
+| [fpga/hw/v5/](fpga/hw/v5/)                 | (8) Multi-block on-chip RAM topology (7 slaves) |
+| [fpga/hw/v5_deep/](fpga/hw/v5_deep/)       | (9) Forks v5 with 1-cyc/nz pipelined SPMV |
+| [fpga/hw/v6/](fpga/hw/v6/)                 | (10) Parallel x/y solve datapaths (10 slaves, 2 engines) |
+| [fpga/hw/test/](fpga/hw/test/)             | Verilator + DPI golden testbench (one binary per RTL version) |
+| [fpga/sw/](fpga/sw/)                       | (11) ARM-side mmap drivers (`cg_fpga_mmap_driver{,_v5,_v6}.h`) and `placer.cpp` symlink to canonical source; `FPGATop.v` lives per-version under `fpga/hw/v*/` |
 | [python-utils/](python-utils/)             | LEF/DEF parser, visualizer, run-placer entry points |
 | [benchmarks/](benchmarks/)                 | ICCAD04 + custom designs |
 | [background-knowledge/](background-knowledge/) | Reference material on placement algorithms |

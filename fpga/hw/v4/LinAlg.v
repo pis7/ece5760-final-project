@@ -1,4 +1,4 @@
-// v2 linalg kernels -- val/rdy (istream/ostream) handshake
+// Linalg kernels -- val/rdy (istream/ostream) handshake.
 //
 // All three kernels (VecDot, AXPY, SPMV) follow the same convention:
 //   istream_val / istream_rdy          upstream -> module handshake
@@ -10,8 +10,7 @@
 // {Kernel}Dpath (multiplier + accumulator + register state) pair,
 // wrapped in a {Kernel}_seq module for use by CGDpath.
 //
-// Semantics match fpga/hw/DotProduct.v and fpga/hw/AXPY.v, extended
-// with p_lanes-wide SIMD on VecDot and AXPY:
+// Per-kernel semantics:
 //   - VecDot / AXPY: one group of p_lanes (a,b) pairs per istream
 //     handshake. AXPY emits a group of p_lanes z outputs per ostream
 //     handshake. VecDot emits one final scalar after num_groups input
@@ -21,12 +20,11 @@
 //     masking we during writeback -- see CGCtrl/CGDpath.
 //   - SPMV: single istream "start" handshake, then one row result per
 //     ostream handshake. SPMV owns a memory-read port to the on-chip
-//     SRAM and an external vec-RF read port. SPMV stays single-lane
-//     because it is memory-bandwidth-bound on the single Avalon port.
+//     SRAM and an external vec-RF read port. Single-lane (the per-nz
+//     inner loop is bound by the single Avalon port).
 //
 // Every internal multiply uses FpMul / FpMulWide (DSP-mapped). DSP
-// count: VecDot p_lanes + AXPY p_lanes + SPMV 1. For p_lanes=4 that
-// is 9 DSPs total.
+// count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1.
 
 //======================================================================
 // VecDot: result = sum_{i=0..n-1}(a[i] * b[i])
@@ -426,21 +424,14 @@ module SPMVCtrl #(
 );
 
   // Two-cycle reads: ADDR state drives mem_addr; the CAPTURE state
-  // in the next cycle latches mem_rdata. We hold the same address
+  // in the next cycle latches mem_rdata. The same address is held
   // across both cycles so Quartus sees a clean inferred timing path.
   //
-  // NOTE: a pipelined version (2 cycles/nnz instead of 5) was attempted
-  // but caused correctness regressions on real placement benchmarks
-  // (parallel_chains_50) despite passing all 8 DPI golden tests bit-exact. Left the
-  // non-pipelined version in place for now; pipelining is a future
-  // optimization that needs a deeper correctness investigation.
-
-  // v3 rp_lo/rp_hi collapse on top of v2's serial inner loop. For row 0
-  // we walk RPLO_ADDR/CAPT then RPHI_ADDR/CAPT. For rows 1..n-1 the
-  // previous row's rp_hi is exactly this row's rp_lo, so we skip the
-  // rp_lo read and just carry rp_hi -> rp_lo while reading the new
-  // rp_ptr[row+1] into rp_hi (states S_RPHI_ADDR_NEXT / _CAPT_NEXT).
-  // Saves 2 cycles per row except row 0.
+  // Row-pointer prologue. For row 0 we walk RPLO_ADDR/CAPT then
+  // RPHI_ADDR/CAPT. For rows 1..n-1 the previous row's rp_hi is exactly
+  // this row's rp_lo, so we skip the rp_lo read and just carry rp_hi ->
+  // rp_lo while reading the new rp_ptr[row+1] into rp_hi (states
+  // S_RPHI_ADDR_NEXT / _CAPT_NEXT). Saves 2 cycles per row except row 0.
   typedef enum logic [3:0] {
     S_IDLE,
     S_RPLO_ADDR,        S_RPLO_CAPT,

@@ -30,6 +30,10 @@ function(add_verilator_tb VERSION RTL_DIR TB)
   if(EXISTS "${RTL_DIR}/M10KLoader.v")
     list(APPEND RTL_SRCS ${RTL_DIR}/M10KLoader.v)
   endif()
+  # v6 adds a CGEngine wrapper that CGTop instantiates twice.
+  if(EXISTS "${RTL_DIR}/CGEngine.v")
+    list(APPEND RTL_SRCS ${RTL_DIR}/CGEngine.v)
+  endif()
 
   add_custom_target(${TARGET} ALL
     COMMAND verilator --cc --exe --build --timing --main --trace
@@ -55,10 +59,13 @@ endfunction()
 # needs CG_GOLDEN_USE_NR). v5 uses the same NR FpDiv as v4 but has a
 # separate testbench because its memory topology is multi-block. v5_deep
 # inherits v5's memory topology and reuses CGTop_tb_v5 -- only its SPMV
-# inner loop is pipelined.
+# inner loop is pipelined. v6 forks v5 to add parallel x/y solve
+# datapaths -- 10 slaves (Q duplicated across two engines), so it has
+# its own testbench.
 add_verilator_tb(v1      ${CMAKE_CURRENT_SOURCE_DIR}/../v1      CGTop_tb)
 add_verilator_tb(v2      ${CMAKE_CURRENT_SOURCE_DIR}/../v2      CGTop_tb)
 add_verilator_tb(v3      ${CMAKE_CURRENT_SOURCE_DIR}/../v3      CGTop_tb    -DCG_GOLDEN_USE_NR)
 add_verilator_tb(v4      ${CMAKE_CURRENT_SOURCE_DIR}/../v4      CGTop_tb    -DCG_GOLDEN_USE_NR)
 add_verilator_tb(v5      ${CMAKE_CURRENT_SOURCE_DIR}/../v5      CGTop_tb_v5 -DCG_GOLDEN_USE_NR)
 add_verilator_tb(v5_deep ${CMAKE_CURRENT_SOURCE_DIR}/../v5_deep CGTop_tb_v5 -DCG_GOLDEN_USE_NR)
+add_verilator_tb(v6      ${CMAKE_CURRENT_SOURCE_DIR}/../v6      CGTop_tb_v6 -DCG_GOLDEN_USE_NR)

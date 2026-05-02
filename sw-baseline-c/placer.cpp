@@ -102,10 +102,14 @@ struct CSRMatrix {
 #ifdef USE_HW_CG
 #if defined(USE_FP_GOLDEN)
 #include "cg_golden_driver.h"
+#elif defined(CG_DRIVER_FPGA_MMAP_V6)
+#include "cg_fpga_mmap_driver_v6.h"
 #elif defined(CG_DRIVER_FPGA_MMAP_V5)
 #include "cg_fpga_mmap_driver_v5.h"
 #elif defined(CG_DRIVER_FPGA_MMAP)
 #include "cg_fpga_mmap_driver.h"
+#elif defined(CG_VERILATOR_V6)
+#include "cg_verilator_driver_v6.h"
 #elif defined(CG_VERILATOR_V5)
 #include "cg_verilator_driver_v5.h"
 #else

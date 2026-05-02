@@ -12,20 +12,23 @@ option(USE_HW_CG "Use Verilator CGTop for CG solve" OFF)
 # Use C++ fixed-point golden model instead of Verilator (faster, no Verilog needed)
 option(USE_FP_GOLDEN "Use C++ fixed-point golden model instead of Verilator" OFF)
 set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
-set(HW_CG_VERSION "v5" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide), v3 (NR divide + rp_lo/rp_hi collapse), v4 (v3 + parallel x/r AXPY), v5 (v4 + multi-block on-chip RAM), or v5_deep (v5 + 1 cycle/nz pipelined SPMV)")
-set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3 v4 v5 v5_deep)
+set(HW_CG_VERSION "v6" CACHE STRING "Which CG solver to wire up: v2 (shift-subtract divide), v3 (NR divide + rp_lo/rp_hi collapse), v4 (v3 + parallel x/r AXPY), v5 (v4 + multi-block on-chip RAM), v5_deep (v5 + 1 cycle/nz pipelined SPMV), or v6 (v5 + parallel x/y solve datapaths)")
+set_property(CACHE HW_CG_VERSION PROPERTY STRINGS v2 v3 v4 v5 v5_deep v6)
 
 # NR-divide variants need the NR DPI golden to stay bit-exact. v2 uses
 # shift-subtract so it falls through to the empty define.
-if(HW_CG_VERSION STREQUAL "v3" OR HW_CG_VERSION STREQUAL "v4" OR HW_CG_VERSION STREQUAL "v5" OR HW_CG_VERSION STREQUAL "v5_deep")
+if(HW_CG_VERSION STREQUAL "v3" OR HW_CG_VERSION STREQUAL "v4" OR HW_CG_VERSION STREQUAL "v5" OR HW_CG_VERSION STREQUAL "v5_deep" OR HW_CG_VERSION STREQUAL "v6")
     set(CG_GOLDEN_DEFINE "CG_GOLDEN_USE_NR")
 else()
     set(CG_GOLDEN_DEFINE "")
 endif()
 
-# v5 / v5_deep share the multi-block memory topology -- placer.cpp needs
-# to pick cg_verilator_driver_v5.h instead of cg_verilator_driver.h.
-if(HW_CG_VERSION STREQUAL "v5" OR HW_CG_VERSION STREQUAL "v5_deep")
+# Pick the right Verilator driver header. v5 / v5_deep share the
+# 7-slave multi-block topology; v6 has 10 slaves (Q duplicated for
+# parallel x/y solves).
+if(HW_CG_VERSION STREQUAL "v6")
+    set(CG_VERILATOR_DEFINE "CG_VERILATOR_V6")
+elseif(HW_CG_VERSION STREQUAL "v5" OR HW_CG_VERSION STREQUAL "v5_deep")
     set(CG_VERILATOR_DEFINE "CG_VERILATOR_V5")
 else()
     set(CG_VERILATOR_DEFINE "")
@@ -44,6 +47,13 @@ elseif(USE_HW_CG)
     set(VDIR "${CMAKE_CURRENT_BINARY_DIR}/vobj")
     set(VERILATOR_ROOT "/usr/local/share/verilator")
 
+    # v6 wraps CGCtrl + CGDpath in a CGEngine module (instantiated twice
+    # by CGTop). Older versions don't have this file.
+    set(EXTRA_RTL "")
+    if(EXISTS "${VERILOG_DIR}/CGEngine.v")
+      list(APPEND EXTRA_RTL "${VERILOG_DIR}/CGEngine.v")
+    endif()
+
     # Build the Verilator model as a static library
     add_custom_command(
       OUTPUT ${VDIR}/VCGTop__ALL.a
@@ -59,6 +69,7 @@ elseif(USE_HW_CG)
         ${VERILOG_DIR}/CGDpath.v
         ${VERILOG_DIR}/FpMath.v
         ${VERILOG_DIR}/LinAlg.v
+        ${EXTRA_RTL}
         -CFLAGS "-std=c++17"
       DEPENDS
         ${VERILOG_DIR}/CGTop.v
@@ -66,6 +77,7 @@ elseif(USE_HW_CG)
         ${VERILOG_DIR}/CGDpath.v
         ${VERILOG_DIR}/FpMath.v
         ${VERILOG_DIR}/LinAlg.v
+        ${EXTRA_RTL}
       COMMENT "Verilating CGTop (${HW_CG_VERSION})"
     )
     add_custom_target(verilator_model DEPENDS ${VDIR}/VCGTop__ALL.a)

@@ -1,18 +1,18 @@
-// Toplevel v5 Verilog: synthesizable CG solver for DE1-SoC.
+// Toplevel v5_deep Verilog: CG solver for DE1-SoC with pipelined SPMV.
 //
-// v5 == v4 + multi-block on-chip RAM topology. The single shared Avalon
-// SRAM is split into seven dedicated Qsys on-chip RAM slaves, each with
-// its own RTL-facing port:
+// Seven dedicated Qsys on-chip RAM slaves, each with its own RTL-facing
+// port:
 //   q_val_ram, q_col_ram, q_rowp_ram -- SPMV-owned, read-only
 //   cx_ram, cy_ram                   -- CGCtrl S_VNS_R serial reads
 //   x_ram, y_ram                     -- CGCtrl load + writeback
 //
-// SPMV reads q_val[j] and q_col[j] in the same cycle (parallel issue and
-// capture). Per-nz drops from 5 cycles in v4 to 3 cycles in v5.
+// SPMV reads q_val[j] and q_col[j] in the same cycle (parallel issue
+// and capture); the inner loop is pipelined to 1 cycle/nz steady state
+// in LinAlg.v.
 //
-// cx_reg disappears from the central RF -- cx is read directly from
-// cx_ram in S_VNS_R, eliminating S_LD_CX_*. x/y stay in x_vec_reg
-// because AXPY_X writes them p_lanes-wide every CG iter.
+// cx is read directly from cx_ram in S_VNS_R (no central cx_reg). x/y
+// stay in x_vec_reg because AXPY_X writes them p_lanes-wide every CG
+// iter.
 
 module CGTop #(
   parameter p_lanes            = 8,
@@ -101,7 +101,7 @@ module CGTop #(
 );
 
   //----------------------------------------------------------------------
-  // PIO input registration (same as v4)
+  // PIO input registration
   //----------------------------------------------------------------------
   logic        sw_go_q;
   logic        sw_done_ack_q;

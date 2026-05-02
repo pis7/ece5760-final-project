@@ -1,16 +1,16 @@
-// v5 CGCtrl: cx/cy live in dedicated M10K slaves (not in the central
-// RF). The S_LD_CX_* state pair is gone; cx is read directly from
-// cx_ram (or cy_ram via sel_y) during a serialized S_VNS_R that walks
-// stream_idx 0..n-1 and writes one (r_reg, d_reg) element per element.
+// v5_deep CGCtrl. cx/cy live in dedicated M10K slaves (not in the
+// central RF); cx is read directly from cx_ram (or cy_ram via sel_y)
+// during a serialized S_VNS_R that walks stream_idx 0..n-1 and writes
+// one (r_reg, d_reg) element per element.
 //
-// x and y still live in the x_vec_reg banked RF (AXPY_X writes them
-// p_lanes-wide every iter, so M10K-banking is left to a future v).
-// S_LD_X_* and S_WB_WRITE survive structurally but their address is
-// now a flat stream_idx (no base-addr add) -- CGDpath routes ctrl_xy_*
-// to x_ram or y_ram based on sel_y.
+// x and y live in the x_vec_reg banked RF (AXPY_X writes them
+// p_lanes-wide every iter). S_LD_X_* and S_WB_WRITE address local
+// offset 0 in the dedicated x_ram / y_ram slaves; CGTop muxes between
+// the two via sel_y.
 //
-// All other v4 features (parallel x/r AXPY, fused S_VNS_R writing both
-// r_reg and d_reg, init_rr_reg fast-path) carry over unchanged.
+// Includes parallel x/r AXPY, fused S_VNS_R writing both r_reg and
+// d_reg in one cycle, and init_rr_reg fast-path (rr lands in rr_reg
+// the same cycle vdot finishes).
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -92,7 +92,7 @@ module CGCtrl #(
   // wr_idx_ctrl_packed (callers always retire the same group on both ports).
   // Used in S_AXPY_XR_FEED (writes axpy_r_z_lane to r_reg) and in
   // S_VNS_R (writes -(cx+q) to d_reg in parallel with the primary r_reg
-  // write, eliminating v3's separate S_COPY_D pass).
+  // write).
   output logic [2:0]                              wr_sel_sec,
   output logic [2:0]                              wdata_src_sec,
   output logic [p_lanes-1:0]                      we_sec,
@@ -154,8 +154,8 @@ module CGCtrl #(
   localparam BANK_SEL_W  = (CLOG2_LANES == 0) ? 1 : CLOG2_LANES;
 
   //----------------------------------------------------------------------
-  // RF select encodings (match CGDpath's rf_read function). Note:
-  // RF_CX_REG is gone in v5 -- cx now lives in cx_ram (M10K).
+  // RF select encodings (match CGDpath's rf_read function). Four RFs:
+  // D, R, X_VEC, Q_BUF -- cx lives in cx_ram (M10K), not in the central RF.
   //----------------------------------------------------------------------
   localparam [2:0] RF_D_REG     = 3'd0;
   localparam [2:0] RF_R_REG     = 3'd1;
@@ -165,8 +165,8 @@ module CGCtrl #(
   localparam [2:0] WD_MEM         = 3'd0;
   localparam [2:0] WD_AXPY        = 3'd1;
   localparam [2:0] WD_SPMV        = 3'd2;
-  // WD_VNS_SCALAR (v5): wr_data[k] = -(vns_cx_rdata + rd_b_data[k]).
-  // Single-lane writeback during the serialized S_VNS_R_CAPT.
+  // WD_VNS_SCALAR: wr_data[k] = -(vns_cx_rdata + rd_b_data[k]). Single-lane
+  // writeback during the serialized S_VNS_R_CAPT.
   localparam [2:0] WD_VNS_SCALAR  = 3'd3;
   localparam [2:0] WD_AXPY_R      = 3'd5;
 
@@ -183,13 +183,14 @@ module CGCtrl #(
     S_SPMV_INIT_FIRE,
     S_SPMV_INIT_COLLECT,
 
-    // Serialized in v5: read cx[stream_idx] from M10K (1-cycle latency),
-    // then in CAPT compute -(cx + q_buf[stream_idx]) and writeback to
-    // r_reg (primary) + d_reg (secondary) at single-lane index.
+    // Serialized read of cx[stream_idx] from M10K (1-cycle latency);
+    // CAPT computes -(cx + q_buf[stream_idx]) and writes back to r_reg
+    // (primary) + d_reg (secondary) at the single active lane.
     S_VNS_R_ADDR,
     S_VNS_R_CAPT,
 
-    // init_rr_reg fires on vdot_out_hs to bypass S_RR_REG_COPY.
+    // init_rr_reg fires on vdot_out_hs so the initial rr lands in
+    // rr_reg the same cycle vdot finishes.
     S_VDOT_INIT_FEED,
 
     S_SPMV_RUN_FIRE,
@@ -360,8 +361,9 @@ module CGCtrl #(
       S_IDLE:            if (sw_go)                                           next_state = S_PREP;
       S_PREP:                                                                 next_state = S_LD_X_ADDR;
 
-      // LD x vector (1 elem / cycle). v5: no S_LD_CX_* -- jump straight
-      // to SPMV_INIT after loading x.
+      // LD x vector (1 elem / cycle), then jump straight to SPMV_INIT
+      // -- cx is read directly from cx_ram during S_VNS_R, no separate
+      // load phase.
       S_LD_X_ADDR:                                                            next_state = S_LD_X_CAPT;
       S_LD_X_CAPT:       if (stream_idx == n_minus_1_reg)                    next_state = S_SPMV_INIT_FIRE;
                          else                                                 next_state = S_LD_X_ADDR;
@@ -371,8 +373,8 @@ module CGCtrl #(
       S_SPMV_INIT_COLLECT:
                          if (spmv_out_hs && stream_idx == n_minus_1_reg)     next_state = S_VNS_R_ADDR;
 
-      // r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i]). v5: serialized,
-      // 1 element per (ADDR, CAPT) pair. cx comes from M10K.
+      // r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i]). Serialized: 1 element
+      // per (ADDR, CAPT) pair. cx comes from M10K.
       S_VNS_R_ADDR:                                                           next_state = S_VNS_R_CAPT;
       S_VNS_R_CAPT:      if (stream_idx == n_minus_1_reg)                    next_state = S_VDOT_INIT_FEED;
                          else                                                 next_state = S_VNS_R_ADDR;

@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-visualizer = "visualizer:main"
+vis = "visualizer:main"
 lefdef-parser = "lefdef_parser:main"
 run-placer = "run_placer:main"
 

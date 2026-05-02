@@ -1,4 +1,4 @@
-// Toplevel v2 Verilog: synthesizable CG solver for DE1-SoC.
+// Toplevel v3 Verilog: synthesizable CG solver for DE1-SoC.
 //
 // Datapath talks directly to the Qsys on-chip SRAM via the Avalon
 // slave interface. A single flat FSM in CGCtrl drives every mux and
@@ -9,7 +9,7 @@
 // and is not touching the memory while sw_done is low.
 
 module CGTop #(
-  parameter p_lanes            = 8,
+  parameter p_lanes            = 4,
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,

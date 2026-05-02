@@ -1,9 +1,24 @@
-# v2 CG Solver - Design Summary
+# v2 CG Solver - First synthesizable design
 
 Synthesizable Verilog implementation of the conjugate-gradient (CG) inner
 loop, targeting the DE1-SoC (Cyclone V FPGA). Replaces the combinational
-v1 reference with a sequential, DSP-mapped, parameterizable-SIMD design
-that runs against Qsys on-chip SRAM via an Avalon slave port.
+[v1](../v1/) reference with a sequential, DSP-mapped, parameterizable-SIMD
+design that runs against Qsys on-chip SRAM via an Avalon slave port.
+
+## Changes vs v1
+
+| Area | v1 | v2 | Win |
+| --- | --- | --- | --- |
+| Datapath structure | fully combinational; one CG iteration is one giant fan-out | sequential FSM; one cycle per mux/latch/handshake step | synthesizable on Cyclone V |
+| Multipliers | inferred logic | DSP-mapped via `(* multstyle = "dsp" *)` (Cyclone V 27x27 DSP block) | maps to silicon multipliers |
+| SIMD | implicit (combinational mass) | parameterized `p_lanes` for VecDot/AXPY (`p_lanes` DSPs each); SPMV stays single-lane (memory-bandwidth bound) | tunable area/throughput |
+| `FpDiv` | combinational restoring divide | shift-subtract restoring divide with val/rdy (~63 cycles) | timing-closed at 50 MHz |
+| Bus | direct combinational reads | single Avalon slave port arbitrated between CGCtrl and SPMV via `ctrl_mem_src_spmv` | matches Qsys on-chip RAM IP |
+| RF storage | combinational nets | flop-based unpacked arrays (`d_reg`, `r_reg`, `x_vec_reg`, `cx_reg`, `q_buf`) | proper sequential state |
+| Fixed-point format | inherited from FL/v1 (27-bit) | formalized: `p_int_bits=13`, `p_frac_bits=14`, `p_acc_bits=48` (no early truncation) | -- |
+
+The v2 design fits within 87 DSP blocks on the Cyclone V and runs the
+same 16 testbench cases bit-exactly against the golden.
 
 ## Files
 

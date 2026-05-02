@@ -45,8 +45,8 @@ module FpMulWide #(
 
 endmodule
 
-// Newton-Raphson reciprocal divider. Drop-in replacement for the previous
-// shift-subtract divider; same val/rdy interface, same operand widths.
+// Newton-Raphson reciprocal divider. val/rdy interface; ~10 cycles per
+// divide.
 //
 // Algorithm (per-divide, ~10 internal cycles):
 //   1. Sign extract: sign = sign(a) ^ sign(b). Take |a|, |b|.
@@ -113,16 +113,13 @@ module FpDiv #(
   localparam M3_W    = ABS_W + BNORM_W;      // 65
   localparam SAT_MAG = (1 << (p_total_bits - 1)) - 1;  // 0x3FFFFFF for 27-bit
 
-  // Two NR iterations -- 1 iter gives ~17-bit accuracy in real arithmetic but
-  // intermediate truncations to 17-bit Q1.16 limit the achievable precision
-  // to a few LSBs. A 2nd iter washes out the truncation noise and gets us
-  // close to exact within the 14-bit fractional output, matching shift-
-  // subtract bit-exactly on most operand pairs.
+  // Two NR iterations -- 1 iter gives ~17-bit accuracy in real arithmetic
+  // but intermediate truncations to 17-bit Q1.16 limit the achievable
+  // precision to a few LSBs; a 2nd iter washes out the truncation noise.
   // Each NR iteration is split into two states: _M1 latches m1 = b_norm *
   // nr_input into nr_m1_reg, _M2 then computes m2 = nr_input * (2 - m1)
   // from the registered m1. This keeps each cycle's combinational chain
-  // to a single multiply (plus a small subtract/select) instead of two
-  // back-to-back multiplies that were the v3 critical path.
+  // to a single multiply plus a small subtract/select.
   typedef enum logic [3:0] {
     S_IDLE,
     S_NORM,
@@ -442,14 +439,10 @@ module FpDiv #(
   endfunction
 
   // NR step operands. The input is r0 in S_NR1_* (1st iter) and r1 in
-  // S_NR2_* (2nd iter); the output is the new r1.
-  //
-  // The two NR multiplies used to be back-to-back combinational
-  // (b_norm * nr_input -> sub -> nr_input * (2-m1)) which on Cyclone V
-  // is two cascaded DSP multiplies plus an adder per 20 ns clock --
-  // not closeable. We now register the first multiply's output into
-  // nr_m1_reg in the _M1 phase, and use that registered value to drive
-  // the second multiply in the _M2 phase.
+  // S_NR2_* (2nd iter); the output is the new r1. The first multiply's
+  // output is registered into nr_m1_reg in the _M1 phase so the second
+  // multiply (in _M2) sees a registered operand, keeping the
+  // combinational chain to a single DSP per cycle.
   wire [BNORM_W-1:0] nr_input     =
       (state == S_NR2_M1 || state == S_NR2_M2) ? r1 : r0;
   wire [BNORM_W:0]   nr_two_minus = 18'h2_0000 - 18'(nr_m1_reg[33:16]);

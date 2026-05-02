@@ -1,10 +1,12 @@
-// v5 datapath -- multi-block on-chip RAM topology.
+// v6 datapath -- single dimension; CGTop instantiates one CGDpath per
+// engine.
 //
 // SPMV owns three independent read ports (q_val, q_col, q_rowp), wired
-// directly to dedicated Qsys M10K slaves. CGCtrl owns a private
-// load+writeback bus to the x_ram / y_ram slaves (sel_y picks which),
-// and a separate serial cx-read port for S_VNS_R that goes to cx_ram /
-// cy_ram. Every slave port has exactly one consumer; no shared bus mux.
+// directly to this engine's dedicated Qsys M10K slaves. CGCtrl owns a
+// private load+writeback bus to this engine's x_ram (or y_ram) and a
+// separate serial cx-read port for S_VNS_R that goes to this engine's
+// cx_ram (or cy_ram). Every slave port has exactly one consumer; no
+// shared bus mux.
 //
 // Central RF: 4 banked flop arrays (d_reg, r_reg, x_vec_reg, q_buf).
 // cx is read directly from M10K via WD_VNS_SCALAR during S_VNS_R_CAPT
@@ -34,16 +36,16 @@ module CGDpath #(
   output logic [p_m10k_addr_bits-1:0] spmv_q_rowp_addr,
   input  logic [31:0]                 spmv_q_rowp_rdata,
 
-  // -- M10K read-data inputs muxed by CGTop (sel_y) and consumed here -----
-  // CGTop drives x_ram/y_ram from CGCtrl's ctrl_xy_* outputs and feeds
-  // the muxed readdata back here as ctrl_xy_rdata for WD_MEM. Same for
-  // cx_ram/cy_ram -> vns_cx_rdata for WD_VNS_SCALAR.
+  // -- M10K read-data inputs from this engine's dimension-private slaves --
+  // CGTop wires CGCtrl's ctrl_xy_* outputs out to the engine's x_ram
+  // (or y_ram) and feeds the readdata back as ctrl_xy_rdata for WD_MEM.
+  // Same for cx_ram (or cy_ram) -> vns_cx_rdata for WD_VNS_SCALAR.
   input  logic [31:0]                 ctrl_xy_rdata,
   input  logic [31:0]                 vns_cx_rdata,
 
   // --- Addressed RF read ports (combinational) ---------------------------
-  // 4 RFs: 0=d_reg, 1=r_reg, 2=x_vec_reg, 4=q_buf (cx is in M10K).
-  // rd_a/rd_b are general-purpose; rd_c/rd_d feed u_axpy_r in S_AXPY_XR_FEED.
+  // 4 RFs: 0=d_reg, 1=r_reg, 2=x_vec_reg, 4=q_buf. rd_a/rd_b are
+  // general-purpose; rd_c/rd_d feed u_axpy_r in S_AXPY_XR_FEED.
   input  logic [2:0]                              rd_a_sel,
   input  logic [p_lanes*$clog2(p_max_n)-1:0]      rd_a_idx_packed,
   input  logic [p_lanes-1:0]                      rd_a_valid,
@@ -451,7 +453,7 @@ module CGDpath #(
     for (int k = 0; k < p_lanes; k++) wr_data[k] = '0;
     case (wdata_src)
       WD_MEM: begin
-        // Loaded from x_ram / y_ram via ctrl_xy_rdata. Replicate so
+        // Loaded from this engine's x_ram (or y_ram) via ctrl_xy_rdata. Replicate so
         // whichever lane has we_eff=1 picks it up.
         for (int k = 0; k < p_lanes; k++)
           wr_data[k] = p_total_bits'($signed(ctrl_xy_rdata));

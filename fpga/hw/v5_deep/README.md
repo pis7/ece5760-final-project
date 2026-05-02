@@ -1,9 +1,33 @@
-# v5_deep -- Deeper SPMV pipeline (1 cycle/nz steady state)
+# v5_deep CG Solver - Deeper SPMV pipeline (1 cycle/nz steady state)
 
-Forks off v5. Same on-chip RAM topology, same drivers, same testbench.
-The only architectural change is the SPMV inner loop: a 4-stage pipeline
-that issues one nz per cycle in steady state, replacing v5's serial
-3-cycle-per-nz `S_NZ_ADDR -> S_NZ_CAPT -> S_ACC` walk.
+Forks [v5](../v5/). Same on-chip RAM topology, same drivers, same
+testbench. The only architectural change is the SPMV inner loop: a
+4-stage pipeline that issues one nz per cycle in steady state,
+replacing v5's serial 3-cycle-per-nz `S_NZ_ADDR -> S_NZ_CAPT -> S_ACC`
+walk.
+
+## Changes vs v5
+
+| Area | v5 | v5_deep | Win |
+| --- | --- | --- | --- |
+| SPMV inner loop | 3 cycles/nz (`NZ_ADDR -> NZ_CAPT -> ACC`) | **1 cycle/nz steady state** in a 4-stage pipeline | up to 3x SPMV asymptote on dense rows |
+| Pipe valid tracking | n/a | 3-deep `issue_d1 -> issue_d2 -> issue_d3` shift register; `acc` updates only when `issue_d3 == 1` | clean drain at row boundaries |
+| Last-nz tail | implicit (FSM stops issuing) | explicit 3-cycle `S_DRAIN` driven by a 2-bit counter | guarantees `acc` absorbs in-flight MAC before `S_EMIT` |
+| Critical path | `col_reg -> RF crossbar -> vec_rd -> mul -> add -> acc` in one cycle | split: mul in stage T+3, add in T+4 | shorter comb depth, same FMAX margin |
+| Everything else | v5 | byte-identical copies of v5's `CGTop`/`CGCtrl`/`CGDpath`/`FpMath`/`FPGATop`, drivers, testbench | minimal blast radius |
+
+Crossover: v5_deep wins when `N + 5 < 3*N + 2`, i.e. rows with
+`nnz >= 2`. `nnz=1` rows regress by 1 cycle. For an `nnz`-distribution
+dominated by `N >= 3` (typical placement Q where most rows pick up
+several net-fanout neighbors plus a diagonal), v5_deep should approach
+the **3x SPMV asymptote**.
+
+## Files
+
+| File | Role |
+| --- | --- |
+| [LinAlg.v](LinAlg.v) | **The only meaningful change** -- SPMV `Ctrl` and `Dpath` rewritten for the 4-stage pipeline |
+| [CGTop.v](CGTop.v), [CGCtrl.v](CGCtrl.v), [CGDpath.v](CGDpath.v), [FpMath.v](FpMath.v), [FPGATop.v](FPGATop.v) | Identical to v5 |
 
 ## Pipeline structure
 
@@ -103,11 +127,19 @@ would race against the next nz's capture. v5_deep avoids this by:
    the win is bounded by N=1 rows; ICCAD04 designs with denser rows
    should show closer to the 3x asymptote).
 
-## Open items
+## Drivers and Qsys
 
-- This change does not touch the FPGA mmap driver or Qsys system. The
-  same v5 mmap driver (`fpga/sw/cg_fpga_mmap_driver_v5.h`) and Qsys
-  layout work for v5_deep.
-- Future work items A-D from the v5 PLAN (overlap x/y solves,
-  concurrent kernel firing, banked x/y M10Ks) remain orthogonal to
-  v5_deep and can land on top of it.
+This change does not touch the FPGA mmap driver or the Qsys system.
+The same v5 mmap driver
+([`cg_fpga_mmap_driver_v5.h`](../../sw/cg_fpga_mmap_driver_v5.h)) and
+seven-slave Qsys layout work for v5_deep. Set
+`HW_CG_VERSION=v5_deep` and `HW_FPGA_VERSION=v5` to wire up the right
+combination.
+
+## Where v5_deep goes from here
+
+v5_deep is orthogonal to [v6](../v6/) (parallel x/y solve datapaths).
+A future merge could fork v6's `CGEngine` to use the v5_deep SPMV
+pipeline, combining ~2x parallelism with the ~3x SPMV asymptote.
+Other v5 deferred work items -- concurrent kernel firing within an
+engine, banked x/y M10Ks -- remain orthogonal to both v5_deep and v6.

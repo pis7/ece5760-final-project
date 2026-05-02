@@ -1,4 +1,4 @@
-// v2 linalg kernels -- val/rdy (istream/ostream) handshake
+// Linalg kernels -- val/rdy (istream/ostream) handshake.
 //
 // All three kernels (VecDot, AXPY, SPMV) follow the same convention:
 //   istream_val / istream_rdy          upstream -> module handshake
@@ -542,14 +542,8 @@ module SPMVCtrl #(
 );
 
   // Two-cycle reads: ADDR state drives mem_addr; the CAPTURE state
-  // in the next cycle latches mem_rdata. We hold the same address
+  // in the next cycle latches mem_rdata. The same address is held
   // across both cycles so Quartus sees a clean inferred timing path.
-  //
-  // NOTE: a pipelined version (2 cycles/nnz instead of 5) was attempted
-  // but caused correctness regressions on real placement benchmarks
-  // (parallel_chains_50) despite passing all 8 DPI golden tests bit-exact. Left the
-  // non-pipelined version in place for now; pipelining is a future
-  // optimization that needs a deeper correctness investigation.
 
   typedef enum logic [3:0] {
     S_IDLE,

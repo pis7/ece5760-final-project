@@ -1,12 +1,9 @@
-// Monolithic CGCtrl FSM. Absorbs every sub-state of the CG solve that
-// used to be split between CGCtrl and CGDpath's orchestration FSM.
-//
-// CGDpath is now a pure datapath (no FSM of its own): CGCtrl drives
-// every mux select, latch enable, and val/rdy handshake signal.
+// v3 CGCtrl: monolithic FSM. CGDpath is a pure datapath (no FSM of
+// its own); CGCtrl drives every mux select, latch enable, and val/rdy
+// handshake signal.
 //
 // A single `sel_y` register picks between x/y base addresses in the
-// inner sub-states so we don't double the state count for the second
-// solve.
+// inner sub-states so the same FSM runs both x and y solves.
 //
 // p_lanes parallelism:
 //   - The streaming phases (VDOT feeds, AXPY feeds, VNS, COPY_D) use
@@ -246,7 +243,7 @@ module CGCtrl #(
   end
 
   //----------------------------------------------------------------------
-  // Convergence test (matches v1 semantics)
+  // Convergence test
   //----------------------------------------------------------------------
   logic signed [p_acc_bits-1:0] eps_sq_wide;
   assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));

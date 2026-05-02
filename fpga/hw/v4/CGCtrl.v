@@ -1,9 +1,8 @@
 // v4 CGCtrl: parallel x-AXPY and r-AXPY, plus fused S_VNS_R that
 // writes r_reg and d_reg in the same cycle.
 //
-// v3 ran S_AXPY_X_FEED then S_AXPY_R_FEED sequentially, sharing one
-// AXPY unit. v4 fires both updates in lockstep in a single merged
-// state S_AXPY_XR_FEED, using two AXPY units in CGDpath:
+// S_AXPY_XR_FEED fires the x and r updates in lockstep using two AXPY
+// units in CGDpath:
 //   u_axpy_x: x += alpha * d   (ADD, reads via rd_a/rd_b)
 //   u_axpy_r: r -= alpha * q   (SUB, reads via rd_c/rd_d)
 // Both consume the same alpha coef; both produce a p_lanes-wide z per
@@ -12,11 +11,10 @@
 //
 // The secondary write port is also reused in S_VNS_R: the computed
 // r_new = -(cx + q) is written into both r_reg (primary) and d_reg
-// (secondary) on the same cycle, eliminating v3's separate S_COPY_D
-// pass and saving num_groups cycles per CG run.
+// (secondary) on the same cycle.
 //
-// S_AXPY_D_FEED is unchanged structurally and reuses u_axpy_x only;
-// u_axpy_r idles outside S_AXPY_XR_FEED.
+// S_AXPY_D_FEED reuses u_axpy_x only; u_axpy_r idles outside
+// S_AXPY_XR_FEED.
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -92,7 +90,7 @@ module CGCtrl #(
   // wr_idx_ctrl_packed (callers always retire the same group on both ports).
   // Used in S_AXPY_XR_FEED (writes axpy_r_z_lane to r_reg) and in
   // S_VNS_R (writes -(cx+q) to d_reg in parallel with the primary r_reg
-  // write, eliminating v3's separate S_COPY_D pass).
+  // write).
   output logic [2:0]                              wr_sel_sec,
   output logic [2:0]                              wdata_src_sec,
   output logic [p_lanes-1:0]                      we_sec,
@@ -184,10 +182,11 @@ module CGCtrl #(
     S_SPMV_INIT_COLLECT,
 
     // Fused: writes r_reg (primary) and d_reg (secondary) with the
-    // same -(cx+q) value -- replaces v3's S_VNS_R + S_COPY_D pair.
+    // same -(cx+q) value in one cycle.
     S_VNS_R,
 
-    // init_rr_reg fires on vdot_out_hs to bypass S_RR_REG_COPY.
+    // init_rr_reg fires on vdot_out_hs so the initial rr lands in
+    // rr_reg the same cycle vdot finishes.
     S_VDOT_INIT_FEED,
 
     S_SPMV_RUN_FIRE,
@@ -394,7 +393,7 @@ module CGCtrl #(
       S_SPMV_INIT_COLLECT:
                          if (spmv_out_hs && stream_idx == n_minus_1_reg)          next_state = S_VNS_R;
 
-      // r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i])  (fused VNS + COPY_D)
+      // r_reg[i] = d_reg[i] = -(cx[i] + q_buf[i]) (fused write)
       S_VNS_R:           if (stream_idx == num_groups_minus_1_reg)                next_state = S_VDOT_INIT_FEED;
 
       // VDOT r.r -> rr_new_latched, and (via init_rr_reg) -> rr_reg

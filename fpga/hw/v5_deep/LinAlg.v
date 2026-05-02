@@ -1,4 +1,4 @@
-// v2 linalg kernels -- val/rdy (istream/ostream) handshake
+// Linalg kernels -- val/rdy (istream/ostream) handshake.
 //
 // All three kernels (VecDot, AXPY, SPMV) follow the same convention:
 //   istream_val / istream_rdy          upstream -> module handshake
@@ -10,8 +10,7 @@
 // {Kernel}Dpath (multiplier + accumulator + register state) pair,
 // wrapped in a {Kernel}_seq module for use by CGDpath.
 //
-// Semantics match fpga/hw/DotProduct.v and fpga/hw/AXPY.v, extended
-// with p_lanes-wide SIMD on VecDot and AXPY:
+// Per-kernel semantics:
 //   - VecDot / AXPY: one group of p_lanes (a,b) pairs per istream
 //     handshake. AXPY emits a group of p_lanes z outputs per ostream
 //     handshake. VecDot emits one final scalar after num_groups input
@@ -20,13 +19,12 @@
 //     the caller driving zeros on rd_a/rd_b for those lanes and
 //     masking we during writeback -- see CGCtrl/CGDpath.
 //   - SPMV: single istream "start" handshake, then one row result per
-//     ostream handshake. SPMV owns a memory-read port to the on-chip
-//     SRAM and an external vec-RF read port. SPMV stays single-lane
-//     because it is memory-bandwidth-bound on the single Avalon port.
+//     ostream handshake. SPMV owns three independent M10K read ports
+//     (q_val, q_col, q_rowp) and an external vec-RF read port. The
+//     inner loop is pipelined to 1 cycle/nz steady state.
 //
 // Every internal multiply uses FpMul / FpMulWide (DSP-mapped). DSP
-// count: VecDot p_lanes + AXPY p_lanes + SPMV 1. For p_lanes=4 that
-// is 9 DSPs total.
+// count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1.
 
 //======================================================================
 // VecDot: result = sum_{i=0..n-1}(a[i] * b[i])
@@ -385,27 +383,28 @@ endmodule
 // and MACs into a wide accumulator via one FpMulWide.
 //======================================================================
 
-// v5_deep SPMV controller: three independent M10K read ports + 4-stage
-// pipelined inner loop.
-//
-// Steady-state cost per non-zero is 1 cycle. The pipeline has 4 stages:
+// SPMV controller. Three independent M10K read ports drive the inner
+// loop at 1 cycle/nz steady state through a 5-stage pipeline:
 //
 //   Cycle T:   addr drive: q_val_addr = q_col_addr = j_idx; j_idx++
 //   Cycle T+1: M10K rdata for j_T settles on the bus
-//   Cycle T+2: dpath latches val_p1, col_p1; vec[col_p1] read combinationally
-//   Cycle T+3: dpath latches prod_p = val_p1 * vec[col_p1]
-//   Cycle T+4: acc <= acc + prod_p (gated by issue_d3 valid bit)
+//   Cycle T+2: dpath latches val_p1, col_p1; vec[col_p1] reads combinationally
+//   Cycle T+3: dpath latches val_p2 <= val_p1, vec_p2 <= vec[col_p1]
+//   Cycle T+4: dpath latches prod_p = val_p2 * vec_p2 (registered operands)
+//   Cycle T+5: acc <= acc + prod_p (gated by issue_d4 valid bit)
 //
-// After the last issue we sit in S_DRAIN for 3 cycles so the in-flight
-// MAC drains into acc before EMIT samples it. Per-row inner-loop cost
-// is 1 (S_ROW_INIT) + N (S_ISSUE) + 3 (S_DRAIN) + 1 (S_EMIT) = N + 5;
-// v5 was 3*N + 2, so v5_deep wins for nnz >= 2 and only regresses by
-// 1 cycle for nnz=1 rows.
+// The val_p2/vec_p2 register split breaks the col_p1 -> 16:1 RF crossbar
+// -> 27x27 multiply chain into two clock periods so each stage stays
+// within a single 50 MHz period on Cyclone V.
+//
+// After the last issue we sit in S_DRAIN for 4 cycles so the in-flight
+// MAC drains into acc before EMIT samples it. Per-row inner-loop cost is
+// 1 (S_ROW_INIT) + N (S_ISSUE) + 4 (S_DRAIN) + 1 (S_EMIT) = N + 6.
 //
 // Row-pointer reads use the q_rowp port. Row 0 walks RP_ADDR_FIRST ->
 // RP_CAPT_FIRST (rp_lo) then RP_ADDR_HI -> RP_CAPT_HI (rp_hi). Rows 1+
 // use RP_ADDR_NEXT -> RP_CAPT_NEXT, carrying the previous rp_hi into
-// the new rp_lo and reading rp_ptr[row+1] into rp_hi (v3 collapse).
+// the new rp_lo and reading rp_ptr[row+1] into rp_hi.
 
 module SPMVCtrl #(
   parameter p_m10k_addr_bits  = 32
@@ -463,9 +462,10 @@ module SPMVCtrl #(
 
   state_t state, next_state;
 
-  // 3 drain cycles flush the pipe so acc absorbs the last MAC before
-  // EMIT samples it. Counter starts at 2 (visits 2->1->0, then EMIT).
-  localparam logic [1:0] DRAIN_INIT = 2'd2;
+  // 4 drain cycles flush the 5-stage pipe so acc absorbs the last MAC
+  // before EMIT samples it. Counter starts at 3 (visits 3->2->1->0,
+  // then EMIT).
+  localparam logic [1:0] DRAIN_INIT = 2'd3;
   logic [1:0] drain_cnt;
 
   wire input_handshake  = istream_val && istream_rdy;
@@ -601,19 +601,26 @@ module SPMVDpath #(
   // Pipe stage 1: latched M10K rdata (1 cycle after addr was driven)
   logic signed [p_total_bits-1:0] val_p1;
   logic signed [p_total_bits-1:0] col_p1;
-  // Pipe stage 2: latched val_p1 * vec[col_p1]
+  // Pipe stage 2: registered val + vec to break the col_p1 -> RF crossbar ->
+  // 27x27 multiplier critical path. vec_p2 latches the combinational
+  // crossbar lookup of vec[col_p1]; val_p2 just buffers val_p1 alongside
+  // it so the multiplier sees two registered operands.
+  logic signed [p_total_bits-1:0] val_p2;
+  logic signed [p_total_bits-1:0] vec_p2;
+  // Pipe stage 3: registered val_p2 * vec_p2
   logic signed [p_acc_bits-1:0]   prod_p;
-  // Pipe stage 3: accumulator
+  // Pipe stage 4: accumulator
   logic signed [p_acc_bits-1:0]   acc;
 
-  // 3-deep "issue valid" shift register. issue_d1 latches at the same
-  // edge that val_p1/col_p1 capture rdata; issue_d3 gates the acc add.
-  logic                           issue_d1, issue_d2, issue_d3;
+  // 4-deep "issue valid" shift register. issue_d1 latches at the same
+  // edge that val_p1/col_p1 capture rdata; issue_d4 gates the acc add.
+  logic                           issue_d1, issue_d2, issue_d3, issue_d4;
 
   logic signed [p_acc_bits-1:0]   product_wide;
 
-  // vec[col_p1] read combinationally via the RF crossbar; val_p1 *
-  // vec_rd_data goes to prod_p the next cycle.
+  // vec[col_p1] read combinationally via the RF crossbar -> latched into
+  // vec_p2 next cycle. The multiplier consumes val_p2/vec_p2 (both
+  // registered), so its inputs are stable for a full clock period.
   assign vec_rd_idx = col_p1[$clog2(p_max_n)-1:0];
 
   FpMulWide #(
@@ -622,8 +629,8 @@ module SPMVDpath #(
     .p_total_bits(p_total_bits),
     .p_wide_bits (p_acc_bits)
   ) u_mul (
-    .a     (val_p1),
-    .b     (vec_rd_data),
+    .a     (val_p2),
+    .b     (vec_p2),
     .result(product_wide)
   );
 
@@ -638,13 +645,16 @@ module SPMVDpath #(
       rp_hi    <= '0;
       val_p1   <= '0;
       col_p1   <= '0;
+      val_p2   <= '0;
+      vec_p2   <= '0;
       prod_p   <= '0;
       acc      <= '0;
       issue_d1 <= 1'b0;
       issue_d2 <= 1'b0;
       issue_d3 <= 1'b0;
+      issue_d4 <= 1'b0;
     end else begin
-      // Row-pointer + outer-row state (single-issue, identical to v5).
+      // Row-pointer + outer-row state (single-issue).
       if (d_begin_op) begin
         row_idx <= '0;
       end
@@ -672,13 +682,16 @@ module SPMVDpath #(
 
       issue_d1 <= d_issue;     // "addr was driven THIS cycle -> rdata next cycle"
       issue_d2 <= issue_d1;    // val_p1 just latched is valid
-      issue_d3 <= issue_d2;    // prod_p just latched is valid
+      issue_d3 <= issue_d2;    // val_p2/vec_p2 just latched is valid
+      issue_d4 <= issue_d3;    // prod_p just latched is valid
 
       val_p1 <= p_total_bits'($signed(q_val_rdata));
       col_p1 <= p_total_bits'($signed(q_col_rdata));
+      val_p2 <= val_p1;
+      vec_p2 <= vec_rd_data;
       prod_p <= product_wide;
 
-      if (issue_d3) acc <= acc + prod_p;
+      if (issue_d4) acc <= acc + prod_p;
     end
   end
 

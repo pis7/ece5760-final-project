@@ -8,12 +8,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(STATIC_BUILD "Build with static linking" OFF)
 set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
 set(MAX_N "50" CACHE STRING "Maximum cell count the mmap driver supports (must match Verilog p_max_n)")
-set(HW_FPGA_VERSION "v5" CACHE STRING "Which mmap driver to wire up: v4 (single SRAM) or v5 (multi-block on-chip RAM)")
-set_property(CACHE HW_FPGA_VERSION PROPERTY STRINGS v4 v5)
+set(HW_FPGA_VERSION "v6" CACHE STRING "Which mmap driver to wire up: v4 (single SRAM), v5 (multi-block on-chip RAM), or v6 (parallel x/y solve datapaths)")
+set_property(CACHE HW_FPGA_VERSION PROPERTY STRINGS v4 v5 v6)
 
-# v4 driver lives at the bare CG_DRIVER_FPGA_MMAP macro; v5 picks its
-# own header via CG_DRIVER_FPGA_MMAP_V5.
-if(HW_FPGA_VERSION STREQUAL "v5")
+# v4 driver lives at the bare CG_DRIVER_FPGA_MMAP macro; v5 / v6 each
+# pick their own header via dedicated macros.
+if(HW_FPGA_VERSION STREQUAL "v6")
+    set(FPGA_MMAP_DEFINE "CG_DRIVER_FPGA_MMAP_V6")
+elseif(HW_FPGA_VERSION STREQUAL "v5")
     set(FPGA_MMAP_DEFINE "CG_DRIVER_FPGA_MMAP_V5")
 else()
     set(FPGA_MMAP_DEFINE "CG_DRIVER_FPGA_MMAP")

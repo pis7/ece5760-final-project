@@ -1,5 +1,5 @@
-// v4 datapath -- adds a second AXPY unit so x and r updates run in
-// lockstep during the merged S_AXPY_XR_FEED state.
+// v4 datapath -- two AXPY units run in lockstep during the merged
+// S_AXPY_XR_FEED state.
 //
 //   u_axpy_x: mode=ADD, reads via rd_a/rd_b, writes primary port
 //   u_axpy_r: mode=SUB, reads via rd_c/rd_d, writes secondary port
@@ -10,8 +10,7 @@
 // z output and only fires when CGCtrl asserts we_sec; outside the
 // merged state CGCtrl drives we_sec to 0.
 //
-// DSP count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1
-//   (one extra p_lanes-wide multiplier set vs v3).
+// DSP count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1.
 
 module CGDpath #(
   parameter p_lanes            = 4,
@@ -598,8 +597,7 @@ module CGDpath #(
       if (latch_alpha)     alpha          <= fpdiv_result;
       if (latch_beta)      beta           <= fpdiv_result;
       // init_rr_reg takes priority: bypasses rr_new_latched and grabs
-      // vdot_result on the same cycle vdot finishes (S_VDOT_INIT_FEED),
-      // eliminating v3's separate S_RR_REG_COPY pass.
+      // vdot_result on the same cycle vdot finishes (S_VDOT_INIT_FEED).
       if (init_rr_reg)         rr_reg     <= vdot_result;
       else if (refresh_rr_reg) rr_reg     <= rr_new_latched;
       if (reset_iter)      iter           <= '0;

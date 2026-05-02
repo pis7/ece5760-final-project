@@ -11,10 +11,10 @@ Modes:
   python                 Baseline Python placer                                (run-only)
   sw                     Full software C++ placer (double precision)           (run + sweep)
   golden                 C++ placer with fixed-point golden CG                 (run + sweep)
-  verilated [v2|v3|v4|v5|v5_deep] C++ placer with Verilator RTL CG (default v5) (run + sweep)
+  verilated [v2|v3|v4|v5|v5_deep|v6] C++ placer with Verilator RTL CG (default v6) (run + sweep)
   arm                    Cross-compile SW placer, run on DE1-SoC ARM           (run + sweep)
-  fpga      [v4|v5]      Cross-compile FPGA-accelerated placer, run on DE1-SoC (run + sweep)
-                         (default v5; selects the mmap driver to link in)
+  fpga      [v4|v5|v6]   Cross-compile FPGA-accelerated placer, run on DE1-SoC (run + sweep)
+                         (default v6; selects the mmap driver to link in)
                          --p-max-n N   bitstream's p_max_n (default 50; rebuilds driver)
 
 Sweep mode runs the placer with max_outer_iter from 1..MAX_SWEEP_ITER,
@@ -23,12 +23,22 @@ iteration, and stitches the frames into a looping GIF + MP4. It stops
 early once the placer reports it needed fewer iterations than the cap
 (with a 2-frame minimum so the slideshow always has something to
 animate).
+
+When the benchmark path is a directory of benchmarks (e.g.
+`benchmarks/custom`, `benchmarks/iccad04`), every contained benchmark
+is run in sequence and a cross-benchmark summary table is printed at
+the end. Auto-detected from directory structure -- no extra flag.
+
+When invoked from a directory whose name starts with `build`, the
+contents are wiped before the run so each invocation starts from a
+clean slate (no stale binaries or JSONs from a different mode).
 """
 
 import argparse
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -71,6 +81,29 @@ def step(msg: str) -> None:
     """Print a `=== msg ===` stage banner, preceded by a blank line for
     visual separation from the previous stage's output."""
     print(f"\n=== {msg} ===", flush=True)
+
+
+def clean_build_dir() -> None:
+    """If cwd looks like a build dir (basename starts with 'build') and is
+    not the repo root itself, wipe its contents so each run starts clean.
+
+    Safety: the repo-root check prevents disasters if a `build` dir is
+    accidentally created at (or symlinked from) the project root.
+    """
+    cwd = Path.cwd().resolve()
+    if not cwd.name.startswith("build"):
+        return
+    if cwd == find_repo_root():
+        return
+    entries = list(cwd.iterdir())
+    if not entries:
+        return
+    step(f"Cleaning build dir ({cwd})")
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_dir():
+            entry.unlink()
+        else:
+            shutil.rmtree(entry)
 
 
 # --- .env / board credentials ------------------------------------------------
@@ -127,6 +160,38 @@ def parse_lefdef(bench_path: Path) -> tuple[str, Path]:
     return parser.design_name, out_path
 
 
+def looks_like_benchmark(path: Path) -> bool:
+    """True iff path has lef/ and def/ subdirs each containing at least one
+    .lef / .def file. Mirrors LefDefParser.find_files semantics."""
+    if not path.is_dir():
+        return False
+    lef_dir = path / "lef"
+    def_dir = path / "def"
+    if not (lef_dir.is_dir() and def_dir.is_dir()):
+        return False
+    return any(lef_dir.glob("*.lef")) and any(def_dir.glob("*.def"))
+
+
+def discover_benchmarks(path: Path) -> list[Path]:
+    """Resolve a benchmark path into a list of one or more benchmark dirs.
+
+    If the path itself is a single benchmark, returns [path].
+    Otherwise scans immediate subdirs and returns the ones that look like
+    benchmarks (sorted by name). Empty result -> SystemExit.
+    """
+    if looks_like_benchmark(path):
+        return [path]
+    if not path.is_dir():
+        raise SystemExit(f"No benchmarks found at {path}: not a directory")
+    children = [c for c in sorted(path.iterdir()) if looks_like_benchmark(c)]
+    if not children:
+        raise SystemExit(
+            f"No benchmarks found at {path}: neither lef/+def/ nor "
+            "subdirs containing them"
+        )
+    return children
+
+
 # --- Build orchestration -----------------------------------------------------
 
 
@@ -177,9 +242,29 @@ def cmake_build(spec: BuildSpec, repo_root: Path, build_dir: Path) -> None:
 # --- Local placer runs -------------------------------------------------------
 
 
-def run_local_placer_streaming(json_file: Path, build_dir: Path) -> None:
-    """Run ./placer JSON, streaming output to the terminal. Raises on failure."""
-    subprocess.run(["./placer", str(json_file)], cwd=build_dir, check=True)
+def run_local_placer_tee(json_file: Path, build_dir: Path) -> str:
+    """Run ./placer JSON, streaming output to the terminal AND capturing it.
+
+    Returns the combined stdout/stderr text. Raises SystemExit on failure.
+    """
+    proc = subprocess.Popen(
+        ["./placer", str(json_file)],
+        cwd=build_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    buf: list[str] = []
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        buf.append(line)
+    rc = proc.wait()
+    if rc != 0:
+        raise SystemExit(f"Placer failed (rc={rc})")
+    return "".join(buf)
 
 
 def run_local_placer_capture(
@@ -211,14 +296,24 @@ def run_python_placer(json_file: Path, repo_root: Path, build_dir: Path) -> None
     )
 
 
-# --- Output marker parsing (sweep) -------------------------------------------
+# --- Output parsing + summary ------------------------------------------------
 
 
 @dataclass
-class PlacerMarkers:
-    iters_used: int
-    converged: bool
-    reverted: bool
+class RunSummary:
+    """Parsed metrics from a single placer run."""
+    design_name: str = ""
+    n_cells: int = 0
+    iters_used: int = 0
+    converged: bool = False
+    reverted: bool = False
+    hpwl_final: float = 0.0
+    max_bin_density_final: float = 0.0
+    cg_total_ms: float = 0.0
+    cg_avg_ms: float = 0.0
+    placer_total_ms: float = 0.0
+    hw_cg_total_cycles: Optional[int] = None
+    hw_cg_avg_cycles: Optional[float] = None
 
     @property
     def tag(self) -> str:
@@ -229,8 +324,8 @@ class PlacerMarkers:
         return "capped"
 
 
-def parse_placer_markers(output: str) -> PlacerMarkers:
-    """Parse the marker lines printed at the end of placer.cpp main()."""
+def parse_run_summary(output: str, design_name: str) -> RunSummary:
+    """Parse marker lines printed by placer.cpp main() into a RunSummary."""
     m_iters = re.search(r"^Outer iterations used:\s+(\d+)", output, re.M)
     m_conv = re.search(r"^Converged:\s+(\S+)", output, re.M)
     m_rev = re.search(r"^Reverted:\s+(\S+)", output, re.M)
@@ -240,11 +335,110 @@ def parse_placer_markers(output: str) -> PlacerMarkers:
             "Could not find marker lines in placer output. "
             "Did placer.cpp print 'Outer iterations used: K'?"
         )
-    return PlacerMarkers(
-        iters_used=int(m_iters.group(1)),
-        converged=m_conv.group(1) == "true",
-        reverted=m_rev.group(1) == "true",
+    s = RunSummary(design_name=design_name)
+    s.iters_used = int(m_iters.group(1))
+    s.converged = m_conv.group(1) == "true"
+    s.reverted = m_rev.group(1) == "true"
+
+    m_size = re.search(r"^\s+(\d+) cells,", output, re.M)
+    if m_size:
+        s.n_cells = int(m_size.group(1))
+
+    # The placer prints HPWL for every iteration including ones it later
+    # reverts; slice to keep only [initial..iter[iters_used]] so the spike
+    # value isn't reported as the final.
+    hpwl_floats = [float(x) for x in re.findall(
+        r"^\s+HPWL:\s+([0-9.]+)", output, re.M
+    )]
+    if hpwl_floats:
+        s.hpwl_final = hpwl_floats[: s.iters_used + 1][-1]
+
+    m_total = re.search(r"^\s+CG total:\s+([0-9.]+) ms", output, re.M)
+    m_avg = re.search(r"^\s+CG average:\s+([0-9.]+) ms", output, re.M)
+    m_pl = re.search(r"^\s+Placer total:\s+([0-9.]+) ms", output, re.M)
+    if m_total: s.cg_total_ms = float(m_total.group(1))
+    if m_avg: s.cg_avg_ms = float(m_avg.group(1))
+    if m_pl: s.placer_total_ms = float(m_pl.group(1))
+
+    densities = re.findall(r"^\s+Max bin density:\s+([0-9.]+)", output, re.M)
+    if densities:
+        s.max_bin_density_final = float(densities[-1])
+
+    m_hw_total = re.search(r"^\s+HW CG total:\s+(\d+) cycles", output, re.M)
+    m_hw_avg = re.search(r"^\s+HW CG average:\s+([0-9.]+) cycles", output, re.M)
+    if m_hw_total:
+        s.hw_cg_total_cycles = int(m_hw_total.group(1))
+    if m_hw_avg:
+        s.hw_cg_avg_cycles = float(m_hw_avg.group(1))
+
+    return s
+
+
+def print_summary(s: RunSummary, *, header: Optional[str] = None) -> None:
+    """Pretty-print one RunSummary as a tidy block."""
+    title = header or f"Run summary: {s.design_name}"
+    step(title)
+    print(f"  Cells:          {s.n_cells}")
+    print(f"  Iters:          {s.iters_used} ({s.tag})")
+    print(f"  Final HPWL:     {s.hpwl_final:.0f}")
+    print(f"  Final density:  {s.max_bin_density_final:.2f}")
+    cg_avg_extra = (
+        f", {s.hw_cg_avg_cycles:.0f} cycles"
+        if s.hw_cg_avg_cycles is not None else ""
     )
+    cg_total_extra = (
+        f", {s.hw_cg_total_cycles} cycles"
+        if s.hw_cg_total_cycles is not None else ""
+    )
+    print(f"  CG average:     {s.cg_avg_ms:.3f} ms{cg_avg_extra}")
+    print(f"  CG total:       {s.cg_total_ms:.3f} ms{cg_total_extra}")
+    print(f"  Placer total:   {s.placer_total_ms:.3f} ms")
+
+
+def print_cross_summary(summaries: list[RunSummary]) -> None:
+    """Print a fixed-width comparison table across multiple runs."""
+    if not summaries:
+        return
+    step(f"Cross-benchmark summary ({len(summaries)} runs)")
+    have_cycles = all(
+        s.hw_cg_total_cycles is not None and s.hw_cg_avg_cycles is not None
+        for s in summaries
+    )
+    name_w = max(len("design"), *(len(s.design_name) for s in summaries))
+    cols: list[str] = [
+        f"{'design':<{name_w}}",
+        f"{'cells':>5}",
+        f"{'iters':>5}",
+        f"{'outcome':<10}",
+        f"{'final_HPWL':>10}",
+        f"{'density':>7}",
+        f"{'cg_avg_ms':>9}",
+        f"{'cg_total_ms':>11}",
+        f"{'placer_ms':>10}",
+    ]
+    if have_cycles:
+        cols += [f"{'cg_avg_cyc':>10}", f"{'cg_total_cyc':>12}"]
+    header = "  ".join(cols)
+    print(header)
+    print("-" * len(header))
+    for s in summaries:
+        row: list[str] = [
+            f"{s.design_name:<{name_w}}",
+            f"{s.n_cells:>5}",
+            f"{s.iters_used:>5}",
+            f"{s.tag:<10}",
+            f"{s.hpwl_final:>10.0f}",
+            f"{s.max_bin_density_final:>7.2f}",
+            f"{s.cg_avg_ms:>9.3f}",
+            f"{s.cg_total_ms:>11.3f}",
+            f"{s.placer_total_ms:>10.3f}",
+        ]
+        if have_cycles:
+            row += [
+                f"{s.hw_cg_avg_cycles:>10.0f}",
+                f"{s.hw_cg_total_cycles:>12d}",
+            ]
+        print("  ".join(row))
 
 
 # --- Board session (fabric wrapper) ------------------------------------------
@@ -292,7 +486,9 @@ class BoardSession:
     def run(self, command: str, *, capture: bool = False) -> str:
         """Run `cd board_dir && command`. Streams unless capture=True.
 
-        Raises SystemExit on non-zero return code.
+        Always returns the captured stdout (Fabric/Invoke populate
+        result.stdout regardless of `hide`). Raises SystemExit on non-zero
+        return code.
         """
         full = f"cd {shlex.quote(self.board_dir)} && {command}"
         result = self._conn.run(full, hide=capture, warn=True)
@@ -303,7 +499,16 @@ class BoardSession:
             raise SystemExit(
                 f"Remote command failed (rc={result.return_code}): {command}"
             )
-        return result.stdout if capture else ""
+        return result.stdout
+
+    def set_board_dir(self, new_dir: str) -> None:
+        """Switch the session's working dir, creating it if necessary.
+
+        Used by multi-benchmark mode to reuse one SSH connection across
+        per-benchmark remote dirs.
+        """
+        self.board_dir = new_dir
+        self._conn.run(f"mkdir -p {shlex.quote(new_dir)}", hide=True)
 
 
 # --- Slideshow (PNG frames -> GIF + MP4) -------------------------------------
@@ -388,7 +593,13 @@ class RunPlacer:
     """End-to-end placer driver. Runs once by default; sweeps when --sweep
     is passed."""
 
-    def __init__(self, args: _Args) -> None:
+    def __init__(
+        self,
+        args: _Args,
+        *,
+        benchmark_override: Optional[Path] = None,
+        shared_board: Optional[BoardSession] = None,
+    ) -> None:
         self.args: _Args = args
         self.repo_root: Path = find_repo_root()
         self.build_dir: Path = Path.cwd().resolve()
@@ -396,12 +607,15 @@ class RunPlacer:
         self.design_name: str = ""
         self.json_file: Path = Path()
         self.frames: list[Path] = []  # populated by sweep mode
+        self.benchmark_path: Path = benchmark_override or args.benchmark_path
+        self.shared_board: Optional[BoardSession] = shared_board
+        self.summary: Optional[RunSummary] = None
 
     # -- Stages --------------------------------------------------------------
 
     def parse_lefdef(self) -> None:
         step("Generating JSON")
-        self.design_name, self.json_file = parse_lefdef(self.args.benchmark_path)
+        self.design_name, self.json_file = parse_lefdef(self.benchmark_path)
 
     def build(self) -> None:
         if self.args.mode == "python":
@@ -434,6 +648,8 @@ class RunPlacer:
                 f"  Results: {self.design_name}-initial.json, "
                 f"{self.design_name}-final.json"
             )
+        if self.summary is not None:
+            print_summary(self.summary)
 
     # -- Single-run path -----------------------------------------------------
 
@@ -447,64 +663,118 @@ class RunPlacer:
             if self.args.mode == "verilated":
                 banner = f"Running placer ({self.args.hw_version})"
             step(banner)
-            run_local_placer_streaming(self.json_file, self.build_dir)
-            return
-        # arm / fpga single run
-        creds = require_board_creds(self.repo_root)
-        board_dir = self._board_dir(sweep=False)
-        step(f"Copying to board ({board_dir})")
-        with BoardSession(creds=creds, board_dir=board_dir) as board:
-            board.put(self.build_dir / "placer")
-            board.put(self.json_file)
-            note = (
-                "(FPGA bitstream must already be loaded)"
-                if self.args.mode == "fpga"
-                else ""
-            )
-            step(f"Running placer on board {note}".rstrip())
-            board.run(f"./placer {self.json_file.name}")
-            step("Copying results back")
-            board.get(
-                f"{self.design_name}-initial.json",
-                self.build_dir / f"{self.design_name}-initial.json",
-            )
-            board.get(
-                f"{self.design_name}-final.json",
-                self.build_dir / f"{self.design_name}-final.json",
-            )
+            output = run_local_placer_tee(self.json_file, self.build_dir)
+        elif self.shared_board is not None:
+            output = self._run_remote_with_board(self.shared_board)
+        else:
+            creds = require_board_creds(self.repo_root)
+            board_dir = self._board_dir(sweep=False)
+            step(f"Copying to board ({board_dir})")
+            with BoardSession(creds=creds, board_dir=board_dir) as board:
+                output = self._run_remote_with_board(board)
+        self.summary = parse_run_summary(output, self.design_name)
+
+    def _run_remote_with_board(self, board: BoardSession) -> str:
+        """Run the placer on the board through an open BoardSession."""
+        if self.shared_board is not None:
+            board.set_board_dir(self._board_dir(sweep=False))
+            step(f"Copying to board ({board.board_dir})")
+        board.put(self.build_dir / "placer")
+        board.put(self.json_file)
+        note = (
+            "(FPGA bitstream must already be loaded)"
+            if self.args.mode == "fpga"
+            else ""
+        )
+        step(f"Running placer on board {note}".rstrip())
+        output = board.run(f"./placer {self.json_file.name}")
+        step("Copying results back")
+        board.get(
+            f"{self.design_name}-initial.json",
+            self.build_dir / f"{self.design_name}-initial.json",
+        )
+        board.get(
+            f"{self.design_name}-final.json",
+            self.build_dir / f"{self.design_name}-final.json",
+        )
+        return output
 
     # -- Sweep path ----------------------------------------------------------
 
     def _run_sweep(self) -> None:
-        if self.is_remote:
+        if not self.is_remote:
+            self._sweep_loop(None)
+        elif self.shared_board is not None:
+            self._sweep_with_board(self.shared_board)
+        else:
             creds = require_board_creds(self.repo_root)
             board_dir = self._board_dir(sweep=True)
             step(f"Copying to board ({board_dir})")
             with BoardSession(creds=creds, board_dir=board_dir) as board:
-                board.put(self.build_dir / "placer")
-                board.put(self.json_file)
-                self._sweep_loop(board)
-        else:
-            self._sweep_loop(None)
+                self._sweep_with_board(board)
         self._render_slideshow()
+
+    def _sweep_with_board(self, board: BoardSession) -> None:
+        if self.shared_board is not None:
+            board.set_board_dir(self._board_dir(sweep=True))
+            step(f"Copying to board ({board.board_dir})")
+        board.put(self.build_dir / "placer")
+        board.put(self.json_file)
+        self._sweep_loop(board)
 
     def _sweep_loop(self, board: Optional[BoardSession]) -> None:
         step(f"Running sweep (1..{MAX_SWEEP_ITER})")
+        last_n = 0
         for n in range(1, MAX_SWEEP_ITER + 1):
-            markers = self._run_one(n, board)
+            summary = self._run_one(n, board)
+            self.summary = summary  # last write wins -- the "natural" final
+            if n == 1:
+                self._capture_initial_frame(board)
             self._capture_frame(n, board)
+            last_n = n
             print(
                 f"  iter {n:2d}/{MAX_SWEEP_ITER}: "
-                f"kept={markers.iters_used} ({markers.tag})"
+                f"kept={summary.iters_used} ({summary.tag})"
             )
-            if markers.iters_used < n and n >= MIN_FRAMES:
+            if summary.iters_used < n and n >= MIN_FRAMES:
                 print(
-                    f"  Placer used only {markers.iters_used} of {n} "
+                    f"  Placer used only {summary.iters_used} of {n} "
                     f"iterations -- stopping sweep."
                 )
                 break
+        if last_n > 0:
+            # Mirror non-sweep mode: leave a canonical <design>-final.json
+            # in the build dir. _capture_frame renamed each iter's final
+            # away, so copy the highest-N per-iter JSON back.
+            last_json = (
+                self.build_dir / f"{self.design_name}-final-iter{last_n:02d}.json"
+            )
+            canonical = self.build_dir / f"{self.design_name}-final.json"
+            shutil.copyfile(last_json, canonical)
 
-    def _run_one(self, n: int, board: Optional[BoardSession]) -> PlacerMarkers:
+    def _capture_initial_frame(self, board: Optional[BoardSession]) -> None:
+        """Snapshot the placer's all-cells-at-die-center placement as the
+        iter-0 frame. Runs once after the first placer invocation, since
+        placer.cpp only writes <design>-initial.json when it actually runs."""
+        iter0_json = (
+            self.build_dir / f"{self.design_name}-final-iter00.json"
+        )
+        if board is not None:
+            board.get(f"{self.design_name}-initial.json", iter0_json)
+        else:
+            initial = self.build_dir / f"{self.design_name}-initial.json"
+            if not initial.is_file():
+                raise SystemExit(
+                    f"Error: expected {initial.name} after placer run"
+                )
+            shutil.copyfile(initial, iter0_json)
+        iter0_png = (
+            self.build_dir / f"{self.design_name}-final-iter00.png"
+        )
+        self._render_png(iter0_json, iter0_png)
+        self.frames.append(iter0_png)
+
+    def _run_one(self, n: int, board: Optional[BoardSession]) -> RunSummary:
         if board is not None:
             output = board.run(
                 f"./placer {self.json_file.name} {n}", capture=True
@@ -513,7 +783,7 @@ class RunPlacer:
             output = run_local_placer_capture(
                 self.json_file, n, self.build_dir
             )
-        return parse_placer_markers(output)
+        return parse_run_summary(output, self.design_name)
 
     def _capture_frame(self, n: int, board: Optional[BoardSession]) -> None:
         per_iter_json = (
@@ -579,6 +849,50 @@ class RunPlacer:
         )
 
 
+# --- Multi-benchmark orchestration -------------------------------------------
+
+
+def run_multi(args: _Args, benches: list[Path]) -> None:
+    """Run a sequence of benchmarks with one shared build (and one shared
+    SSH session for remote modes), then print a cross-benchmark table."""
+    n = len(benches)
+    step(f"Multi-benchmark mode: {n} benchmarks")
+    for i, b in enumerate(benches, start=1):
+        print(f"  [{i}/{n}] {b.name}")
+
+    # Build once -- the binary is the same for every benchmark.
+    builder = RunPlacer(args, benchmark_override=benches[0])
+    builder.build()
+
+    summaries: list[RunSummary] = []
+    is_remote = args.mode in _REMOTE_MODES
+
+    def _run_each(board: Optional[BoardSession]) -> None:
+        for i, bench in enumerate(benches, start=1):
+            step(f"[{i}/{n}] Benchmark: {bench.name}")
+            runner = RunPlacer(
+                args, benchmark_override=bench, shared_board=board
+            )
+            runner.parse_lefdef()
+            runner.run()
+            if runner.summary is not None:
+                print_summary(
+                    runner.summary,
+                    header=f"Run summary: {runner.design_name} [{i}/{n}]",
+                )
+                summaries.append(runner.summary)
+
+    if is_remote:
+        creds = require_board_creds(builder.repo_root)
+        # Open one session; per-benchmark dirs are set inside the loop.
+        with BoardSession(creds=creds, board_dir="/home/root") as board:
+            _run_each(board)
+    else:
+        _run_each(None)
+
+    print_cross_summary(summaries)
+
+
 # --- CLI ---------------------------------------------------------------------
 
 
@@ -617,19 +931,19 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
             type=Path,
             help="Path to a benchmark directory (containing lef/ and def/).",
         )
-        sp.set_defaults(hw_version="v4")  # unused; keeps the attr defined
+        sp.set_defaults(hw_version="v6")  # unused; keeps the attr defined
         _add_common(sp)
 
     sp_ver = sub.add_parser(
         "verilated",
-        help="C++ placer with Verilator RTL CG. Optional [v2|v3|v4|v5|v5_deep] before path.",
+        help="C++ placer with Verilator RTL CG. Optional [v2|v3|v4|v5|v5_deep|v6] before path.",
     )
     sp_ver.add_argument(
         "hw_version",
         nargs="?",
-        choices=["v2", "v3", "v4", "v5", "v5_deep"],
-        default="v5",
-        help="Verilator RTL version (default v5).",
+        choices=["v2", "v3", "v4", "v5", "v5_deep", "v6"],
+        default="v6",
+        help="Verilator RTL version (default v6).",
     )
     sp_ver.add_argument(
         "benchmark_path",
@@ -640,14 +954,14 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
 
     sp_fpga = sub.add_parser(
         "fpga",
-        help="Cross-compile FPGA-accelerated placer, run on DE1-SoC. Optional [v4|v5] before path.",
+        help="Cross-compile FPGA-accelerated placer, run on DE1-SoC. Optional [v4|v5|v6] before path.",
     )
     sp_fpga.add_argument(
         "hw_version",
         nargs="?",
-        choices=["v4", "v5"],
-        default="v5",
-        help="FPGA mmap driver version (default v5).",
+        choices=["v4", "v5", "v6"],
+        default="v6",
+        help="FPGA mmap driver version (default v6).",
     )
     sp_fpga.add_argument(
         "benchmark_path",
@@ -671,6 +985,14 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
     if args.sweep and args.mode == "python":
         parser.error("--sweep is not supported with mode=python")
 
+    is_multi = (
+        args.benchmark_path.is_dir()
+        and not looks_like_benchmark(args.benchmark_path)
+        and any(looks_like_benchmark(c) for c in args.benchmark_path.iterdir())
+    )
+    if is_multi and args.mode == "python":
+        parser.error("multi-benchmark mode does not support mode=python")
+
     p_max_n = getattr(args, "p_max_n", 50)
     if p_max_n <= 0:
         parser.error("--p-max-n must be a positive integer")
@@ -686,11 +1008,16 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
 
 def main() -> None:
     args = _parse_args()
-    runner = RunPlacer(args)
-    runner.parse_lefdef()
-    runner.build()
-    runner.run()
-    runner.report()
+    clean_build_dir()
+    benches = discover_benchmarks(args.benchmark_path)
+    if len(benches) == 1:
+        runner = RunPlacer(args, benchmark_override=benches[0])
+        runner.parse_lefdef()
+        runner.build()
+        runner.run()
+        runner.report()
+    else:
+        run_multi(args, benches)
 
 
 if __name__ == "__main__":

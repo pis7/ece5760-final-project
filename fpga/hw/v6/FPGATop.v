@@ -368,14 +368,15 @@ assign HEX4 = ~hex5_hex4[ 6: 0];
 assign HEX5 = ~hex5_hex4[14: 8];
 
 //=======================================================
-//  CG solver <-> Avalon on-chip RAM interconnect (7 slaves)
+//  CG solver <-> Avalon on-chip RAM interconnect (10 slaves)
 //=======================================================
 
-// Seven dedicated Qsys on-chip RAM slaves, each with exactly one
-// RTL-facing consumer. SPMV fetches q_val[j] and q_col[j] in the same
-// cycle from independent slaves. Computer_System.qsys must expose
-// seven on-chip RAM IPs whose FPGA-facing slave port names match the
-// bundles below.
+// Q is duplicated across two trios so each CGEngine runs SPMV against
+// its own Q ports with zero contention. Total slaves: 6 Q (3 per
+// engine) + 4 dimension-private vector slaves (cx, cy, x, y) = 10.
+// Each slave's RTL-facing port has exactly one consumer (no bus mux).
+// Computer_System.qsys must expose ten on-chip RAM IPs whose
+// FPGA-facing slave port names match the bundles below.
 `define DECL_RAM_BUNDLE(NAME) \
 	wire	[31: 0]	NAME``_address; \
 	wire				NAME``_chipselect; \
@@ -385,15 +386,29 @@ assign HEX5 = ~hex5_hex4[14: 8];
 	wire	[31: 0]	NAME``_writedata; \
 	wire	[ 3: 0]	NAME``_byteenable
 
-`DECL_RAM_BUNDLE(cg_q_val_ram);
-`DECL_RAM_BUNDLE(cg_q_col_ram);
-`DECL_RAM_BUNDLE(cg_q_rowp_ram);
+`DECL_RAM_BUNDLE(cg_q_val_x_ram);
+`DECL_RAM_BUNDLE(cg_q_col_x_ram);
+`DECL_RAM_BUNDLE(cg_q_rowp_x_ram);
+`DECL_RAM_BUNDLE(cg_q_val_y_ram);
+`DECL_RAM_BUNDLE(cg_q_col_y_ram);
+`DECL_RAM_BUNDLE(cg_q_rowp_y_ram);
 `DECL_RAM_BUNDLE(cg_cx_ram);
 `DECL_RAM_BUNDLE(cg_cy_ram);
 `DECL_RAM_BUNDLE(cg_x_ram);
 `DECL_RAM_BUNDLE(cg_y_ram);
 
-`undef DECL_RAM_BUNDLE
+// Wire one RAM bundle into a module-instantiation port list. Connects
+// the module's `<NAME>_*` ports to the local `cg_<NAME>_*` wires
+// declared above. Used identically for both CGTop and Computer_System
+// since both expose the same `<NAME>_<signal>` port-name pattern.
+`define WIRE_RAM_PORTS(NAME) \
+	.NAME``_address    (cg_``NAME``_address),    \
+	.NAME``_chipselect (cg_``NAME``_chipselect), \
+	.NAME``_clken      (cg_``NAME``_clken),      \
+	.NAME``_write      (cg_``NAME``_write),      \
+	.NAME``_readdata   (cg_``NAME``_readdata),   \
+	.NAME``_writedata  (cg_``NAME``_writedata),  \
+	.NAME``_byteenable (cg_``NAME``_byteenable)
 
 // PIO ports
 //   cg_ctrl_export       : ARM -> FPGA, 8b ({5'b0, rst, sw_done_ack, sw_go})
@@ -441,68 +456,17 @@ CGTop cg_inst (
 	.sw_done                 (cg_sw_done),
 	.sw_done_ack             (cg_sw_done_ack),
 
-	// q_val_ram (SPMV read-only)
-	.q_val_ram_address       (cg_q_val_ram_address),
-	.q_val_ram_chipselect    (cg_q_val_ram_chipselect),
-	.q_val_ram_clken         (cg_q_val_ram_clken),
-	.q_val_ram_write         (cg_q_val_ram_write),
-	.q_val_ram_readdata      (cg_q_val_ram_readdata),
-	.q_val_ram_writedata     (cg_q_val_ram_writedata),
-	.q_val_ram_byteenable    (cg_q_val_ram_byteenable),
-
-	// q_col_ram (SPMV read-only)
-	.q_col_ram_address       (cg_q_col_ram_address),
-	.q_col_ram_chipselect    (cg_q_col_ram_chipselect),
-	.q_col_ram_clken         (cg_q_col_ram_clken),
-	.q_col_ram_write         (cg_q_col_ram_write),
-	.q_col_ram_readdata      (cg_q_col_ram_readdata),
-	.q_col_ram_writedata     (cg_q_col_ram_writedata),
-	.q_col_ram_byteenable    (cg_q_col_ram_byteenable),
-
-	// q_rowp_ram (SPMV read-only)
-	.q_rowp_ram_address      (cg_q_rowp_ram_address),
-	.q_rowp_ram_chipselect   (cg_q_rowp_ram_chipselect),
-	.q_rowp_ram_clken        (cg_q_rowp_ram_clken),
-	.q_rowp_ram_write        (cg_q_rowp_ram_write),
-	.q_rowp_ram_readdata     (cg_q_rowp_ram_readdata),
-	.q_rowp_ram_writedata    (cg_q_rowp_ram_writedata),
-	.q_rowp_ram_byteenable   (cg_q_rowp_ram_byteenable),
-
-	// cx_ram (CGCtrl S_VNS_R serial read)
-	.cx_ram_address          (cg_cx_ram_address),
-	.cx_ram_chipselect       (cg_cx_ram_chipselect),
-	.cx_ram_clken            (cg_cx_ram_clken),
-	.cx_ram_write            (cg_cx_ram_write),
-	.cx_ram_readdata         (cg_cx_ram_readdata),
-	.cx_ram_writedata        (cg_cx_ram_writedata),
-	.cx_ram_byteenable       (cg_cx_ram_byteenable),
-
-	// cy_ram (CGCtrl S_VNS_R serial read)
-	.cy_ram_address          (cg_cy_ram_address),
-	.cy_ram_chipselect       (cg_cy_ram_chipselect),
-	.cy_ram_clken            (cg_cy_ram_clken),
-	.cy_ram_write            (cg_cy_ram_write),
-	.cy_ram_readdata         (cg_cy_ram_readdata),
-	.cy_ram_writedata        (cg_cy_ram_writedata),
-	.cy_ram_byteenable       (cg_cy_ram_byteenable),
-
-	// x_ram (CGCtrl load + writeback)
-	.x_ram_address           (cg_x_ram_address),
-	.x_ram_chipselect        (cg_x_ram_chipselect),
-	.x_ram_clken             (cg_x_ram_clken),
-	.x_ram_write             (cg_x_ram_write),
-	.x_ram_readdata          (cg_x_ram_readdata),
-	.x_ram_writedata         (cg_x_ram_writedata),
-	.x_ram_byteenable        (cg_x_ram_byteenable),
-
-	// y_ram (CGCtrl load + writeback)
-	.y_ram_address           (cg_y_ram_address),
-	.y_ram_chipselect        (cg_y_ram_chipselect),
-	.y_ram_clken             (cg_y_ram_clken),
-	.y_ram_write             (cg_y_ram_write),
-	.y_ram_readdata          (cg_y_ram_readdata),
-	.y_ram_writedata         (cg_y_ram_writedata),
-	.y_ram_byteenable        (cg_y_ram_byteenable),
+	// 6 Q slaves (3 per engine, no contention) + 4 vector slaves.
+	`WIRE_RAM_PORTS(q_val_x_ram),
+	`WIRE_RAM_PORTS(q_col_x_ram),
+	`WIRE_RAM_PORTS(q_rowp_x_ram),
+	`WIRE_RAM_PORTS(q_val_y_ram),
+	`WIRE_RAM_PORTS(q_col_y_ram),
+	`WIRE_RAM_PORTS(q_rowp_y_ram),
+	`WIRE_RAM_PORTS(cx_ram),
+	`WIRE_RAM_PORTS(cy_ram),
+	`WIRE_RAM_PORTS(x_ram),
+	`WIRE_RAM_PORTS(y_ram),
 
 	.max_iter                (cg_max_iter),
 	.eps_sq                  (cg_eps_sq),
@@ -622,65 +586,22 @@ Computer_System The_System (
 	.hps_io_hps_io_usb1_inst_DIR		(HPS_USB_DIR),
 	.hps_io_hps_io_usb1_inst_NXT		(HPS_USB_NXT),
 	
-	// Seven dedicated on-chip RAM slaves. The Qsys system must expose
+	// Ten dedicated on-chip RAM slaves. The Qsys system must expose
 	// these as on-chip RAM IPs with FPGA-facing slave port names matching
 	// the prefixes below. ARM-facing port on each slave is the h2f bridge
-	// (so the driver can mmap each region independently).
-	.q_val_ram_address               (cg_q_val_ram_address),
-	.q_val_ram_chipselect            (cg_q_val_ram_chipselect),
-	.q_val_ram_clken                 (cg_q_val_ram_clken),
-	.q_val_ram_write                 (cg_q_val_ram_write),
-	.q_val_ram_readdata              (cg_q_val_ram_readdata),
-	.q_val_ram_writedata             (cg_q_val_ram_writedata),
-	.q_val_ram_byteenable            (cg_q_val_ram_byteenable),
-
-	.q_col_ram_address               (cg_q_col_ram_address),
-	.q_col_ram_chipselect            (cg_q_col_ram_chipselect),
-	.q_col_ram_clken                 (cg_q_col_ram_clken),
-	.q_col_ram_write                 (cg_q_col_ram_write),
-	.q_col_ram_readdata              (cg_q_col_ram_readdata),
-	.q_col_ram_writedata             (cg_q_col_ram_writedata),
-	.q_col_ram_byteenable            (cg_q_col_ram_byteenable),
-
-	.q_rowp_ram_address              (cg_q_rowp_ram_address),
-	.q_rowp_ram_chipselect           (cg_q_rowp_ram_chipselect),
-	.q_rowp_ram_clken                (cg_q_rowp_ram_clken),
-	.q_rowp_ram_write                (cg_q_rowp_ram_write),
-	.q_rowp_ram_readdata             (cg_q_rowp_ram_readdata),
-	.q_rowp_ram_writedata            (cg_q_rowp_ram_writedata),
-	.q_rowp_ram_byteenable           (cg_q_rowp_ram_byteenable),
-
-	.cx_ram_address                  (cg_cx_ram_address),
-	.cx_ram_chipselect               (cg_cx_ram_chipselect),
-	.cx_ram_clken                    (cg_cx_ram_clken),
-	.cx_ram_write                    (cg_cx_ram_write),
-	.cx_ram_readdata                 (cg_cx_ram_readdata),
-	.cx_ram_writedata                (cg_cx_ram_writedata),
-	.cx_ram_byteenable               (cg_cx_ram_byteenable),
-
-	.cy_ram_address                  (cg_cy_ram_address),
-	.cy_ram_chipselect               (cg_cy_ram_chipselect),
-	.cy_ram_clken                    (cg_cy_ram_clken),
-	.cy_ram_write                    (cg_cy_ram_write),
-	.cy_ram_readdata                 (cg_cy_ram_readdata),
-	.cy_ram_writedata                (cg_cy_ram_writedata),
-	.cy_ram_byteenable               (cg_cy_ram_byteenable),
-
-	.x_ram_address                   (cg_x_ram_address),
-	.x_ram_chipselect                (cg_x_ram_chipselect),
-	.x_ram_clken                     (cg_x_ram_clken),
-	.x_ram_write                     (cg_x_ram_write),
-	.x_ram_readdata                  (cg_x_ram_readdata),
-	.x_ram_writedata                 (cg_x_ram_writedata),
-	.x_ram_byteenable                (cg_x_ram_byteenable),
-
-	.y_ram_address                   (cg_y_ram_address),
-	.y_ram_chipselect                (cg_y_ram_chipselect),
-	.y_ram_clken                     (cg_y_ram_clken),
-	.y_ram_write                     (cg_y_ram_write),
-	.y_ram_readdata                  (cg_y_ram_readdata),
-	.y_ram_writedata                 (cg_y_ram_writedata),
-	.y_ram_byteenable                (cg_y_ram_byteenable),
+	// (so the driver can mmap each region independently). Q is duplicated
+	// across two trios (x engine + y engine) so the two SPMVs run in
+	// parallel without contention.
+	`WIRE_RAM_PORTS(q_val_x_ram),
+	`WIRE_RAM_PORTS(q_col_x_ram),
+	`WIRE_RAM_PORTS(q_rowp_x_ram),
+	`WIRE_RAM_PORTS(q_val_y_ram),
+	`WIRE_RAM_PORTS(q_col_y_ram),
+	`WIRE_RAM_PORTS(q_rowp_y_ram),
+	`WIRE_RAM_PORTS(cx_ram),
+	`WIRE_RAM_PORTS(cy_ram),
+	`WIRE_RAM_PORTS(x_ram),
+	`WIRE_RAM_PORTS(y_ram),
 
   // PIO ports
   .cg_ctrl_export                  (cg_ctrl_export),
@@ -690,5 +611,7 @@ Computer_System The_System (
   .cg_status_export                (cg_status_export)
 );
 
+`undef DECL_RAM_BUNDLE
+`undef WIRE_RAM_PORTS
 
 endmodule

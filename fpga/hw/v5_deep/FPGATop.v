@@ -368,14 +368,14 @@ assign HEX4 = ~hex5_hex4[ 6: 0];
 assign HEX5 = ~hex5_hex4[14: 8];
 
 //=======================================================
-//  CG solver <-> Avalon on-chip RAM interconnect (v5: 7 slaves)
+//  CG solver <-> Avalon on-chip RAM interconnect (7 slaves)
 //=======================================================
 
-// v5 splits the v4 single SRAM into seven dedicated Qsys on-chip RAM
-// slaves. Each slave's RTL-facing port has exactly one consumer
-// (no bus mux), so SPMV can fetch q_val[j] and q_col[j] in the same
-// cycle. Regenerate Computer_System with seven on-chip RAM IPs whose
-// FPGA-facing slave port names match the bundles below.
+// Seven dedicated Qsys on-chip RAM slaves, each with exactly one
+// RTL-facing consumer. SPMV fetches q_val[j] and q_col[j] in the same
+// cycle from independent slaves. Computer_System.qsys must expose
+// seven on-chip RAM IPs whose FPGA-facing slave port names match the
+// bundles below.
 `define DECL_RAM_BUNDLE(NAME) \
 	wire	[31: 0]	NAME``_address; \
 	wire				NAME``_chipselect; \

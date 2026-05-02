@@ -1,16 +1,7 @@
-// v5 CGCtrl. cx/cy live in dedicated M10K slaves (not in the central
-// RF); cx is read directly from cx_ram (or cy_ram via sel_y) during a
-// serialized S_VNS_R that walks stream_idx 0..n-1 and writes one
-// (r_reg, d_reg) element per cycle.
-//
-// x and y live in the x_vec_reg banked RF (AXPY_X writes them
-// p_lanes-wide every iter). S_LD_X_* and S_WB_WRITE address local
-// offset 0 in the dedicated x_ram / y_ram slaves; CGTop muxes between
-// the two via sel_y.
-//
-// Includes parallel x/r AXPY, fused S_VNS_R writing both r_reg and
-// d_reg in one cycle, and init_rr_reg fast-path (rr lands in rr_reg
-// the same cycle vdot finishes).
+// v6 CGCtrl: single-dimension CG solver. CGTop instantiates one
+// CGCtrl + CGDpath pair per dimension and wires it to that dimension's
+// cx/x slaves (or cy/y slaves). After S_WB_WRITE the FSM goes
+// unconditionally to S_CG_DONE.
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -39,23 +30,19 @@ module CGCtrl #(
   input  logic signed [p_acc_bits-1:0] rr_new,
   input  logic signed [p_acc_bits-1:0] rr_old,
 
-  // -- x/y load + writeback bus (CGDpath routes to x_ram or y_ram by sel_y).
+  // -- x/y load + writeback bus. CGTop wires this directly to either
+  // x_ram or y_ram depending on which CGCtrl/CGDpath pair this is.
   // Read-back into the X_VEC_REG RF in S_LD_X_CAPT goes through CGDpath's
   // WD_MEM mux, so we don't need ctrl_xy_rdata here.
   output logic [p_m10k_addr_bits-1:0] ctrl_xy_addr,
   output logic                        ctrl_xy_wr_en,
   output logic [31:0]                 ctrl_xy_wdata,
 
-  // -- VNS_R cx serial-read port (CGDpath routes to cx_ram or cy_ram).
-  // The capture is consumed by CGDpath's WD_VNS_SCALAR mux; CGCtrl
+  // -- VNS_R cx serial-read port. CGTop wires this to either cx_ram or
+  // cy_ram. Capture is consumed by CGDpath's WD_VNS_SCALAR mux; CGCtrl
   // only drives addr/rd_en.
   output logic [p_m10k_addr_bits-1:0] vns_cx_addr,
   output logic                        vns_cx_rd_en,
-
-  // sel_y is exposed so CGDpath/CGTop can route x_ram vs y_ram and
-  // cx_ram vs cy_ram. Held by CGCtrl across the whole second-dimension
-  // pass.
-  output logic                        sel_y,
 
   // RF read ports (p_lanes-wide). rd_a/rd_b are shared across all states;
   // rd_c/rd_d are only used in S_AXPY_XR_FEED to feed u_axpy_r.
@@ -102,10 +89,10 @@ module CGCtrl #(
   output logic                               latch_rr_new,
   output logic                               latch_alpha,
   output logic                               latch_beta,
-  // refresh_rr_reg copies rr_new_latched -> rr_reg (used after the
-  // VDOT_RR -> RUN_CHECK update). init_rr_reg bypasses rr_new_latched
-  // and writes rr_reg directly from vdot_result, used in S_VDOT_INIT_FEED
-  // so the initial rr lands in rr_reg the same cycle vdot finishes.
+  // refresh_rr_reg copies rr_new_latched -> rr_reg after RUN_CHECK.
+  // init_rr_reg bypasses rr_new_latched and writes rr_reg directly
+  // from vdot_result during S_VDOT_INIT_FEED so the initial rr lands
+  // in rr_reg the same cycle vdot finishes.
   output logic                               refresh_rr_reg,
   output logic                               init_rr_reg,
   output logic                               bump_iter,
@@ -223,11 +210,8 @@ module CGCtrl #(
   //----------------------------------------------------------------------
   // Auxiliary registers
   //----------------------------------------------------------------------
-  logic                               sel_y_reg;
   logic [$clog2(p_max_n+1)-1:0]       stream_idx;
   logic [$clog2(p_max_n+1)-1:0]       out_idx;
-
-  assign sel_y = sel_y_reg;
 
   //----------------------------------------------------------------------
   // Handshake wires. We use u_axpy_x's handshakes as canonical for FSM
@@ -410,12 +394,7 @@ module CGCtrl #(
       S_RUN_CHECK:       if (run_converged)                                   next_state = S_WB_WRITE;
                          else                                                 next_state = S_SPMV_RUN_FIRE;
 
-      S_WB_WRITE: begin
-        if (stream_idx == n_minus_1_reg) begin
-          if (sel_y_reg) next_state = S_CG_DONE;
-          else           next_state = S_LD_X_ADDR;
-        end
-      end
+      S_WB_WRITE:        if (stream_idx == n_minus_1_reg)                     next_state = S_CG_DONE;
 
       S_CG_DONE:         if (sw_done_ack)                                     next_state = S_IDLE;
       default:                                                                next_state = S_IDLE;
@@ -423,7 +402,7 @@ module CGCtrl #(
   end
 
   //----------------------------------------------------------------------
-  // sel_y, stream_idx, out_idx updates
+  // stream_idx, out_idx updates
   //----------------------------------------------------------------------
   function automatic logic [4:0] phase_of(state_t s);
     case (s)
@@ -449,15 +428,9 @@ module CGCtrl #(
 
   always_ff @(posedge clk) begin
     if (rst) begin
-      sel_y_reg  <= 1'b0;
       stream_idx <= '0;
       out_idx    <= '0;
     end else begin
-      if (state == S_PREP)
-        sel_y_reg <= 1'b0;
-      else if (state == S_WB_WRITE && stream_idx == n_minus_1_reg && !sel_y_reg)
-        sel_y_reg <= 1'b1;
-
       if (reset_counters)
         stream_idx <= '0;
       else begin
@@ -719,8 +692,6 @@ module CGCtrl #(
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_active_mask;
         ctrl_xy_wdata   = 32'($signed(rd_a_data_active));
-        if (stream_idx == n_minus_1_reg && !sel_y_reg)
-          reset_iter = 1'b1;
       end
 
       S_CG_DONE: sw_done = 1'b1;
