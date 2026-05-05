@@ -20,7 +20,7 @@ uv run run-placer fpga benchmarks/custom/parallel_chains_50
 Compare cg-total, cg-average, and placer total for all of these
 
 ```bash
-uv run run-placer verilated v6 benchmarks/custom/parallel_chains_50 --sweep
+uv run run-placer fpga benchmarks/custom/parallel_chains_50 --sweep
 uv run vis parallel_chains_50.json
 ```
 We can see what the placer is doing at each step using the above command.
@@ -39,20 +39,33 @@ from verilog.
 ```
 vim ../project1-group11/rtl/Demo2.v
 ```
-Write some verilog code!!!
+
 This uses infrastructure and a project Parker and Jeremy worked on for the
 ASICs class to parse and lower the Verilog to lef/def.
 
 ```
+cd ../project1-group11/asic/build-demo1/
+./run-flow
+cd -
+cp -r ../project1-group11/asic/build-demo1/03-summarize-results/ benchmarks/custom/demo1
+
+uv run run-placer fpga benchmarks/custom/demo1 --sweep
+
+uv run vis demo1.json
+  
+```
+
+Now you write some verilog code!!!
+Let's do a global placement of it.
+```
 cd ../project1-group11/asic/build-demo2/
 ./run-flow
 cd -
-cp -r ../project1-group11/asic/build-demo2/03-summarize-results/ benchmarks/custom
+cp -r ../project1-group11/asic/build-demo2/03-summarize-results/ benchmarks/custom/demo2
 
-uv run run-placer fpga benchmarks/custom/03-summarize-results/
-uv run run-placer verilated v6 benchmarks/custom/03-summarize-results/ --sweep
+uv run run-placer fpga benchmarks/custom/demo2 --sweep
 
-uv run vis 03-summarize-results.json
+uv run vis demo2.json
 ```
 
 That's it.
