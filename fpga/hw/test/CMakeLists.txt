@@ -1,7 +1,18 @@
 cmake_minimum_required(VERSION 3.14)
 project(CGTop_tb LANGUAGES CXX)
 
-set(DPI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/cg_golden_dpi.cpp")
+set(DPI_SRC    "${CMAKE_CURRENT_SOURCE_DIR}/cg_golden_dpi.cpp")
+set(DPI_SRC_V6 "${CMAKE_CURRENT_SOURCE_DIR}/cg_golden_dpi_v6.cpp")
+
+# Bitwidth knobs -- override at configure time to match wider verilator
+# builds, e.g. cmake .. -DINT_BITS=32 -DFRAC_BITS=32. Default 13/14
+# keeps the existing 16-case regression bit-exact.
+set(INT_BITS  "13" CACHE STRING "Fixed-point integer bits (sets CGTop_tb p_int_bits and CG_GOLDEN_TOTAL_BITS).")
+set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (sets CGTop_tb p_frac_bits and CG_GOLDEN_FRAC_BITS).")
+math(EXPR TB_TOTAL_BITS "${INT_BITS} + ${FRAC_BITS}")
+if(TB_TOTAL_BITS GREATER 64)
+    message(FATAL_ERROR "INT_BITS + FRAC_BITS (=${TB_TOTAL_BITS}) exceeds 64.")
+endif()
 
 # Build one Verilator testbench target for an RTL version directory.
 #
@@ -35,18 +46,28 @@ function(add_verilator_tb VERSION RTL_DIR TB)
     list(APPEND RTL_SRCS ${RTL_DIR}/CGEngine.v)
   endif()
 
+  # v6 is the only testbench with parameterized bitwidth + the wider
+  # int64 DPI; older tb's are locked to Q13.14 / int32 DPI.
+  set(WIDTH_GFLAGS "")
+  set(THIS_DPI ${DPI_SRC})
+  if(VERSION STREQUAL "v6")
+    list(APPEND WIDTH_GFLAGS -Gp_int_bits=${INT_BITS} -Gp_frac_bits=${FRAC_BITS})
+    set(THIS_DPI ${DPI_SRC_V6})
+  endif()
+
   add_custom_target(${TARGET} ALL
     COMMAND verilator --cc --exe --build --timing --main --trace
       -Wall -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSEDSIGNAL
       -Wno-UNUSEDPARAM -Wno-BLKSEQ -Wno-DECLFILENAME
       --top-module CGTop_tb
       --Mdir ${VDIR}
+      ${WIDTH_GFLAGS}
       ${CMAKE_CURRENT_SOURCE_DIR}/${TB}.v
       ${RTL_SRCS}
-      ${DPI_SRC}
-      -CFLAGS "-std=c++17 ${EXTRA_CFLAGS} -I${CMAKE_CURRENT_SOURCE_DIR}/../../../sw-baseline-c"
+      ${THIS_DPI}
+      -CFLAGS "-std=c++17 ${EXTRA_CFLAGS} -DCG_GOLDEN_FRAC_BITS=${FRAC_BITS} -DCG_GOLDEN_TOTAL_BITS=${TB_TOTAL_BITS} -I${CMAKE_CURRENT_SOURCE_DIR}/../../../sw-baseline-c"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Building ${TB} (${VERSION}) with Verilator"
+    COMMENT "Building ${TB} (${VERSION}) with Verilator (Q${INT_BITS}.${FRAC_BITS})"
   )
 
   add_custom_command(TARGET ${TARGET} POST_BUILD

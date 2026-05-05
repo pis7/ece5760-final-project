@@ -1,19 +1,26 @@
-// Bit-exact fixed-point CG golden model -- pure int32/int64 math, no I/O,
-// no placer or HW driver dependencies. Single source of truth for both:
+// Bit-exact fixed-point CG golden model -- int64 storage, __int128
+// multiplies, no I/O, no placer or HW driver dependencies. Single
+// source of truth for both:
 //   1. C++ placer (via cg_golden_driver.h wrapper)
 //   2. Verilator DPI testbench (via cg_golden_dpi.cpp wrapper)
 //
-// Arithmetic rules (matching Cyclone V hardware):
+// TOTAL_BITS defaults to 27 (the locked-down Cyclone V bitstream)
+// but may be overridden via CG_GOLDEN_TOTAL_BITS up to 64 to match a
+// wider verilated v6 build.
+//
+// Arithmetic rules (matching Cyclone V hardware at 27 bits):
 //   - Multiplies: 27×27 DSP blocks produce 54-bit products
 //   - Accumulators: use full-precision products (~40-bit after shift),
 //     accumulated in 64-bit (maps to LUT adders on FPGA)
 //   - Division:
-//       * default (matches v1, v2 hardware): LUT-based shift-subtract,
-//         accepts 64-bit inputs, produces 27-bit output.
-//       * with -DCG_GOLDEN_USE_NR (matches v3 hardware): Newton-Raphson
+//       * default (matches v1, v2 hardware AND any width >27): LUT-based
+//         shift-subtract, accepts 64-bit inputs, produces TOTAL_BITS output.
+//       * with -DCG_GOLDEN_USE_NR (matches v3..v5 hardware): Newton-Raphson
 //         reciprocal with 256x17 seed ROM and 2 NR iters; mirrors
-//         fpga/hw/v3/FpMath.v::FpDiv bit-exactly.
-//   - Storage: all vectors stored as 27-bit fixed-point
+//         fpga/hw/v3/FpMath.v::FpDiv bit-exactly. Only valid for
+//         TOTAL_BITS<=27; force-disabled for wider widths since the
+//         RTL generate switches to shift-subtract too.
+//   - Storage: all vectors stored as TOTAL_BITS fixed-point
 
 #pragma once
 
@@ -24,36 +31,50 @@
 #define CG_GOLDEN_FRAC_BITS 14
 #endif
 
+#ifndef CG_GOLDEN_TOTAL_BITS
+#define CG_GOLDEN_TOTAL_BITS 27
+#endif
+
+// NR path is hard-wired to 48-bit / Q1.16 internals; fall back to SS
+// whenever the active total width pushes past the NR design point so
+// the golden mirrors the RTL's generate-driven divider choice.
+#if defined(CG_GOLDEN_USE_NR) && (CG_GOLDEN_TOTAL_BITS > 27)
+#undef CG_GOLDEN_USE_NR
+#endif
+
 struct CGGolden {
-    static constexpr int TOTAL_BITS = 27;
+    static constexpr int TOTAL_BITS = CG_GOLDEN_TOTAL_BITS;
     static constexpr int FRAC_BITS  = CG_GOLDEN_FRAC_BITS;
-    static constexpr int FRAC_SCALE = 1 << FRAC_BITS;
-    static constexpr int32_t BIT_MASK =
-        static_cast<int32_t>((1LL << TOTAL_BITS) - 1);
-    static constexpr uint32_t SAT_MAG =
-        static_cast<uint32_t>((1u << (TOTAL_BITS - 1)) - 1);  // 0x3FFFFFF
+    static constexpr int64_t FRAC_SCALE = static_cast<int64_t>(1) << FRAC_BITS;
+    static constexpr int64_t BIT_MASK =
+        (TOTAL_BITS >= 64)
+            ? -1LL
+            : ((static_cast<int64_t>(1) << TOTAL_BITS) - 1);
+    static constexpr uint64_t SAT_MAG =
+        (static_cast<uint64_t>(1) << (TOTAL_BITS - 1)) - 1;
 
     // -- Fixed-point primitives -----------------------------------------------
 
-    static int32_t sign_extend(int32_t v) {
+    static int64_t sign_extend(int64_t v) {
         v &= BIT_MASK;
-        if (v & (1 << (TOTAL_BITS - 1)))
+        if (v & (static_cast<int64_t>(1) << (TOTAL_BITS - 1)))
             v |= ~BIT_MASK;
         return v;
     }
 
-    // 27-bit multiply, truncated to 27-bit output.
+    // TOTAL_BITS multiply, truncated to TOTAL_BITS output.
     // Use for scalar ops (alpha*d[i], beta*d[i]).
-    static int32_t fp_mul(int32_t a, int32_t b) {
-        int64_t full = static_cast<int64_t>(a) * static_cast<int64_t>(b);
-        return sign_extend(static_cast<int32_t>(full >> FRAC_BITS));
+    static int64_t fp_mul(int64_t a, int64_t b) {
+        __int128 full = static_cast<__int128>(a) * static_cast<__int128>(b);
+        return sign_extend(static_cast<int64_t>(full >> FRAC_BITS));
     }
 
-    // Full-precision multiply — returns ~40-bit shifted product.
-    // On FPGA: DSP gives 54-bit product; shift right by FRAC_BITS.
+    // Full-precision multiply — returns full shifted product.
+    // On FPGA: DSP gives 2*TOTAL_BITS product; shift right by FRAC_BITS.
     // Used inside dot products and SPMV where the accumulator is wide.
-    static int64_t fp_mul_wide(int32_t a, int32_t b) {
-        int64_t full = static_cast<int64_t>(a) * static_cast<int64_t>(b);
+    // Returns __int128 so 64-bit total widths don't truncate.
+    static __int128 fp_mul_wide(int64_t a, int64_t b) {
+        __int128 full = static_cast<__int128>(a) * static_cast<__int128>(b);
         return full >> FRAC_BITS;
     }
 
@@ -110,19 +131,18 @@ struct CGGolden {
 
     // Newton-Raphson reciprocal divide. Bit-exact with the v3 FpDiv RTL:
     // same LZC, same ROM, same NR truncations, same denorm shift, same
-    // saturation. Inputs treated as 48-bit signed; output is Q13.14.
-    static int32_t fp_div_wide(int64_t a, int64_t b) {
+    // saturation. Inputs treated as 48-bit signed; output is Q(I).(F)
+    // sign-extended into int64_t. Only compiled when TOTAL_BITS<=27.
+    static int64_t fp_div_wide(__int128 a, __int128 b) {
         bool sign_q = (a < 0) ^ (b < 0);
-        uint64_t abs_a = (a < 0) ? static_cast<uint64_t>(-a)
-                                 : static_cast<uint64_t>(a);
-        uint64_t abs_b = (b < 0) ? static_cast<uint64_t>(-b)
-                                 : static_cast<uint64_t>(b);
+        uint64_t abs_a = static_cast<uint64_t>(a < 0 ? -a : a);
+        uint64_t abs_b = static_cast<uint64_t>(b < 0 ? -b : b);
         abs_a &= (1ULL << 48) - 1;
         abs_b &= (1ULL << 48) - 1;
 
         // b == 0 → saturate to max-magnitude with sign of a.
         if (abs_b == 0) {
-            int32_t mag = static_cast<int32_t>(SAT_MAG);
+            int64_t mag = static_cast<int64_t>(SAT_MAG);
             return sign_extend(sign_q ? -mag : mag);
         }
 
@@ -157,50 +177,98 @@ struct CGGolden {
 
         // Saturate: any bit at position >= TOTAL_BITS-1 means overflow.
         bool overflow = (shifted_m3 >> (TOTAL_BITS - 1)) != 0;
-        uint32_t result_pos = overflow
+        uint64_t result_pos = overflow
             ? SAT_MAG
-            : (static_cast<uint32_t>(shifted_m3) & ((1u << (TOTAL_BITS - 1)) - 1));
+            : (static_cast<uint64_t>(shifted_m3) & SAT_MAG);
 
-        int32_t result = sign_q ? -static_cast<int32_t>(result_pos)
-                                :  static_cast<int32_t>(result_pos);
+        int64_t result = sign_q ? -static_cast<int64_t>(result_pos)
+                                :  static_cast<int64_t>(result_pos);
         return sign_extend(result);
     }
 #else
-    // Default: LUT-style integer shift-subtract divide. Matches v1 and v2
-    // FpDiv (sequential restoring divider in fpga/hw/v{1,2}/FpMath.v).
-    static int32_t fp_div_wide(int64_t a, int64_t b) {
+    // Default: integer shift-subtract divide. Mirrors fpga/hw/v2/FpMath.v
+    // (and the v6 FpDivSS branch picked when p_total_bits>27) bit-for-bit
+    // -- abs(a)/abs(b), pre-shifted by FRAC_BITS, then sign-applied.
+    //
+    // Implemented as a direct MSB-first shift-subtract loop instead of
+    // (a << FRAC_BITS) / b so we don't overflow __uint128_t at wide
+    // configurations (e.g. Q32.32 / N=50: accumulator hits ~102 bits and
+    // the pre-shifted dividend would be ~134 bits). The 128-bit running
+    // remainder is enough because abs_b is at most p_wide_bits ~=
+    // 2*TOTAL_BITS-FRAC_BITS+log2(N) bits, comfortably <128 for
+    // TOTAL_BITS<=64.
+    static int64_t fp_div_wide(__int128 a, __int128 b) {
         if (b == 0) return 0;
-        int64_t num = a << FRAC_BITS;
-        return sign_extend(static_cast<int32_t>(num / b));
+        bool sign_q = (a < 0) ^ (b < 0);
+        __uint128_t abs_a = a < 0 ? static_cast<__uint128_t>(-a)
+                                  : static_cast<__uint128_t>(a);
+        __uint128_t abs_b = b < 0 ? static_cast<__uint128_t>(-b)
+                                  : static_cast<__uint128_t>(b);
+
+        // Process the MSBs of abs_a first (matching the RTL's
+        // {abs_a, {FRAC_BITS{0}}} dividend layout), then FRAC_BITS of
+        // zeros. We only need the bottom TOTAL_BITS-1 bits of the
+        // quotient (matches `quotient[p_total_bits-2:0]` in v2 RTL), so
+        // tracking it in a uint64_t is sufficient.
+        __uint128_t rem  = 0;
+        uint64_t    quot = 0;
+        const int   total_iters = 128 + FRAC_BITS;
+        for (int k = total_iters - 1; k >= 0; --k) {
+            rem <<= 1;
+            // Bit (k - FRAC_BITS) of abs_a shifts into rem; lower
+            // FRAC_BITS positions are implicit zeros.
+            if (k >= FRAC_BITS) {
+                int bit_idx = k - FRAC_BITS;
+                if ((abs_a >> bit_idx) & __uint128_t(1)) rem |= 1;
+            }
+            if (rem >= abs_b) {
+                rem -= abs_b;
+                // Quotient bit position from the top: total_iters-1-iter,
+                // where iter goes 0..total_iters-1 as k goes high..low.
+                // That collapses to: this iteration sets bit k of the
+                // quotient. We only care about the bottom TOTAL_BITS-1
+                // bits so high-bit overflows are silently dropped (the
+                // RTL truncates with the same `quotient[p_total_bits-2:0]`
+                // slice).
+                if (k < TOTAL_BITS - 1) quot |= (uint64_t(1) << k);
+            }
+        }
+
+        int64_t result = sign_q ? -static_cast<int64_t>(quot)
+                                :  static_cast<int64_t>(quot);
+        return sign_extend(result);
     }
 #endif
 
-    // -- CSR format (int32_t values, already in fixed-point) ------------------
+    // -- CSR format (int64_t values, already in fixed-point) -----------------
 
     struct CSR {
         int n;
-        std::vector<int32_t> row_ptr;
-        std::vector<int32_t> col_idx;
-        std::vector<int32_t> vals;
+        std::vector<int32_t> row_ptr;   // indices, 32-bit
+        std::vector<int32_t> col_idx;   // indices, 32-bit
+        std::vector<int64_t> vals;      // fixed-point, sign-extended
     };
 
     // -- Linear algebra -------------------------------------------------------
 
-    // SPMV: wide accumulator with full-precision products, 27-bit output.
-    static void spmv(const CSR& A, const std::vector<int32_t>& x,
-                     std::vector<int32_t>& y, int n) {
+    // SPMV: wide accumulator with full-precision products, TOTAL_BITS output.
+    // Accumulator is __int128 so sums of n=p_max_n wide products at
+    // TOTAL_BITS=64 don't overflow before the final truncation.
+    static void spmv(const CSR& A, const std::vector<int64_t>& x,
+                     std::vector<int64_t>& y, int n) {
         for (int i = 0; i < n; ++i) {
-            int64_t s = 0;
+            __int128 s = 0;
             for (int j = A.row_ptr[i]; j < A.row_ptr[i + 1]; ++j)
                 s += fp_mul_wide(A.vals[j], x[A.col_idx[j]]);
-            y[i] = sign_extend(static_cast<int32_t>(s));
+            y[i] = sign_extend(static_cast<int64_t>(s));
         }
     }
 
-    // Dot product: wide accumulator with full-precision products, wide output.
-    static int64_t vec_dot(const std::vector<int32_t>& a,
-                           const std::vector<int32_t>& b, int n) {
-        int64_t s = 0;
+    // Dot product: wide accumulator with full-precision products. Returns
+    // __int128 so the divider can keep full precision when TOTAL_BITS=64.
+    static __int128 vec_dot(const std::vector<int64_t>& a,
+                            const std::vector<int64_t>& b, int n) {
+        __int128 s = 0;
         for (int i = 0; i < n; ++i)
             s += fp_mul_wide(a[i], b[i]);
         return s;
@@ -208,33 +276,33 @@ struct CGGolden {
 
     // -- CG solver ------------------------------------------------------------
 
-    static void cg_solve(const CSR& Q, const std::vector<int32_t>& cx,
-                         std::vector<int32_t>& x, int max_iter,
-                         int32_t eps_sq) {
+    static void cg_solve(const CSR& Q, const std::vector<int64_t>& cx,
+                         std::vector<int64_t>& x, int max_iter,
+                         int64_t eps_sq) {
         int n = Q.n;
-        std::vector<int32_t> Qx(n), r(n), d(n), q(n);
+        std::vector<int64_t> Qx(n), r(n), d(n), q(n);
         spmv(Q, x, Qx, n);
         for (int i = 0; i < n; ++i)
             r[i] = sign_extend(-(cx[i] + Qx[i]));
         d = r;
-        int64_t rr = vec_dot(r, r, n);
+        __int128 rr = vec_dot(r, r, n);
 
         for (int k = 0; k < max_iter; ++k) {
             spmv(Q, d, q, n);
-            int64_t dq = vec_dot(d, q, n);
+            __int128 dq = vec_dot(d, q, n);
             if (dq == 0) break;
-            int32_t alpha = fp_div_wide(rr, dq);
+            int64_t alpha = fp_div_wide(rr, dq);
 
             for (int i = 0; i < n; ++i) {
                 x[i] = sign_extend(x[i] + fp_mul(alpha, d[i]));
                 r[i] = sign_extend(r[i] - fp_mul(alpha, q[i]));
             }
 
-            int64_t rr_new = vec_dot(r, r, n);
+            __int128 rr_new = vec_dot(r, r, n);
             if (rr_new <= eps_sq) break;
             if (k > 0 && rr_new >= rr) break;
 
-            int32_t beta = fp_div_wide(rr_new, rr);
+            int64_t beta = fp_div_wide(rr_new, rr);
             for (int i = 0; i < n; ++i)
                 d[i] = sign_extend(r[i] + fp_mul(beta, d[i]));
             rr = rr_new;

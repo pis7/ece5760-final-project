@@ -6,8 +6,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Always use the FPGA CG driver (mmap over /dev/mem).
 option(STATIC_BUILD "Build with static linking" OFF)
-set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits)")
+set(INT_BITS  "13" CACHE STRING "Fixed-point integer bits (must match Verilog p_int_bits). Default 13.")
+set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (must match Verilog p_frac_bits). Default 14.")
 set(MAX_N "50" CACHE STRING "Maximum cell count the mmap driver supports (must match Verilog p_max_n)")
+
+# The FPGA bitstream is locked to 27-bit Q-format -- reject wider knobs
+# at configure time so users get a clear error instead of a silent
+# mismatch with the synthesized design.
+math(EXPR FPGA_TOTAL_BITS "${INT_BITS} + ${FRAC_BITS}")
+if(NOT FPGA_TOTAL_BITS EQUAL 27)
+    message(FATAL_ERROR
+        "INT_BITS + FRAC_BITS = ${FPGA_TOTAL_BITS} but the FPGA bitstream is "
+        "fixed at 27-bit. Wider widths are only supported in the verilated / "
+        "golden modes (sw-baseline-c).")
+endif()
 set(HW_FPGA_VERSION "v6" CACHE STRING "Which mmap driver to wire up: v4 (single SRAM), v5 (multi-block on-chip RAM), or v6 (parallel x/y solve datapaths)")
 set_property(CACHE HW_FPGA_VERSION PROPERTY STRINGS v4 v5 v6)
 

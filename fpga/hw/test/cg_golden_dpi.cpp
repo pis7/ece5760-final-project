@@ -1,5 +1,10 @@
-// DPI wrapper around shared CG golden model for Verilator testbench.
-// Unpacks the flat M10K memory layout, runs cg_solve, writes results back.
+// DPI wrapper around shared CG golden model for older Verilator
+// testbenches (v1..v5_deep). The testbench passes a 32-bit `int mem[]`
+// because their RTL is locked to Q13.14; the int64-based golden model
+// is bridged via narrow/widen conversions at the DPI boundary.
+//
+// v6 has its own DPI (cg_golden_dpi_v6.cpp) that takes longint mem[]
+// for the wider value words.
 
 #include <cstdint>
 #include <vector>
@@ -14,7 +19,8 @@ static void dpi_cg_solve_dim(int32_t* mp, int n, int max_n,
     int q_col_base  = max_n * max_n;
     int q_rowp_base = 2 * max_n * max_n;
 
-    // Unpack CSR
+    // Unpack CSR. Values widen 32->64 (sign-extension preserves the
+    // existing low-bit value).
     CGGolden::CSR Q;
     Q.n = n;
     Q.row_ptr.resize(n + 1);
@@ -26,22 +32,22 @@ static void dpi_cg_solve_dim(int32_t* mp, int n, int max_n,
     Q.vals.resize(nnz);
     for (int j = 0; j < nnz; ++j) {
         Q.col_idx[j] = mp[q_col_base + j];
-        Q.vals[j]    = mp[q_val_base + j];
+        Q.vals[j]    = static_cast<int64_t>(mp[q_val_base + j]);
     }
 
-    // Unpack cx and solution vector
-    std::vector<int32_t> cx(n), x(n);
+    // Unpack cx and solution vector (32 -> 64).
+    std::vector<int64_t> cx(n), x(n);
     for (int i = 0; i < n; ++i) {
-        cx[i] = mp[cx_base + i];
-        x[i]  = mp[sol_base + i];
+        cx[i] = static_cast<int64_t>(mp[cx_base + i]);
+        x[i]  = static_cast<int64_t>(mp[sol_base + i]);
     }
 
     // Run golden CG
-    CGGolden::cg_solve(Q, cx, x, max_iter, eps_sq);
+    CGGolden::cg_solve(Q, cx, x, max_iter, static_cast<int64_t>(eps_sq));
 
-    // Write solution back
+    // Write solution back (64 -> 32).
     for (int i = 0; i < n; ++i)
-        mp[sol_base + i] = x[i];
+        mp[sol_base + i] = static_cast<int32_t>(x[i]);
 }
 
 extern "C" void dpi_cg_solve(

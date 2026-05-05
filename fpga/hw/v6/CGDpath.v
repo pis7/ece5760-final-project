@@ -20,8 +20,11 @@ module CGDpath #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
-  parameter p_m10k_addr_bits   = 32
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
+  parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -29,8 +32,10 @@ module CGDpath #(
   input  logic [31:0] n,
 
   // -- SPMV-owned Q read ports (3 independent M10K slaves) ----------------
+  // q_val carries a fixed-point value (p_word_bits wide); q_col / q_rowp
+  // carry plain integer indices and stay 32-bit.
   output logic [p_m10k_addr_bits-1:0] spmv_q_val_addr,
-  input  logic [31:0]                 spmv_q_val_rdata,
+  input  logic [p_word_bits-1:0]      spmv_q_val_rdata,
   output logic [p_m10k_addr_bits-1:0] spmv_q_col_addr,
   input  logic [31:0]                 spmv_q_col_rdata,
   output logic [p_m10k_addr_bits-1:0] spmv_q_rowp_addr,
@@ -40,8 +45,8 @@ module CGDpath #(
   // CGTop wires CGCtrl's ctrl_xy_* outputs out to the engine's x_ram
   // (or y_ram) and feeds the readdata back as ctrl_xy_rdata for WD_MEM.
   // Same for cx_ram (or cy_ram) -> vns_cx_rdata for WD_VNS_SCALAR.
-  input  logic [31:0]                 ctrl_xy_rdata,
-  input  logic [31:0]                 vns_cx_rdata,
+  input  logic [p_word_bits-1:0]      ctrl_xy_rdata,
+  input  logic [p_word_bits-1:0]      vns_cx_rdata,
 
   // --- Addressed RF read ports (combinational) ---------------------------
   // 4 RFs: 0=d_reg, 1=r_reg, 2=x_vec_reg, 4=q_buf. rd_a/rd_b are
@@ -351,7 +356,8 @@ module CGDpath #(
     .p_total_bits      (p_total_bits),
     .p_acc_bits        (p_acc_bits),
     .p_max_n           (p_max_n),
-    .p_m10k_addr_bits  (p_m10k_addr_bits)
+    .p_m10k_addr_bits  (p_m10k_addr_bits),
+    .p_word_bits       (p_word_bits)
   ) u_spmv (
     .clk, .rst,
     .istream_val        (spmv_istream_val),
