@@ -56,19 +56,19 @@ public:
     std::vector<double> c_x, c_y, x_pos, y_pos;
     CSRMatrix Q;
 
-    CGHwDriver() {
+    CGHwDriver()
+        : q_val_x_mem_ (Q_VAL_DEPTH,  0),
+          q_col_x_mem_ (Q_COL_DEPTH,  0),
+          q_rowp_x_mem_(Q_ROWP_DEPTH, 0),
+          q_val_y_mem_ (Q_VAL_DEPTH,  0),
+          q_col_y_mem_ (Q_COL_DEPTH,  0),
+          q_rowp_y_mem_(Q_ROWP_DEPTH, 0),
+          cx_mem_      (VEC_DEPTH,    0),
+          cy_mem_      (VEC_DEPTH,    0),
+          x_mem_       (VEC_DEPTH,    0),
+          y_mem_       (VEC_DEPTH,    0) {
         ctx_ = new VerilatedContext;
         dut_ = new VCGTop(ctx_);
-        std::memset(q_val_x_mem_,  0, sizeof(q_val_x_mem_));
-        std::memset(q_col_x_mem_,  0, sizeof(q_col_x_mem_));
-        std::memset(q_rowp_x_mem_, 0, sizeof(q_rowp_x_mem_));
-        std::memset(q_val_y_mem_,  0, sizeof(q_val_y_mem_));
-        std::memset(q_col_y_mem_,  0, sizeof(q_col_y_mem_));
-        std::memset(q_rowp_y_mem_, 0, sizeof(q_rowp_y_mem_));
-        std::memset(cx_mem_,       0, sizeof(cx_mem_));
-        std::memset(cy_mem_,       0, sizeof(cy_mem_));
-        std::memset(x_mem_,        0, sizeof(x_mem_));
-        std::memset(y_mem_,        0, sizeof(y_mem_));
     }
 
     ~CGHwDriver() {
@@ -148,7 +148,7 @@ public:
         ++last_solve_cycles_;
         dut_->sw_go = 0;
 
-        int timeout = 1000000;
+        int timeout = 100000000;
         while (!dut_->sw_done && --timeout > 0) {
             tick();
             ++last_solve_cycles_;
@@ -169,18 +169,20 @@ public:
 private:
     VerilatedContext* ctx_;
     VCGTop* dut_;
-    // Value-carrying mirrors widen to int64_t to carry up to TOTAL_BITS=64;
-    // q_col / q_rowp are plain integer indices and stay 32-bit.
-    int64_t q_val_x_mem_  [Q_VAL_DEPTH];
-    int32_t q_col_x_mem_  [Q_COL_DEPTH];
-    int32_t q_rowp_x_mem_ [Q_ROWP_DEPTH];
-    int64_t q_val_y_mem_  [Q_VAL_DEPTH];
-    int32_t q_col_y_mem_  [Q_COL_DEPTH];
-    int32_t q_rowp_y_mem_ [Q_ROWP_DEPTH];
-    int64_t cx_mem_       [VEC_DEPTH];
-    int64_t cy_mem_       [VEC_DEPTH];
-    int64_t x_mem_        [VEC_DEPTH];
-    int64_t y_mem_        [VEC_DEPTH];
+    // Heap-allocated -- Q_VAL_DEPTH = MAX_N*MAX_N grows quadratically and
+    // would blow the stack for MAX_N >> 50. Value-carrying mirrors widen
+    // to int64_t to carry up to TOTAL_BITS=64; q_col / q_rowp are plain
+    // integer indices and stay 32-bit.
+    std::vector<int64_t> q_val_x_mem_;
+    std::vector<int32_t> q_col_x_mem_;
+    std::vector<int32_t> q_rowp_x_mem_;
+    std::vector<int64_t> q_val_y_mem_;
+    std::vector<int32_t> q_col_y_mem_;
+    std::vector<int32_t> q_rowp_y_mem_;
+    std::vector<int64_t> cx_mem_;
+    std::vector<int64_t> cy_mem_;
+    std::vector<int64_t> x_mem_;
+    std::vector<int64_t> y_mem_;
     uint64_t last_solve_cycles_ = 0;
 
     std::vector<int> q_diag_pos_;
@@ -302,16 +304,16 @@ private:
         uint64_t x_rd        = dut_->x_ram_readdata;
         uint64_t y_rd        = dut_->y_ram_readdata;
 
-        service_value_port(q_val_x_cs,  q_val_x_a,  q_val_x_wr,  q_val_x_wd,  q_val_x_mem_,  Q_VAL_DEPTH,  &q_val_x_rd);
-        service_index_port(q_col_x_cs,  q_col_x_a,  q_col_x_wr,  q_col_x_wd,  q_col_x_mem_,  Q_COL_DEPTH,  &q_col_x_rd);
-        service_index_port(q_rowp_x_cs, q_rowp_x_a, q_rowp_x_wr, q_rowp_x_wd, q_rowp_x_mem_, Q_ROWP_DEPTH, &q_rowp_x_rd);
-        service_value_port(q_val_y_cs,  q_val_y_a,  q_val_y_wr,  q_val_y_wd,  q_val_y_mem_,  Q_VAL_DEPTH,  &q_val_y_rd);
-        service_index_port(q_col_y_cs,  q_col_y_a,  q_col_y_wr,  q_col_y_wd,  q_col_y_mem_,  Q_COL_DEPTH,  &q_col_y_rd);
-        service_index_port(q_rowp_y_cs, q_rowp_y_a, q_rowp_y_wr, q_rowp_y_wd, q_rowp_y_mem_, Q_ROWP_DEPTH, &q_rowp_y_rd);
-        service_value_port(cx_cs,       cx_a,       cx_wr,       cx_wd,       cx_mem_,       VEC_DEPTH,    &cx_rd);
-        service_value_port(cy_cs,       cy_a,       cy_wr,       cy_wd,       cy_mem_,       VEC_DEPTH,    &cy_rd);
-        service_value_port(x_cs,        x_a,        x_wr,        x_wd,        x_mem_,        VEC_DEPTH,    &x_rd);
-        service_value_port(y_cs,        y_a,        y_wr,        y_wd,        y_mem_,        VEC_DEPTH,    &y_rd);
+        service_value_port(q_val_x_cs,  q_val_x_a,  q_val_x_wr,  q_val_x_wd,  q_val_x_mem_.data(),  Q_VAL_DEPTH,  &q_val_x_rd);
+        service_index_port(q_col_x_cs,  q_col_x_a,  q_col_x_wr,  q_col_x_wd,  q_col_x_mem_.data(),  Q_COL_DEPTH,  &q_col_x_rd);
+        service_index_port(q_rowp_x_cs, q_rowp_x_a, q_rowp_x_wr, q_rowp_x_wd, q_rowp_x_mem_.data(), Q_ROWP_DEPTH, &q_rowp_x_rd);
+        service_value_port(q_val_y_cs,  q_val_y_a,  q_val_y_wr,  q_val_y_wd,  q_val_y_mem_.data(),  Q_VAL_DEPTH,  &q_val_y_rd);
+        service_index_port(q_col_y_cs,  q_col_y_a,  q_col_y_wr,  q_col_y_wd,  q_col_y_mem_.data(),  Q_COL_DEPTH,  &q_col_y_rd);
+        service_index_port(q_rowp_y_cs, q_rowp_y_a, q_rowp_y_wr, q_rowp_y_wd, q_rowp_y_mem_.data(), Q_ROWP_DEPTH, &q_rowp_y_rd);
+        service_value_port(cx_cs,       cx_a,       cx_wr,       cx_wd,       cx_mem_.data(),       VEC_DEPTH,    &cx_rd);
+        service_value_port(cy_cs,       cy_a,       cy_wr,       cy_wd,       cy_mem_.data(),       VEC_DEPTH,    &cy_rd);
+        service_value_port(x_cs,        x_a,        x_wr,        x_wd,        x_mem_.data(),        VEC_DEPTH,    &x_rd);
+        service_value_port(y_cs,        y_a,        y_wr,        y_wd,        y_mem_.data(),        VEC_DEPTH,    &y_rd);
 
         dut_->q_val_x_ram_readdata  = q_val_x_rd;
         dut_->q_col_x_ram_readdata  = q_col_x_rd;
