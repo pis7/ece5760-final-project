@@ -42,46 +42,49 @@ Introduction
 
 Benchmarks
 --------------------------------------------------------------------------------
-(Colin, Parker runs commands)
+(Colin, Parker runs commands, either Parker/Jeremy explains script outputs)
 
-Central `run-placer` script parses lef/def files into intermediate json format,
-cross-compiles `placer.cpp` for HPS. SCP's `placer.cpp` and json to HPS and runs
-the program.
+The `run-placer` script starts with a set of LEF/DEF files and parses these
+into an intermediate JSON format (the LEF file is a library of macros, and the DEF 
+file gives an initial placement which we optimize). It then cross-compiles `placer.cpp`,
+SCPs it and the JSON to the HPS, and runs the program.
 
-When running in arm mode, we use the software-based CG solver. When in FPGA
-mode, we use a hardware connector shim for the CG solve which implements memory
-mapping and PIO communications. The same `placer.cpp` script is the same between
-the both, a define flag determines which version we use.
-
-Note that in the FPGA version, the Q, x, and c vectors all live in M10K memory
-to begin using `mmap` so we only copy values when we need to - this is a prime
-example of hardware-software codesign that we take advantage of.
+The script has a couple different operating modes. When running in arm mode, we use a
+fully software-based CG solver. 
 
 ```bash
 run-placer arm ../benchmarks/custom/parallel_chains_50 --sweep
 code parallel_chains_50-sweep.gif 
-
-run-placer fpga ../benchmarks/custom/parallel_chains_50 --sweep
-code parallel_chains_50-sweep.gif
-
-vis parallel_chains_50.json
+# PARKER / JEREMY: explain the visualization tool & output
 ```
 
-Compare cg-total, cg-average, and placer total for all of these We can see what
-the placer is doing at each step using the above command. 10-15x speedup for cg
-average, only about 10% improvement in total placer time since cg solve doesnt
-dominate for small designs.
+When in FPGA mode, we instead offload CG computation onto the FPGA. To create that
+interface, we have some PIOs plus memory mapping done using `mmap`. The Q, x, and c
+vectors all live in M10K memory and we really only copy values when we need to. This 
+actually uses the same `placer.cpp` script as the ARM mode, but the file will know 
+to run differently in eithe case becasue of a a define flag we set here.
 
-We did verilate a hardware version which can place the full iccad DMA benchmark
-with comparable placement quality to the software version. This proves that
-given more FPGA resources, our hardware would be able to place larger designs.
+```bash
+run-placer fpga ../benchmarks/custom/parallel_chains_50 --sweep
+code parallel_chains_50-sweep.gif
+# PARKER / JEREMY: explain command outputs
+
+vis parallel_chains_50.json
+# PARKER / JEREMY: explain command outputs, compare cg-total, cg-average and placer
+# total; highlight 10-15x speed-up for CG average, but only 10% improvement in total
+# placer time since CG solve does not dominate for small designs
+```
+
+While we are limited on FPGA resources, we did verilate a hardware version which 
+can place a full ICCAD benchmark with comparable placement quality to the software 
+version. This proves that given more FPGA resources, our hardware would be able to 
+place larger designs.
 
 TinyFlow Demo
 --------------------------------------------------------------------------------
 (Jeremy, Parker runs commands)
 
-These all started from lef/def files. The lef file is a library of macros and
-the def files is an inital placement which we optimize.
+These all started from lef/def files:
 
 ```bash
 code ../benchmarks/custom/parallel_chains_50/def/parallel_chains_50.lef
