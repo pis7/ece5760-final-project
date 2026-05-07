@@ -102,7 +102,9 @@
             <p>[TODO: why this project, what inspired it, key references.]</p>
 
             <h3>Background Math</h3>
-            <p>[TODO: intro to the analytical placement formulation.]</p>
+            <p>[TODO: intro to the analytical placement formulation and explain
+            CG solve and partitioning/anchoring. Use placer-overview.md file in
+            background-knowledge/]</p>
 
             <!-- Example MathJax block (delete if unused) -->
             <!--
@@ -124,7 +126,10 @@
             </pre>
             -->
 
-            <h4>[TODO: subtopic, e.g. Fixed-Point Q-format]</h4>
+            <h4>[TODO: subtopic, e.g. Partitioning and Anchoring]</h4>
+            <p>[TODO: prose.]</p>
+
+            <h4>[TODO: subtopic, e.g. Q CSR Format and why we need it]</h4>
             <p>[TODO: prose.]</p>
 
             <h3>Logical Structure</h3>
@@ -142,49 +147,86 @@
             <p>[TODO: what runs on HPS ARM vs FPGA fabric and why.]</p>
 
             <h3>Existing Designs</h3>
-            <p>[TODO: prior work in analytical placement / FPGA-accelerated linear solves.]</p>
+            <p>[TODO: prior work in analytical placement / FPGA-accelerated
+            linear solves]</p>
         </section>
 
         <!-- =============================================================
-             HARDWARE DESIGN (RTL)
+             SOFTWARE PLACERS
              ============================================================= -->
-        <section id="hardware-design">
-            <h2>Hardware Design</h2>
-            <p>[TODO: overview of the RTL accelerator architecture.]</p>
+        <section id="software-placers">
+            <h2>Software Placers</h2>
+            <p>[TODO: easier to start with software and derive hardware from
+            it]</p>
 
-            <h3>[TODO: e.g. CG Datapath]</h3>
-            <p>[TODO: prose.]</p>
+            <h3>LEF/DEF Parser</h3>
+            <p>[TODO: explain LEF/DEF with examples, how we parse into JSON
+            intermediate format]</p>
 
-            <h3>[TODO: e.g. Memory Architecture]</h3>
-            <p>[TODO: prose.]</p>
+            <h3>Design Visualizer</h3>
+            <p>[TODO: Tk visualization of JSON format and its features]</p>
 
-            <h3>[TODO: e.g. RTL Versions v1 -> v6]</h3>
-            <p>[TODO: progression of design iterations.]</p>
+            <h3>Python Placer</h3>
+            <p>[TODO: algorithm explanation]</p>
 
-            <h3>[TODO: e.g. HPS-FPGA Interface]</h3>
-            <p>[TODO: AXI / Avalon / mmap details.]</p>
+            <h3>C++ Placer</h3>
+            <p>[TODO: largely just a C++ port of Python, explain hooks for
+            hardware shims to discuss next]</p>
         </section>
 
         <!-- =============================================================
-             SOFTWARE DESIGN
+             HARDWARE PLACERS
              ============================================================= -->
-        <section id="software-design">
-            <h2>Software Design</h2>
+        <section id="hardware-placers">
+            <h2>Hardware Placers</h2>
+            <p>[TODO: incremental design narrative]</p>
 
-            <h3>[TODO: e.g. Repository Structure]</h3>
+            <h3>Python Functional-Level Model</h3>
             <p>[TODO: prose.]</p>
 
-            <h3>[TODO: e.g. LEF/DEF Parsing]</h3>
-            <p>[TODO: prose.]</p>
+            <h3>V1 RTL</h3>
+            <p>[TODO: RTL, not synthesizeable]</p>
 
-            <h3>[TODO: e.g. Q/c Construction]</h3>
-            <p>[TODO: prose.]</p>
+            <h3>V2 RTL</h3>
+            <p>[TODO: RTL and Qsys]</p>
 
-            <h3>[TODO: e.g. ARM mmap Driver]</h3>
-            <p>[TODO: prose.]</p>
+            <h3>V3 RTL</h3>
+            <p>[TODO: RTL and Qsys]</p>
 
-            <h3>[TODO: e.g. Overlap Reduction]</h3>
-            <p>[TODO: prose.]</p>
+            <h3>V4 RTL</h3>
+            <p>[TODO: RTL and Qsys]</p>
+
+            <h3>V5 RTL</h3>
+            <p>[TODO: RTL and Qsys]</p>
+
+            <h3>V6 RTL</h3>
+            <p>[TODO: RTL and Qsys]</p>
+
+            <h3>RTL Testing Framework</h3>
+            <p>[TODO: DPI to golden C++ model for reference values]</p>
+        </section>
+
+        <!-- =============================================================
+             SYSTEM INTEGRATION
+             ============================================================= -->
+        <section id="system-integration">
+            <h2>System Integration</h2>
+            <p>[TODO: intro]</p>
+
+            <h3>Running placer.cpp with golden C++ model</h3>
+            <p>[TODO: explain golden C++ model from RTL testing and header
+            shim]</p>
+
+            <h3>Running placer.cpp with Verilated model</h3>
+            <p>[TODO: explain how Verilated RTL is connected to placer.cpp
+            through header shim]</p>
+
+            <h3>Running placer.cpp on FPGA</h3>
+            <p>[TODO: explain FPGA fabric header shim and show Qsys diagram]</p>
+
+            <h3>Putting It All Together: run-placer</h3>
+            <p>[TODO: explain how run-placer links everything together, sweeps,
+            big diagram showing how everything links together]</p>
         </section>
 
         <!-- =============================================================
@@ -207,7 +249,8 @@
             <p>[TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]</p>
 
             <h3>[TODO: e.g. Performance / Speedup]</h3>
-            <p>[TODO: SW vs ARM vs FPGA timing on the benchmark suite.]</p>
+            <p>[TODO: SW vs ARM vs FPGA timing on the benchmark suite - explain
+            each benchmark]</p>
 
             <!--
             <figure>
@@ -217,10 +260,14 @@
             -->
 
             <h3>[TODO: e.g. Resource Utilization]</h3>
-            <p>[TODO: M10K, DSP, ALM usage on Cyclone V.]</p>
+            <p>[TODO: M10K, DSP, ALM usage on Cyclone V]</p>
 
             <h3>[TODO: e.g. Placement Quality]</h3>
-            <p>[TODO: HPWL / overlap metrics across benchmarks.]</p>
+            <p>[TODO: HPWL / overlap metrics across benchmarks]</p>
+
+            <h3>[TODO: Extension of Verilated design to large placement
+            problems]</h3>
+            <p>[TODO: prose]</p>
         </section>
 
         <!-- =============================================================
@@ -230,10 +277,10 @@
             <h2>Conclusions</h2>
 
             <h3>Meeting Expectations</h3>
-            <p>[TODO: did the project meet its goals; what would change next time.]</p>
+            <p>[TODO: did the project meet its goals; what would change next time]</p>
 
             <h3>IP Considerations</h3>
-            <p>[TODO: licenses, third-party code, originality of design.]</p>
+            <p>[TODO: licenses, third-party code, originality of design]</p>
         </section>
 
         <!-- =============================================================
@@ -260,10 +307,13 @@
             <p>[TODO: name -- responsibilities.]
                 <a href="[TODO]">GitHub</a> <a href="[TODO]">LinkedIn</a>
             </p>
+
+            <h3>AI Attributioin</h3>
+            <p>[TODO: explain use of Claude in depth]</a>.</p>
         </section>
 
         <footer>
-            <p>&copy; 2026 [TODO: author name(s)]</p>
+            <p>&copy; 2026 Parker Schless (pis7), Jeremy Ku-Benjet (jk2582), Colin Muessig (cjm369)</p>
         </footer>
     </div>
 </body>
