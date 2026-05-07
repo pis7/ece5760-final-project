@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECE 5760 Final Project: Analytical Placement via FPGA</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        section {
+            margin-bottom: 20px;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 10px 0;
+        }
+        .scaled-image-960 {
+            width: 960px;
+            height: auto;
+        }
+        .scaled-image-480 {
+            width: 480px;
+            height: auto;
+        }
+        .scaled-image-240 {
+            width: 240px;
+            height: auto;
+        }
+        pre, code {
+            text-align: left;
+            display: block;
+            margin-left: 0;
+        }
+        figcaption {
+            text-align: center;
+            font-style: italic;
+            color: #555;
+            margin-top: 5px;
+        }
+    </style>
+    <script id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ECE 5760 Spring 2026 Final Project: Analytical Placement via FPGA</h1>
+        </header>
+
+        <!-- =============================================================
+             INTRODUCTION
+             ============================================================= -->
+        <section id="introduction">
+            <h2>Project Introduction</h2>
+            <p><i>[TODO: one-sentence italicized summary of the project.]</i></p>
+
+            <!-- Hero figure (e.g., DE1-SoC running the placer, or a final placement plot) -->
+            <!--
+            <figure>
+                <img src="images/hero.png" alt="[TODO]" class="scaled-image-960">
+                <figcaption>[TODO: caption]</figcaption>
+            </figure>
+            -->
+
+            <p>[TODO: motivation paragraph -- what problem does analytical placement
+                solve, why accelerate it, why on the DE1-SoC.]</p>
+
+            <!-- Optional demo video embed -->
+            <!--
+            <iframe
+                width="960"
+                height="540"
+                src="https://www.youtube.com/embed/[TODO]"
+                frameborder="0"
+                allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen>
+            </iframe>
+            -->
+        </section>
+
+        <!-- =============================================================
+             HIGH-LEVEL DESIGN
+             ============================================================= -->
+        <section id="high-level-design">
+            <h2>High-Level Design</h2>
+
+            <h3>Rationale and Sources</h3>
+            <p>[TODO: why this project, what inspired it, key references.]</p>
+
+            <h3>Background Math</h3>
+            <p>[TODO: intro to the analytical placement formulation.]</p>
+
+            <!-- Example MathJax block (delete if unused) -->
+            <!--
+            <p>The placement problem reduces to solving the linear system
+                $$Q\,x = -c$$
+                where \(Q\) is the symmetric positive-definite Laplacian-like matrix
+                derived from the netlist and \(c\) encodes the fixed-pin contributions.</p>
+            -->
+
+            <h4>[TODO: subtopic, e.g. Conjugate Gradient]</h4>
+            <p>[TODO: prose.]</p>
+
+            <!-- Example code block (delete if unused) -->
+            <!--
+            <pre>
+                <code>
+// [TODO: snippet]
+                </code>
+            </pre>
+            -->
+
+            <h4>[TODO: subtopic, e.g. Fixed-Point Q-format]</h4>
+            <p>[TODO: prose.]</p>
+
+            <h3>Logical Structure</h3>
+            <p>[TODO: end-to-end flow -- LEF/DEF parse -> Q/c build -> CG solve ->
+                overlap reduction -> visualization.]</p>
+
+            <!--
+            <figure>
+                <img src="images/system_block.png" alt="[TODO]" class="scaled-image-960">
+                <figcaption>[TODO: caption]</figcaption>
+            </figure>
+            -->
+
+            <h3>Hardware/Software Tradeoffs</h3>
+            <p>[TODO: what runs on HPS ARM vs FPGA fabric and why.]</p>
+
+            <h3>Existing Designs</h3>
+            <p>[TODO: prior work in analytical placement / FPGA-accelerated linear solves.]</p>
+        </section>
+
+        <!-- =============================================================
+             HARDWARE DESIGN (RTL)
+             ============================================================= -->
+        <section id="hardware-design">
+            <h2>Hardware Design</h2>
+            <p>[TODO: overview of the RTL accelerator architecture.]</p>
+
+            <h3>[TODO: e.g. CG Datapath]</h3>
+            <p>[TODO: prose.]</p>
+
+            <h3>[TODO: e.g. Memory Architecture]</h3>
+            <p>[TODO: prose.]</p>
+
+            <h3>[TODO: e.g. RTL Versions v1 -> v6]</h3>
+            <p>[TODO: progression of design iterations.]</p>
+
+            <h3>[TODO: e.g. HPS-FPGA Interface]</h3>
+            <p>[TODO: AXI / Avalon / mmap details.]</p>
+        </section>
+
+        <!-- =============================================================
+             SOFTWARE DESIGN
+             ============================================================= -->
+        <section id="software-design">
+            <h2>Software Design</h2>
+
+            <h3>[TODO: e.g. Repository Structure]</h3>
+            <p>[TODO: prose.]</p>
+
+            <h3>[TODO: e.g. LEF/DEF Parsing]</h3>
+            <p>[TODO: prose.]</p>
+
+            <h3>[TODO: e.g. Q/c Construction]</h3>
+            <p>[TODO: prose.]</p>
+
+            <h3>[TODO: e.g. ARM mmap Driver]</h3>
+            <p>[TODO: prose.]</p>
+
+            <h3>[TODO: e.g. Overlap Reduction]</h3>
+            <p>[TODO: prose.]</p>
+        </section>
+
+        <!-- =============================================================
+             DESIGN CHALLENGES
+             ============================================================= -->
+        <section id="challenges">
+            <h2>Design Challenges</h2>
+            <p>[TODO: challenge 1 + how it was addressed.]</p>
+            <p>[TODO: challenge 2 + how it was addressed.]</p>
+            <p>[TODO: challenge 3 + how it was addressed.]</p>
+        </section>
+
+        <!-- =============================================================
+             RESULTS
+             ============================================================= -->
+        <section id="results">
+            <h2>Results of Design</h2>
+
+            <h3>[TODO: e.g. Functional Correctness]</h3>
+            <p>[TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]</p>
+
+            <h3>[TODO: e.g. Performance / Speedup]</h3>
+            <p>[TODO: SW vs ARM vs FPGA timing on the benchmark suite.]</p>
+
+            <!--
+            <figure>
+                <img src="images/speedup.png" alt="[TODO]" class="scaled-image-960">
+                <figcaption>[TODO: caption]</figcaption>
+            </figure>
+            -->
+
+            <h3>[TODO: e.g. Resource Utilization]</h3>
+            <p>[TODO: M10K, DSP, ALM usage on Cyclone V.]</p>
+
+            <h3>[TODO: e.g. Placement Quality]</h3>
+            <p>[TODO: HPWL / overlap metrics across benchmarks.]</p>
+        </section>
+
+        <!-- =============================================================
+             CONCLUSIONS
+             ============================================================= -->
+        <section id="conclusions">
+            <h2>Conclusions</h2>
+
+            <h3>Meeting Expectations</h3>
+            <p>[TODO: did the project meet its goals; what would change next time.]</p>
+
+            <h3>IP Considerations</h3>
+            <p>[TODO: licenses, third-party code, originality of design.]</p>
+        </section>
+
+        <!-- =============================================================
+             APPENDIX
+             ============================================================= -->
+        <section id="appendix">
+            <h2>Appendix</h2>
+
+            <h3>Code Repository</h3>
+            <p>Our repository is located <a href="https://github.com/pis7/ece5760-final-project">here</a>.</p>
+
+            <h3>Approvals</h3>
+            <p>The group approves this report for inclusion on the course website.</p>
+            <p>The group approves the video for inclusion on the course YouTube channel.</p>
+
+            <h3>References</h3>
+            <p><a href="[TODO]">[TODO: reference 1]</a></p>
+            <p><a href="[TODO]">[TODO: reference 2]</a></p>
+
+            <h3>Datasheets</h3>
+            <p><a href="[TODO]">[TODO: datasheet 1]</a></p>
+
+            <h3>Tasks for Each Team Member</h3>
+            <p>[TODO: name -- responsibilities.]
+                <a href="[TODO]">GitHub</a> <a href="[TODO]">LinkedIn</a>
+            </p>
+        </section>
+
+        <footer>
+            <p>&copy; 2026 [TODO: author name(s)]</p>
+        </footer>
+    </div>
+</body>
+</html>

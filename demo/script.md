@@ -87,7 +87,7 @@ TinyFlow Demo
 These all started from lef/def files:
 
 ```bash
-code ../benchmarks/custom/parallel_chains_50/def/parallel_chains_50.lef
+code ../benchmarks/custom/parallel_chains_50/lef/parallel_chains_50.lef
 code ../benchmarks/custom/parallel_chains_50/def/parallel_chains_50.def
 ```
 
@@ -110,7 +110,7 @@ code 01-tinyflow-synth/post-synth.v
 code 03-summarize-results/lef/Demo1.lef
 code 03-summarize-results/def/Demo1.def
 
-run-placer fpga ../../project1-group11/asic/build-demo1/03-summarize-results/03-summarize-results --sweep
+run-placer fpga ../../project1-group11/asic/build-demo1/03-summarize-results/ --sweep
 code Demo1-sweep.gif 
 vis Demo1-final.json
 ```
@@ -121,6 +121,7 @@ Let's do a global placement of it.
 (Prof writes code)
 
 ```bash
+code ../../rtl/Demo2.v
 pyhflow ../designs/demo2-lef-def-only.yml
 ./run-flow
 
