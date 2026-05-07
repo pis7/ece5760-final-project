@@ -9,8 +9,11 @@ module CGCtrl #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
-  parameter p_m10k_addr_bits   = 32
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
+  parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -36,7 +39,7 @@ module CGCtrl #(
   // WD_MEM mux, so we don't need ctrl_xy_rdata here.
   output logic [p_m10k_addr_bits-1:0] ctrl_xy_addr,
   output logic                        ctrl_xy_wr_en,
-  output logic [31:0]                 ctrl_xy_wdata,
+  output logic [p_word_bits-1:0]      ctrl_xy_wdata,
 
   // -- VNS_R cx serial-read port. CGTop wires this to either cx_ram or
   // cy_ram. Capture is consumed by CGDpath's WD_VNS_SCALAR mux; CGCtrl
@@ -259,7 +262,11 @@ module CGCtrl #(
   // Convergence test
   //----------------------------------------------------------------------
   logic signed [p_acc_bits-1:0] eps_sq_wide;
-  assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));
+  // eps_sq is the 32-bit ARM/PIO input (a small positive fixed-point
+  // threshold); sign-extending the whole word to p_acc_bits is safe at
+  // any p_total_bits in [2, 64] -- callers pre-clamp the value so the
+  // upper bits are zero.
+  assign eps_sq_wide = p_acc_bits'($signed(eps_sq));
 
   logic run_converged;
   assign run_converged = (iter >= max_iter)
@@ -691,7 +698,7 @@ module CGCtrl #(
         rd_a_sel        = RF_X_VEC_REG;
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_active_mask;
-        ctrl_xy_wdata   = 32'($signed(rd_a_data_active));
+        ctrl_xy_wdata   = p_word_bits'($signed(rd_a_data_active));
       end
 
       S_CG_DONE: sw_done = 1'b1;

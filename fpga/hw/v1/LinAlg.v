@@ -1,6 +1,5 @@
-// Sparse matrix-vector multiply (CSR format)
-// result = A * vec
-// Accumulates full-precision products in a wide accumulator,
+// Combinational sparse matrix-vector multiply (CSR format).
+// Accumulates full-precision products in a p_acc_bits-wide accumulator;
 // truncates only the final per-row sum to p_total_bits.
 
 module SPMV #(
@@ -25,8 +24,8 @@ module SPMV #(
   output logic signed [p_total_bits-1:0] result [p_max_n]
 );
 
-  // Full-precision multiply: returns ~40-bit shifted product (no truncation).
-  // On FPGA: DSP gives 54-bit product, shift right by frac_bits.
+  // Full-precision multiply: returns p_acc_bits-wide product shifted by
+  // p_frac_bits (no truncation).
   function automatic signed [p_acc_bits-1:0] fp_mul_wide(
     input signed [p_total_bits-1:0] a,
     input signed [p_total_bits-1:0] b
@@ -80,9 +79,8 @@ module VecNegSub #(
 
 endmodule
 
-// Vector dot product: result = sum(a[i] * b[i])
-// Uses wide accumulator with full-precision products.
-// Output is wide (p_acc_bits) — used for rr and dq.
+// Combinational vector dot product. Uses a p_acc_bits-wide accumulator
+// with full-precision products; output is wide (used for rr and dq).
 
 module VecDot #(
   parameter p_max_n      = 50,
@@ -98,7 +96,8 @@ module VecDot #(
   output logic signed [p_acc_bits-1:0]   result
 );
 
-  // Full-precision multiply: returns ~40-bit shifted product (no truncation).
+  // Full-precision multiply: returns p_acc_bits-wide product shifted by
+  // p_frac_bits (no truncation).
   function automatic signed [p_acc_bits-1:0] fp_mul_wide(
     input signed [p_total_bits-1:0] x,
     input signed [p_total_bits-1:0] y
@@ -118,9 +117,8 @@ module VecDot #(
 
 endmodule
 
-// AXPY: result[i] = a[i] +/- coef * b[i]
-// mode: 0 = add, 1 = sub
-// Uses truncated 27-bit multiply (coef is a scalar like alpha/beta).
+// Combinational AXPY: result[i] = a[i] +/- coef * b[i] (mode: 0=add, 1=sub).
+// Uses a truncated p_total_bits multiply (coef is a scalar like alpha/beta).
 
 module AXPY #(
   parameter p_max_n      = 50,
@@ -137,7 +135,7 @@ module AXPY #(
   output logic signed [p_total_bits-1:0] result [p_max_n]
 );
 
-  // Truncated 27-bit multiply (matches DSP block output width).
+  // Truncated p_total_bits multiply.
   function automatic signed [p_total_bits-1:0] fp_mul(
     input signed [p_total_bits-1:0] x,
     input signed [p_total_bits-1:0] y

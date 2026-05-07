@@ -1,17 +1,24 @@
-// Testbench for CGTop
-// - M10K RAM shim responds to CGTop's M10K interface
-// - DPI call to golden-reference C++ CG solver for comparison
+// Testbench for v1..v4 CGTop (single shared on-chip RAM topology).
+//
+// p_int_bits / p_frac_bits / p_max_n are top-level parameters,
+// overridable via -Gp_int_bits / -Gp_frac_bits / -Gp_max_n at simulator
+// build time. WORD_BITS up to 64 is supported; the FPGA build stays
+// 27-bit.
 
-module CGTop_tb;
+module CGTop_tb #(
+  parameter int p_int_bits  = 13,
+  parameter int p_frac_bits = 14,
+  parameter int p_max_n     = 50
+);
 
-  // Parameters (must match CGTop defaults)
-  localparam MAX_N       = 50;
-  localparam INT_BITS    = 13;
-  localparam FRAC_BITS   = 14;
+  localparam MAX_N       = p_max_n;
+  localparam INT_BITS    = p_int_bits;
+  localparam FRAC_BITS   = p_frac_bits;
+  localparam TOTAL_BITS  = INT_BITS + FRAC_BITS;
+  localparam WORD_BITS   = (TOTAL_BITS <= 32) ? 32 : 64;
   localparam ADDR_BITS   = 32;
-  localparam FRAC_SCALE  = 1 << FRAC_BITS;
+  localparam longint FRAC_SCALE = longint'(1) << FRAC_BITS;
 
-  // Memory layout
   localparam Q_VAL_BASE  = 0;
   localparam Q_COL_BASE  = MAX_N * MAX_N;
   localparam Q_ROWP_BASE = 2 * MAX_N * MAX_N;
@@ -21,24 +28,18 @@ module CGTop_tb;
   localparam Y_BASE      = 2 * MAX_N * MAX_N + 4 * MAX_N + 1;
   localparam TOTAL_WORDS = 2 * MAX_N * MAX_N + 5 * MAX_N + 1;
 
-  // DPI import
   import "DPI-C" function void dpi_cg_solve(
-    inout int mem [],
-    input int n,
-    input int max_n,
-    input int max_iter,
-    input int eps_sq
+    inout longint mem [],
+    input int     n,
+    input int     max_n,
+    input int     max_iter,
+    input longint eps_sq
   );
 
-  // Clock and reset
   logic clk, rst;
   initial clk = 0;
   always #5 clk = ~clk;
 
-  // Optional VCD dump. Pass `+vcd=<path>` on the simulator command line
-  // to enable; with no plusarg, no waveform is written. Verilator must
-  // be built with --trace (set in fpga/hw/test/CMakeLists.txt) for this
-  // to do anything.
   initial begin
     string vcd_file;
     if ($value$plusargs("dump-vcd=%s", vcd_file)) begin
@@ -48,27 +49,22 @@ module CGTop_tb;
     end
   end
 
-  // DUT signals
   logic        sw_go, sw_done, sw_done_ack;
   logic [31:0] max_iter, eps_sq, n;
 
   logic [ADDR_BITS-1:0] ram_address;
   logic                 ram_chipselect, ram_clken, ram_write;
-  logic [31:0]          ram_readdata, ram_writedata;
+  logic [WORD_BITS-1:0] ram_readdata, ram_writedata;
   logic [3:0]           ram_byteenable;
 
-  // M10K RAM shim
-  int m10k_mem [TOTAL_WORDS];
+  logic signed [WORD_BITS-1:0] m10k_mem [TOTAL_WORDS];
   always_ff @(posedge clk) begin
     if (ram_chipselect && ram_clken) begin
-      if (ram_write)
-        m10k_mem[ram_address] <= ram_writedata;
-      else
-        ram_readdata <= m10k_mem[ram_address];
+      if (ram_write) m10k_mem[ram_address] <= ram_writedata;
+      else           ram_readdata          <= m10k_mem[ram_address];
     end
   end
 
-  // DUT
   CGTop #(
     .p_max_n          (MAX_N),
     .p_int_bits       (INT_BITS),
@@ -92,33 +88,25 @@ module CGTop_tb;
     .n                      (n)
   );
 
-  // Golden reference memory (separate copy)
-  int golden_mem [TOTAL_WORDS];
+  longint golden_mem [TOTAL_WORDS];
 
-  // Test infrastructure
   int test_num;
   int fail_count;
 
-  // ----------------------------------------------------------------------
-  // Helpers
-  // ----------------------------------------------------------------------
-
-  // Fixed-point conversion
-  function int to_fp(real v);
-    return int'(v * real'(FRAC_SCALE));
+  function automatic longint to_fp(real v);
+    return longint'(v * real'(FRAC_SCALE));
   endfunction
 
-  // Load a CSR matrix + vectors into both m10k_mem and golden_mem.
   task automatic load_test(
-    input int t_n,
-    input int nnz,
-    input int row_ptr [],
-    input int col_idx [],
-    input int vals    [],
-    input int cx      [],
-    input int x0      [],
-    input int cy      [],
-    input int y0      []
+    input int     t_n,
+    input int     nnz,
+    input int     row_ptr [],
+    input int     col_idx [],
+    input longint vals    [],
+    input longint cx      [],
+    input longint x0      [],
+    input longint cy      [],
+    input longint y0      []
   );
     for (int i = 0; i < TOTAL_WORDS; i++) begin
       m10k_mem[i]   = 0;
@@ -146,7 +134,6 @@ module CGTop_tb;
     end
   endtask
 
-  // Drive go, wait for done (with 2M-cycle timeout), ack, and return to IDLE.
   task automatic run_dut();
     int timeout_cnt;
     @(posedge clk); sw_go = 1;
@@ -165,7 +152,6 @@ module CGTop_tb;
     repeat(2) @(posedge clk);
   endtask
 
-  // Compare a single solution vector (x or y) in DUT vs golden memory.
   task automatic check_vec(
     input int t_n,
     input int base,
@@ -173,13 +159,13 @@ module CGTop_tb;
     input string test_name,
     inout int mismatch
   );
-    int dut_v, gold_v;
+    longint dut_v, gold_v;
     real dut_real, gold_real;
     for (int i = 0; i < t_n; i++) begin
       dut_v  = m10k_mem  [base + i];
       gold_v = golden_mem[base + i];
-      dut_real  = $itor(dut_v)  / real'(FRAC_SCALE);
-      gold_real = $itor(gold_v) / real'(FRAC_SCALE);
+      dut_real  = real'(dut_v)  / real'(FRAC_SCALE);
+      gold_real = real'(gold_v) / real'(FRAC_SCALE);
       if (dut_v !== gold_v) begin
         $display("  FAIL %s: %s[%0d] dut=%.6f gold=%.6f (raw dut=%0d gold=%0d diff=%0d)",
                  test_name, vec_name, i, dut_real, gold_real, dut_v, gold_v, dut_v - gold_v);
@@ -190,7 +176,6 @@ module CGTop_tb;
     end
   endtask
 
-  // Compare DUT solution (m10k_mem) vs golden (golden_mem) for both dims.
   task automatic check_results(input int t_n, input string name);
     int mismatch;
     mismatch = 0;
@@ -204,18 +189,17 @@ module CGTop_tb;
     end
   endtask
 
-  // Run a full test: load matrix+vectors, invoke golden, drive DUT, compare.
   task automatic run_test(
-    input string name,
-    input int    t_n,
-    input int    nnz,
-    input int    row_ptr [],
-    input int    col_idx [],
-    input int    vals    [],
-    input int    cx      [],
-    input int    cy      [],
-    input int    x0      [],
-    input int    y0      []
+    input string  name,
+    input int     t_n,
+    input int     nnz,
+    input int     row_ptr [],
+    input int     col_idx [],
+    input longint vals    [],
+    input longint cx      [],
+    input longint cy      [],
+    input longint x0      [],
+    input longint y0      []
   );
     test_num++;
     n = t_n;
@@ -226,17 +210,14 @@ module CGTop_tb;
     check_results(t_n, name);
   endtask
 
-  // Build a uniform tridiagonal CSR: diag_fp on the main diagonal, off_fp on
-  // both first off-diagonals. Allocates and writes the row_ptr/col_idx/vals
-  // dynamic arrays and returns nnz.
   task automatic build_uniform_tridiag(
-    input  int t_n,
-    input  int diag_fp,
-    input  int off_fp,
-    output int row_ptr [],
-    output int col_idx [],
-    output int vals    [],
-    output int nnz
+    input  int     t_n,
+    input  longint diag_fp,
+    input  longint off_fp,
+    output int     row_ptr [],
+    output int     col_idx [],
+    output longint vals    [],
+    output int     nnz
   );
     int idx;
     nnz = 3 * t_n - 2;
@@ -257,10 +238,6 @@ module CGTop_tb;
     row_ptr[t_n] = idx;
   endtask
 
-  // -----------------------------------------------------------------------
-  // Test cases
-  // -----------------------------------------------------------------------
-
   initial begin
     rst         = 1;
     sw_go       = 0;
@@ -277,7 +254,6 @@ module CGTop_tb;
 
     `include "test_cases.v"
 
-    // Summary
     $display("");
     if (fail_count == 0)
       $display("ALL %0d TESTS PASSED", test_num);

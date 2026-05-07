@@ -10,8 +10,7 @@
 // {Kernel}Dpath (multiplier + accumulator + register state) pair,
 // wrapped in a {Kernel}_seq module for use by CGDpath.
 //
-// Semantics match fpga/hw/DotProduct.v and fpga/hw/AXPY.v, extended
-// with p_lanes-wide SIMD on VecDot and AXPY:
+// Per-kernel semantics:
 //   - VecDot / AXPY: one group of p_lanes (a,b) pairs per istream
 //     handshake. AXPY emits a group of p_lanes z outputs per ostream
 //     handshake. VecDot emits one final scalar after num_groups input
@@ -503,7 +502,7 @@ endmodule
 //======================================================================
 
 module SPMVCtrl #(
-  parameter p_m10k_addr_bits  = 32
+  parameter p_m10k_addr_bits = 32
 ) (
   input  logic                           clk,
   input  logic                           rst,
@@ -671,13 +670,18 @@ module SPMVDpath #(
   parameter p_frac_bits  = 14,
   parameter p_total_bits = p_int_bits + p_frac_bits,
   parameter p_acc_bits   = 48,
-  parameter p_max_n      = 50
+  parameter p_max_n      = 50,
+  // Memory data-port width: 32 keeps the FPGA build / Q13.14 testbench
+  // identical, 64 carries up to int+frac=64 in verilated mode. q_val
+  // (a fixed-point value) is what scales; q_col / q_rowp arrive on the
+  // same bus but only need their low 32 bits.
+  parameter p_word_bits  = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
 
   // From memory
-  input  logic [31:0]                    mem_rdata,
+  input  logic [p_word_bits-1:0]         mem_rdata,
 
   // From RF read port (combinational lookup of vec[col_reg])
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -743,22 +747,22 @@ module SPMVDpath #(
       if (d_begin_op) begin
         row_idx <= '0;
       end
-      if (d_capture_rplo) rp_lo <= mem_rdata;
-      if (d_capture_rphi) rp_hi <= mem_rdata;
-      // Non-first row prologue: previous row's rp_hi becomes new row's
-      // rp_lo, and the new rp_ptr[row+1] read from memory becomes the
-      // new rp_hi. NBA: rp_lo gets the pre-edge rp_hi (previous row's
-      // value) while rp_hi gets the new mem_rdata. Both fire same cycle.
+      // rp_lo/rp_hi/col_reg carry plain integer indices, so we only
+      // care about the low 32 bits of mem_rdata even when p_word_bits
+      // is 64. val_reg is the fixed-point Q value, sign-extended from
+      // the full word.
+      if (d_capture_rplo) rp_lo <= mem_rdata[31:0];
+      if (d_capture_rphi) rp_hi <= mem_rdata[31:0];
       if (d_capture_rphi_next) begin
         rp_lo <= rp_hi;
-        rp_hi <= mem_rdata;
+        rp_hi <= mem_rdata[31:0];
       end
       if (d_init_row) begin
         j_idx <= rp_lo;
         acc   <= '0;
       end
       if (d_capture_val) val_reg <= p_total_bits'($signed(mem_rdata));
-      if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata));
+      if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata[31:0]));
       if (d_acc_en) begin
         acc   <= acc + product_wide;
         j_idx <= j_idx + 1;
@@ -778,7 +782,8 @@ module SPMV_seq #(
   parameter p_total_bits      = p_int_bits + p_frac_bits,
   parameter p_acc_bits        = 48,
   parameter p_max_n           = 50,
-  parameter p_m10k_addr_bits  = 32
+  parameter p_m10k_addr_bits  = 32,
+  parameter p_word_bits       = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
@@ -799,10 +804,13 @@ module SPMV_seq #(
   input  logic [p_m10k_addr_bits-1:0]    q_col_base,
   input  logic [p_m10k_addr_bits-1:0]    q_rowp_base,
 
-  // Memory bus (SPMV drives addr; mem returns rdata 1 cycle later)
+  // Memory bus (SPMV drives addr; mem returns rdata 1 cycle later).
+  // mem_rdata is p_word_bits wide -- val reads use the full word
+  // (sign-extended into p_total_bits inside the dpath), col / rowp
+  // reads only need the low 32 bits.
   output logic [p_m10k_addr_bits-1:0]    mem_addr,
   output logic                           mem_rd_en,
-  input  logic [31:0]                    mem_rdata,
+  input  logic [p_word_bits-1:0]         mem_rdata,
 
   // RF read port for vec[col]
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -832,7 +840,8 @@ module SPMV_seq #(
     .p_frac_bits (p_frac_bits),
     .p_total_bits(p_total_bits),
     .p_acc_bits  (p_acc_bits),
-    .p_max_n     (p_max_n)
+    .p_max_n     (p_max_n),
+    .p_word_bits (p_word_bits)
   ) u_dpath (
     .clk, .rst,
     .mem_rdata,

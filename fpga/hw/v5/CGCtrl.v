@@ -1,16 +1,4 @@
-// v5 CGCtrl. cx/cy live in dedicated M10K slaves (not in the central
-// RF); cx is read directly from cx_ram (or cy_ram via sel_y) during a
-// serialized S_VNS_R that walks stream_idx 0..n-1 and writes one
-// (r_reg, d_reg) element per cycle.
-//
-// x and y live in the x_vec_reg banked RF (AXPY_X writes them
-// p_lanes-wide every iter). S_LD_X_* and S_WB_WRITE address local
-// offset 0 in the dedicated x_ram / y_ram slaves; CGTop muxes between
-// the two via sel_y.
-//
-// Includes parallel x/r AXPY, fused S_VNS_R writing both r_reg and
-// d_reg in one cycle, and init_rr_reg fast-path (rr lands in rr_reg
-// the same cycle vdot finishes).
+// v5 CGCtrl: sequential x-then-y CG solver. sel_y picks dimension.
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -18,8 +6,11 @@ module CGCtrl #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
-  parameter p_m10k_addr_bits   = 32
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
+  parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -44,7 +35,7 @@ module CGCtrl #(
   // WD_MEM mux, so we don't need ctrl_xy_rdata here.
   output logic [p_m10k_addr_bits-1:0] ctrl_xy_addr,
   output logic                        ctrl_xy_wr_en,
-  output logic [31:0]                 ctrl_xy_wdata,
+  output logic [p_word_bits-1:0]      ctrl_xy_wdata,
 
   // -- VNS_R cx serial-read port (CGDpath routes to cx_ram or cy_ram).
   // The capture is consumed by CGDpath's WD_VNS_SCALAR mux; CGCtrl
@@ -102,10 +93,10 @@ module CGCtrl #(
   output logic                               latch_rr_new,
   output logic                               latch_alpha,
   output logic                               latch_beta,
-  // refresh_rr_reg copies rr_new_latched -> rr_reg (used after the
-  // VDOT_RR -> RUN_CHECK update). init_rr_reg bypasses rr_new_latched
-  // and writes rr_reg directly from vdot_result, used in S_VDOT_INIT_FEED
-  // so the initial rr lands in rr_reg the same cycle vdot finishes.
+  // refresh_rr_reg copies rr_new_latched -> rr_reg after RUN_CHECK.
+  // init_rr_reg bypasses rr_new_latched and writes rr_reg directly
+  // from vdot_result during S_VDOT_INIT_FEED so the initial rr lands
+  // in rr_reg the same cycle vdot finishes.
   output logic                               refresh_rr_reg,
   output logic                               init_rr_reg,
   output logic                               bump_iter,
@@ -275,7 +266,11 @@ module CGCtrl #(
   // Convergence test
   //----------------------------------------------------------------------
   logic signed [p_acc_bits-1:0] eps_sq_wide;
-  assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));
+  // eps_sq is the 32-bit ARM/PIO input (a small positive fixed-point
+  // threshold); sign-extending the whole word to p_acc_bits is safe at
+  // any p_total_bits in [2, 64] -- callers pre-clamp the value so the
+  // upper bits are zero.
+  assign eps_sq_wide = p_acc_bits'($signed(eps_sq));
 
   logic run_converged;
   assign run_converged = (iter >= max_iter)
@@ -718,7 +713,7 @@ module CGCtrl #(
         rd_a_sel        = RF_X_VEC_REG;
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_active_mask;
-        ctrl_xy_wdata   = 32'($signed(rd_a_data_active));
+        ctrl_xy_wdata   = p_word_bits'($signed(rd_a_data_active));
         if (stream_idx == n_minus_1_reg && !sel_y_reg)
           reset_iter = 1'b1;
       end

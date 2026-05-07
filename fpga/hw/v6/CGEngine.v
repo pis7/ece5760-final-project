@@ -10,8 +10,11 @@ module CGEngine #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
-  parameter p_m10k_addr_bits   = 32
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
+  parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -28,12 +31,14 @@ module CGEngine #(
   input  logic [31:0] eps_sq,
 
   // -- Engine's Q-CSR Avalon slaves (read-only) --------------------------
+  // q_val carries fixed-point values (p_word_bits wide); q_col / q_rowp
+  // carry plain integer indices and stay 32-bit.
   output logic [p_m10k_addr_bits-1:0] q_val_ram_address,
   output logic                        q_val_ram_chipselect,
   output logic                        q_val_ram_clken,
   output logic                        q_val_ram_write,
-  input  logic [31:0]                 q_val_ram_readdata,
-  output logic [31:0]                 q_val_ram_writedata,
+  input  logic [p_word_bits-1:0]      q_val_ram_readdata,
+  output logic [p_word_bits-1:0]      q_val_ram_writedata,
   output logic [3:0]                  q_val_ram_byteenable,
 
   output logic [p_m10k_addr_bits-1:0] q_col_ram_address,
@@ -58,8 +63,8 @@ module CGEngine #(
   output logic                        c_ram_chipselect,
   output logic                        c_ram_clken,
   output logic                        c_ram_write,
-  input  logic [31:0]                 c_ram_readdata,
-  output logic [31:0]                 c_ram_writedata,
+  input  logic [p_word_bits-1:0]      c_ram_readdata,
+  output logic [p_word_bits-1:0]      c_ram_writedata,
   output logic [3:0]                  c_ram_byteenable,
 
   // -- Engine's xy Avalon slave (load + writeback) -----------------------
@@ -68,8 +73,8 @@ module CGEngine #(
   output logic                        xy_ram_chipselect,
   output logic                        xy_ram_clken,
   output logic                        xy_ram_write,
-  input  logic [31:0]                 xy_ram_readdata,
-  output logic [31:0]                 xy_ram_writedata,
+  input  logic [p_word_bits-1:0]      xy_ram_readdata,
+  output logic [p_word_bits-1:0]      xy_ram_writedata,
   output logic [3:0]                  xy_ram_byteenable
 );
 
@@ -83,7 +88,7 @@ module CGEngine #(
   // CGCtrl-driven xy load/writeback bus.
   logic [p_m10k_addr_bits-1:0] ctrl_xy_addr;
   logic                        ctrl_xy_wr_en;
-  logic [31:0]                 ctrl_xy_wdata;
+  logic [p_word_bits-1:0]      ctrl_xy_wdata;
 
   // CGCtrl S_VNS_R c-vector serial-read port.
   logic [p_m10k_addr_bits-1:0] vns_cx_addr;
@@ -149,7 +154,7 @@ module CGEngine #(
   assign q_val_ram_chipselect  = 1'b1;
   assign q_val_ram_clken       = 1'b1;
   assign q_val_ram_write       = 1'b0;
-  assign q_val_ram_writedata   = 32'd0;
+  assign q_val_ram_writedata   = '0;
   assign q_val_ram_byteenable  = 4'b1111;
 
   assign q_col_ram_chipselect  = 1'b1;
@@ -168,10 +173,10 @@ module CGEngine #(
   assign c_ram_chipselect      = 1'b1;
   assign c_ram_clken           = 1'b1;
   assign c_ram_write           = 1'b0;
-  assign c_ram_writedata       = 32'd0;
+  assign c_ram_writedata       = '0;
   assign c_ram_byteenable      = 4'b1111;
   assign c_ram_address         = vns_cx_addr;
-  logic [31:0] vns_cx_rdata;
+  logic [p_word_bits-1:0] vns_cx_rdata;
   assign vns_cx_rdata          = c_ram_readdata;
 
   // xy port: read + write.
@@ -181,7 +186,7 @@ module CGEngine #(
   assign xy_ram_address        = ctrl_xy_addr;
   assign xy_ram_write          = ctrl_xy_wr_en;
   assign xy_ram_writedata      = ctrl_xy_wdata;
-  logic [31:0] ctrl_xy_rdata;
+  logic [p_word_bits-1:0] ctrl_xy_rdata;
   assign ctrl_xy_rdata         = xy_ram_readdata;
 
   // SPMV ports: just plug through.
@@ -202,7 +207,8 @@ module CGEngine #(
     .p_frac_bits      (p_frac_bits),
     .p_total_bits     (p_total_bits),
     .p_acc_bits       (p_acc_bits),
-    .p_m10k_addr_bits (p_m10k_addr_bits)
+    .p_m10k_addr_bits (p_m10k_addr_bits),
+    .p_word_bits      (p_word_bits)
   ) ctrl (
     .clk,
     .rst,
@@ -248,7 +254,8 @@ module CGEngine #(
     .p_frac_bits        (p_frac_bits),
     .p_total_bits       (p_total_bits),
     .p_acc_bits         (p_acc_bits),
-    .p_m10k_addr_bits   (p_m10k_addr_bits)
+    .p_m10k_addr_bits   (p_m10k_addr_bits),
+    .p_word_bits        (p_word_bits)
   ) dpath (
     .clk,
     .rst,

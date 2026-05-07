@@ -21,8 +21,8 @@ module FpMul #(
 endmodule
 
 // Wide fixed-point signed multiply. Returns a p_wide_bits-wide result
-// with the frac-bits right shift applied. Used so products can
-// accumulate without early truncation.
+// with the frac-bits right shift applied so products can accumulate
+// without early truncation.
 
 module FpMulWide #(
   parameter p_int_bits   = 13,
@@ -44,14 +44,9 @@ module FpMulWide #(
 
 endmodule
 
-// Sequential fixed-point signed divide (restoring shift-subtract) with
-// val/rdy handshake
-// convention.
-//   istream_msg = {a, b}          sent together on one handshake
-//   ostream_msg = quotient        one handshake per completed divide
-// Internal latency: p_wide_bits + p_frac_bits iterations after the
-// input handshake, then a FINISH cycle, then DONE holds until the
-// output handshake.
+// Sequential restoring shift-subtract divider, val/rdy. Fully
+// parameterized -- handles any p_total_bits up to 64. Latency is
+// p_wide_bits + p_frac_bits iterations + 1 FINISH cycle.
 
 module FpDiv #(
   parameter p_int_bits   = 13,
@@ -62,13 +57,11 @@ module FpDiv #(
   input  logic                           clk,
   input  logic                           rst,
 
-  // istream (CGCtrl -> FpDiv)
   input  logic                           istream_val,
   output logic                           istream_rdy,
   input  logic signed [p_wide_bits-1:0]  istream_msg_a,
   input  logic signed [p_wide_bits-1:0]  istream_msg_b,
 
-  // ostream (FpDiv -> CGCtrl)
   output logic                           ostream_val,
   input  logic                           ostream_rdy,
   output logic signed [p_total_bits-1:0] ostream_msg_result
@@ -93,49 +86,37 @@ module FpDiv #(
   logic                   sign;
   logic [p_iter_w-1:0]    iter_cnt;
 
-  // Handshake wires
-  wire input_handshake;
-  wire output_handshake;
-  assign input_handshake  = istream_val && istream_rdy;
-  assign output_handshake = ostream_val && ostream_rdy;
+  wire input_handshake  = istream_val && istream_rdy;
+  wire output_handshake = ostream_val && ostream_rdy;
 
   assign istream_rdy = (state_reg == STATE_IDLE);
   assign ostream_val = (state_reg == STATE_DONE);
-
-  // -- State register --------------------------------------------------------
 
   always_ff @(posedge clk) begin
     if (rst) state_reg <= STATE_IDLE;
     else     state_reg <= state_next;
   end
 
-  // -- Next-state logic ------------------------------------------------------
-
   always_comb begin
     state_next = state_reg;
     case (state_reg)
-      STATE_IDLE:    if (input_handshake)                          state_next = STATE_RUN;
-      STATE_RUN:     if (iter_cnt == p_iter_w'(p_div_w))           state_next = STATE_FINISH;
-      STATE_FINISH:                                                state_next = STATE_DONE;
-      STATE_DONE:    if (output_handshake)                         state_next = STATE_IDLE;
+      STATE_IDLE:    if (input_handshake)                  state_next = STATE_RUN;
+      STATE_RUN:     if (iter_cnt == p_iter_w'(p_div_w))   state_next = STATE_FINISH;
+      STATE_FINISH:                                        state_next = STATE_DONE;
+      STATE_DONE:    if (output_handshake)                 state_next = STATE_IDLE;
       default: ;
     endcase
   end
-
-  // -- Trial shift-subtract combinational helpers ---------------------------
 
   logic [p_wide_bits:0] new_rem_pre;
   logic [p_wide_bits:0] trial_sub;
   assign new_rem_pre = {rem[p_wide_bits-1:0], dividend[p_div_w-1]};
   assign trial_sub   = new_rem_pre - {1'b0, divisor};
 
-  // Absolute value of operands latched on the input handshake
   logic [p_wide_bits-1:0] abs_a;
   logic [p_wide_bits-1:0] abs_b;
   assign abs_a = istream_msg_a[p_wide_bits-1] ? $unsigned(-istream_msg_a) : $unsigned(istream_msg_a);
   assign abs_b = istream_msg_b[p_wide_bits-1] ? $unsigned(-istream_msg_b) : $unsigned(istream_msg_b);
-
-  // -- Sequential state updates ---------------------------------------------
 
   always_ff @(posedge clk) begin
     if (rst) begin

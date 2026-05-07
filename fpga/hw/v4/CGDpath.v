@@ -1,16 +1,8 @@
 // v4 datapath -- two AXPY units run in lockstep during the merged
-// S_AXPY_XR_FEED state.
-//
-//   u_axpy_x: mode=ADD, reads via rd_a/rd_b, writes primary port
-//   u_axpy_r: mode=SUB, reads via rd_c/rd_d, writes secondary port
-//
-// rd_c/rd_d are two additional p_lanes-wide combinational read ports
-// (the working vectors are flop arrays so additional read aliases are
-// free). The secondary write port is hard-wired to draw from u_axpy_r's
-// z output and only fires when CGCtrl asserts we_sec; outside the
-// merged state CGCtrl drives we_sec to 0.
-//
-// DSP count: VecDot p_lanes + AXPY x p_lanes + AXPY r p_lanes + SPMV 1.
+// S_AXPY_XR_FEED state. u_axpy_x (ADD) reads rd_a/rd_b and writes the
+// primary port; u_axpy_r (SUB) reads rd_c/rd_d and writes the
+// secondary port. The secondary port is also reused by S_VNS_R for
+// the d_reg writeback, paired with the primary r_reg writeback.
 
 module CGDpath #(
   parameter p_lanes            = 4,
@@ -18,8 +10,11 @@ module CGDpath #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_q_val_base_addr  = 0,
   parameter p_q_col_base_addr  = p_max_n * p_max_n,
   parameter p_q_rowp_base_addr = 2 * p_max_n * p_max_n
@@ -31,12 +26,12 @@ module CGDpath #(
 
   output logic [p_m10k_addr_bits-1:0] mem_addr,
   output logic                        mem_wr_en,
-  output logic [31:0]                 mem_wdata,
-  input  logic [31:0]                 mem_rdata,
+  output logic [p_word_bits-1:0]      mem_wdata,
+  input  logic [p_word_bits-1:0]      mem_rdata,
 
   input  logic [p_m10k_addr_bits-1:0] ctrl_mem_addr,
   input  logic                        ctrl_mem_wr_en,
-  input  logic [31:0]                 ctrl_mem_wdata,
+  input  logic [p_word_bits-1:0]      ctrl_mem_wdata,
   input  logic                        ctrl_mem_src_spmv,
 
   // --- Addressed RF read ports (combinational) ---------------------------
@@ -372,7 +367,8 @@ module CGDpath #(
     .p_total_bits      (p_total_bits),
     .p_acc_bits        (p_acc_bits),
     .p_max_n           (p_max_n),
-    .p_m10k_addr_bits  (p_m10k_addr_bits)
+    .p_m10k_addr_bits  (p_m10k_addr_bits),
+    .p_word_bits       (p_word_bits)
   ) u_spmv (
     .clk, .rst,
     .istream_val        (spmv_istream_val),
@@ -422,7 +418,7 @@ module CGDpath #(
 
   assign mem_addr  = ctrl_mem_src_spmv ? spmv_mem_addr  : ctrl_mem_addr;
   assign mem_wr_en = ctrl_mem_src_spmv ? 1'b0           : ctrl_mem_wr_en;
-  assign mem_wdata = ctrl_mem_src_spmv ? 32'd0          : ctrl_mem_wdata;
+  assign mem_wdata = ctrl_mem_src_spmv ? '0             : ctrl_mem_wdata;
 
   //----------------------------------------------------------------------
   // RF write port (per-lane). With banking, lane k targets bank k:

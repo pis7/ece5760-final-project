@@ -11,18 +11,22 @@ Modes:
   python                 Baseline Python placer                                (run-only)
   sw                     Full software C++ placer (double precision)           (run + sweep)
   golden                 C++ placer with fixed-point golden CG                 (run + sweep)
+                         --int-bits I  Q-format int bits (default 13)
                          --frac-bits B Q-format frac bits (default 14;
-                                       int_bits = 27 - B; total stays 27)
+                                       I + B <= 64; >27 only supported in
+                                       golden / verilated modes)
+                         --max-n   N   Max cell count (default 50)
   verilated [v2|v3|v4|v5|v5_deep|v6] C++ placer with Verilator RTL CG (default v6) (run + sweep)
-                         --frac-bits B Q-format frac bits (default 14;
-                                       int_bits = 27 - B; total stays 27)
+                         --int-bits I  Q-format int bits (default 13)
+                         --frac-bits B Q-format frac bits (default 14)
+                         --max-n   N   Max cell count / Verilog p_max_n (default 50)
   arm                    Cross-compile SW placer, run on DE1-SoC ARM           (run + sweep)
   fpga      [v4|v5|v6]   Cross-compile FPGA-accelerated placer, run on DE1-SoC (run + sweep)
                          (default v6; selects the mmap driver to link in)
 
-All modes are limited to MAX_N=50 cells (the bitstream and the C++
-driver mirrors are sized for this). ICCAD benchmarks are not supported
-on any backend; use the custom/ benchmarks instead.
+Default MAX_N is 50 (the bitstream's M10K depth). golden / verilated
+modes accept --max-n to override; arm/fpga are locked. ICCAD benchmarks
+are not supported on any backend; use the custom/ benchmarks instead.
 
 Sweep mode runs the placer with max_outer_iter from 1..MAX_SWEEP_ITER,
 captures the per-iter final placement, renders one PNG frame per
@@ -217,20 +221,31 @@ _ARM_DEFINES = [
 ]
 
 
-def build_spec_for(mode: str, hw_version: str, frac_bits: int) -> BuildSpec:
-    """Map a mode (and hw_version / frac_bits for verilated|golden) to its
-    BuildSpec.
+def build_spec_for(
+    mode: str, hw_version: str, int_bits: int, frac_bits: int, max_n: int
+) -> BuildSpec:
+    """Map a mode (and hw_version / int_bits / frac_bits / max_n for
+    verilated|golden) to its BuildSpec.
 
-    Total bit width is fixed at 27 (the synthesized bitstream's format);
-    int_bits = 27 - frac_bits. The fpga path is locked to FRAC_BITS=14
-    too -- only verilated/golden honor the override.
+    Defaults are int=13, frac=14 (Q13.14, total 27 -- the FPGA bitstream's
+    format) and max_n=50 (the bitstream's M10K depth). Wider widths /
+    larger N are only honored by `golden` and `verilated`; other modes
+    either don't use fixed-point at all (sw) or are locked to the
+    synthesized bitstream (fpga). The CLI parser rejects these flags
+    outside golden/verilated, so by the time we get here forwarding the
+    knob to non-fixed-point modes is harmless.
     """
     if mode == "sw":
         return BuildSpec(_SW_C, [])
     if mode == "golden":
         return BuildSpec(
             _SW_C,
-            ["-DUSE_FP_GOLDEN=ON", f"-DFRAC_BITS={frac_bits}"],
+            [
+                "-DUSE_FP_GOLDEN=ON",
+                f"-DINT_BITS={int_bits}",
+                f"-DFRAC_BITS={frac_bits}",
+                f"-DMAX_N={max_n}",
+            ],
         )
     if mode == "verilated":
         return BuildSpec(
@@ -238,7 +253,9 @@ def build_spec_for(mode: str, hw_version: str, frac_bits: int) -> BuildSpec:
             [
                 "-DUSE_HW_CG=ON",
                 f"-DHW_CG_VERSION={hw_version}",
+                f"-DINT_BITS={int_bits}",
                 f"-DFRAC_BITS={frac_bits}",
+                f"-DMAX_N={max_n}",
             ],
         )
     if mode == "arm":
@@ -265,13 +282,19 @@ def cmake_build(spec: BuildSpec, repo_root: Path, build_dir: Path) -> None:
 # --- Local placer runs -------------------------------------------------------
 
 
-def run_local_placer_tee(json_file: Path, build_dir: Path) -> str:
-    """Run ./placer JSON, streaming output to the terminal AND capturing it.
+def run_local_placer_tee(
+    json_file: Path, build_dir: Path, max_iter: Optional[int] = None
+) -> str:
+    """Run ./placer JSON [max_iter], streaming output to the terminal AND
+    capturing it.
 
     Returns the combined stdout/stderr text. Raises SystemExit on failure.
     """
+    cmd: list[str] = ["./placer", str(json_file)]
+    if max_iter is not None:
+        cmd.append(str(max_iter))
     proc = subprocess.Popen(
-        ["./placer", str(json_file)],
+        cmd,
         cwd=build_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -607,9 +630,12 @@ class SlideshowMaker:
 class _Args:
     mode: str
     benchmark_path: Path
-    hw_version: str   # only used when mode == "verilated" / "fpga"
-    frac_bits: int    # only used when mode == "verilated" / "golden"
+    hw_version: str         # only used when mode == "verilated" / "fpga"
+    int_bits: int           # only used when mode == "verilated" / "golden"
+    frac_bits: int          # only used when mode == "verilated" / "golden"
+    max_n: int              # only used when mode == "verilated" / "golden"
     sweep: bool
+    max_iter: Optional[int]   # None = use placer's built-in default
 
 
 class RunPlacer:
@@ -644,7 +670,11 @@ class RunPlacer:
         if self.args.mode == "python":
             return  # No build needed for the Python baseline.
         spec: BuildSpec = build_spec_for(
-            self.args.mode, self.args.hw_version, self.args.frac_bits
+            self.args.mode,
+            self.args.hw_version,
+            self.args.int_bits,
+            self.args.frac_bits,
+            self.args.max_n,
         )
         step(self._build_banner())
         cmake_build(spec, self.repo_root, self.build_dir)
@@ -688,7 +718,9 @@ class RunPlacer:
             if self.args.mode == "verilated":
                 banner = f"Running placer ({self.args.hw_version})"
             step(banner)
-            output = run_local_placer_tee(self.json_file, self.build_dir)
+            output = run_local_placer_tee(
+                self.json_file, self.build_dir, self.args.max_iter
+            )
         elif self.shared_board is not None:
             output = self._run_remote_with_board(self.shared_board)
         else:
@@ -722,7 +754,10 @@ class RunPlacer:
             else ""
         )
         step(f"Running placer on board {note}".rstrip())
-        output = board.run(f"./placer {self.json_file.name}")
+        cmd = f"./placer {self.json_file.name}"
+        if self.args.max_iter is not None:
+            cmd += f" {self.args.max_iter}"
+        output = board.run(cmd)
         step("Copying results back")
         board.get(
             f"{self.design_name}-initial.json",
@@ -875,12 +910,14 @@ class RunPlacer:
         if m == "golden":
             return (
                 f"Building C++ placer (FP golden CG, "
-                f"frac_bits={self.args.frac_bits})"
+                f"Q{self.args.int_bits}.{self.args.frac_bits}, "
+                f"max_n={self.args.max_n})"
             )
         if m == "verilated":
             return (
                 f"Building C++ placer (Verilator CG, {self.args.hw_version}, "
-                f"frac_bits={self.args.frac_bits})"
+                f"Q{self.args.int_bits}.{self.args.frac_bits}, "
+                f"max_n={self.args.max_n})"
             )
         if m == "arm":
             return "Cross-compiling placer for ARM"
@@ -958,16 +995,44 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
                 "per-iter placements. Not supported with mode=python."
             ),
         )
+        p.add_argument(
+            "--max-iter",
+            type=int,
+            default=None,
+            help=(
+                "Cap the placer's outer iteration count "
+                "(passes argv[2] to ./placer). Default: placer's built-in "
+                "MAX_OUTER_ITER (16). Not combinable with --sweep."
+            ),
+        )
 
-    def _add_frac_bits(p: argparse.ArgumentParser) -> None:
+    def _add_q_format(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--int-bits",
+            type=int,
+            default=13,
+            help=(
+                "Q-format integer bits (default 13). int_bits + frac_bits "
+                "<= 64; widths above 27 only work with golden / verilated."
+            ),
+        )
         p.add_argument(
             "--frac-bits",
             type=int,
             default=14,
             help=(
-                "Q-format fractional bits (default 14). Total is fixed "
-                "at 27, so int_bits = 27 - frac_bits. Forwarded to "
+                "Q-format fractional bits (default 14). Forwarded to "
                 "verilator as -Gp_frac_bits."
+            ),
+        )
+        p.add_argument(
+            "--max-n",
+            type=int,
+            default=50,
+            help=(
+                "Max cell count (default 50). Sets Verilog p_max_n and "
+                "the C++ driver's MAX_N. Honored by golden / verilated; "
+                "rejected for sw / arm / fpga (the bitstream is locked)."
             ),
         )
 
@@ -996,7 +1061,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
         help="Path to a benchmark directory (containing lef/ and def/).",
     )
     sp_golden.set_defaults(hw_version="v6")  # unused; keeps the attr defined
-    _add_frac_bits(sp_golden)
+    _add_q_format(sp_golden)
     _add_common(sp_golden)
 
     sp_ver = sub.add_parser(
@@ -1015,7 +1080,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
         type=Path,
         help="Path to a benchmark directory (containing lef/ and def/).",
     )
-    _add_frac_bits(sp_ver)
+    _add_q_format(sp_ver)
     _add_common(sp_ver)
 
     sp_fpga = sub.add_parser(
@@ -1049,20 +1114,50 @@ def _parse_args(argv: Optional[list[str]] = None) -> _Args:
     if is_multi and args.mode == "python":
         parser.error("multi-benchmark mode does not support mode=python")
 
+    int_bits: int  = getattr(args, "int_bits",  13)
     frac_bits: int = getattr(args, "frac_bits", 14)
-    # int_bits = 27 - frac_bits must leave at least 1 bit on each side.
-    if not (1 <= frac_bits <= 26):
+    max_n: int     = getattr(args, "max_n",     50)
+    if int_bits < 1 or frac_bits < 1:
+        parser.error("--int-bits and --frac-bits must each be >= 1")
+    if int_bits + frac_bits > 64:
         parser.error(
-            "--frac-bits must be in [1, 26] "
-            "(total bits fixed at 27, int_bits = 27 - frac_bits)"
+            f"--int-bits ({int_bits}) + --frac-bits ({frac_bits}) "
+            "exceeds 64 -- the verilator driver caps fixed-point storage "
+            "at int64_t."
         )
+    if int_bits + frac_bits != 27 and args.mode not in ("golden", "verilated"):
+        parser.error(
+            f"--int-bits + --frac-bits = {int_bits + frac_bits} but only "
+            "golden / verilated honor widths different from 27 (sw uses "
+            "doubles; arm/fpga are locked to the 27-bit bitstream)."
+        )
+    if max_n < 1:
+        parser.error("--max-n must be >= 1")
+    if max_n != 50 and args.mode not in ("golden", "verilated"):
+        parser.error(
+            f"--max-n = {max_n} but only golden / verilated honor a "
+            "non-default max-n (sw uses dynamic vectors; arm/fpga are "
+            "locked to the bitstream's M10K depth of 50)."
+        )
+
+    max_iter: Optional[int] = getattr(args, "max_iter", None)
+    if max_iter is not None:
+        if max_iter < 1:
+            parser.error("--max-iter must be >= 1")
+        if args.mode == "python":
+            parser.error("--max-iter is not supported with mode=python")
+        if args.sweep:
+            parser.error("--max-iter and --sweep are mutually exclusive")
 
     return _Args(
         mode=args.mode,
         benchmark_path=args.benchmark_path,
         hw_version=args.hw_version,
+        int_bits=int_bits,
         frac_bits=frac_bits,
+        max_n=max_n,
         sweep=args.sweep,
+        max_iter=max_iter,
     )
 
 

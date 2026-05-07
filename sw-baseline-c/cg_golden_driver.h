@@ -13,7 +13,11 @@
 
 class CGHwDriver {
 public:
+#ifndef HW_MAX_N
     static constexpr int MAX_N = 50;
+#else
+    static constexpr int MAX_N = HW_MAX_N;
+#endif
 
     // Public mirrors -- canonical storage for the placer's working
     // state. Same accessor surface as the verilator / mmap drivers so
@@ -59,10 +63,10 @@ public:
     void solve(int max_iter, double eps) {
         int n = Q.n;
         assert(n <= MAX_N);
-        int32_t eps_sq = CGGolden::sign_extend(
-            static_cast<int32_t>(eps * eps * CGGolden::FRAC_SCALE));
+        int64_t eps_sq = CGGolden::sign_extend(
+            static_cast<int64_t>(eps * eps * CGGolden::FRAC_SCALE));
 
-        // Build int32_t CSR from the placer-set double CSR
+        // Build int64_t CSR from the placer-set double CSR
         CGGolden::CSR Q_fp;
         Q_fp.n = n;
         Q_fp.row_ptr = Q.row_ptr;
@@ -78,12 +82,12 @@ public:
 private:
     std::vector<int> q_diag_pos_;
 
-    static int32_t d2fp(double v) {
+    static int64_t d2fp(double v) {
         return CGGolden::sign_extend(
-            static_cast<int32_t>(v * CGGolden::FRAC_SCALE));
+            static_cast<int64_t>(v * CGGolden::FRAC_SCALE));
     }
 
-    static double fp2d(int32_t v) {
+    static double fp2d(int64_t v) {
         return static_cast<double>(CGGolden::sign_extend(v)) /
                CGGolden::FRAC_SCALE;
     }
@@ -91,8 +95,8 @@ private:
     static void solve_dim(const CGGolden::CSR& Q_fp,
                           const std::vector<double>& c_d,
                           std::vector<double>& x_d,
-                          int n, int max_iter, int32_t eps_sq) {
-        std::vector<int32_t> c_fp(n), x_fp(n);
+                          int n, int max_iter, int64_t eps_sq) {
+        std::vector<int64_t> c_fp(n), x_fp(n);
         for (int i = 0; i < n; ++i) {
             c_fp[i] = d2fp(c_d[i]);
             x_fp[i] = d2fp(x_d[i]);

@@ -653,13 +653,17 @@ module SPMVDpath #(
   parameter p_frac_bits  = 14,
   parameter p_total_bits = p_int_bits + p_frac_bits,
   parameter p_acc_bits   = 48,
-  parameter p_max_n      = 50
+  parameter p_max_n      = 50,
+  // 32 keeps the FPGA / Q13.14 path identical; 64 carries values up to
+  // p_total_bits=64 in verilated mode.
+  parameter p_word_bits  = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
 
-  // From memory
-  input  logic [31:0]                    mem_rdata,
+  // From memory. q_val occupies the low p_total_bits of the wider bus;
+  // q_col / q_rowp are plain integer indices that fit in 32 bits.
+  input  logic [p_word_bits-1:0]         mem_rdata,
 
   // From RF read port (combinational lookup of vec[col_reg])
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -724,14 +728,14 @@ module SPMVDpath #(
       if (d_begin_op) begin
         row_idx <= '0;
       end
-      if (d_capture_rplo) rp_lo <= mem_rdata;
-      if (d_capture_rphi) rp_hi <= mem_rdata;
+      if (d_capture_rplo) rp_lo <= mem_rdata[31:0];
+      if (d_capture_rphi) rp_hi <= mem_rdata[31:0];
       if (d_init_row) begin
         j_idx <= rp_lo;
         acc   <= '0;
       end
       if (d_capture_val) val_reg <= p_total_bits'($signed(mem_rdata));
-      if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata));
+      if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata[31:0]));
       if (d_acc_en) begin
         acc   <= acc + product_wide;
         j_idx <= j_idx + 1;
@@ -751,7 +755,8 @@ module SPMV_seq #(
   parameter p_total_bits      = p_int_bits + p_frac_bits,
   parameter p_acc_bits        = 48,
   parameter p_max_n           = 50,
-  parameter p_m10k_addr_bits  = 32
+  parameter p_m10k_addr_bits  = 32,
+  parameter p_word_bits       = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
@@ -772,10 +777,12 @@ module SPMV_seq #(
   input  logic [p_m10k_addr_bits-1:0]    q_col_base,
   input  logic [p_m10k_addr_bits-1:0]    q_rowp_base,
 
-  // Memory bus (SPMV drives addr; mem returns rdata 1 cycle later)
+  // Memory bus (SPMV drives addr; mem returns rdata 1 cycle later).
+  // mem_rdata carries q_val as fixed-point in low p_total_bits, or
+  // q_col / q_rowp as 32-bit integers in low 32 bits.
   output logic [p_m10k_addr_bits-1:0]    mem_addr,
   output logic                           mem_rd_en,
-  input  logic [31:0]                    mem_rdata,
+  input  logic [p_word_bits-1:0]         mem_rdata,
 
   // RF read port for vec[col]
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -805,7 +812,8 @@ module SPMV_seq #(
     .p_frac_bits (p_frac_bits),
     .p_total_bits(p_total_bits),
     .p_acc_bits  (p_acc_bits),
-    .p_max_n     (p_max_n)
+    .p_max_n     (p_max_n),
+    .p_word_bits (p_word_bits)
   ) u_dpath (
     .clk, .rst,
     .mem_rdata,

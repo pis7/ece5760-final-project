@@ -44,8 +44,59 @@ module FpMulWide #(
 
 endmodule
 
+// FpDiv wrapper: picks Newton-Raphson for p_total_bits <= 27 and a
+// restoring shift-subtract divider for wider widths. The NR module's
+// internals are hard-coded to 48-bit operands and 256x17 Q1.16 ROM, so
+// it can't be cleanly stretched past 27-bit -- the SS module (ported
+// from v2) is fully parameterized and handles arbitrary widths at the
+// cost of (p_wide_bits + p_frac_bits) iteration latency.
+//
+// CGTop/CGEngine wire p_wide_bits = p_acc_bits, and CGDpath derives
+// p_acc_bits = 48 when p_total_bits <= 27 so the NR branch stays
+// lossless.
+
+module FpDiv #(
+  parameter p_int_bits   = 13,
+  parameter p_frac_bits  = 14,
+  parameter p_total_bits = p_int_bits + p_frac_bits,
+  parameter p_wide_bits  = 48
+) (
+  input  logic                           clk,
+  input  logic                           rst,
+
+  input  logic                           istream_val,
+  output logic                           istream_rdy,
+  input  logic signed [p_wide_bits-1:0]  istream_msg_a,
+  input  logic signed [p_wide_bits-1:0]  istream_msg_b,
+
+  output logic                           ostream_val,
+  input  logic                           ostream_rdy,
+  output logic signed [p_total_bits-1:0] ostream_msg_result
+);
+
+  generate
+    if (p_total_bits <= 27) begin : g_div_nr
+      FpDivNR #(
+        .p_int_bits  (p_int_bits),
+        .p_frac_bits (p_frac_bits),
+        .p_total_bits(p_total_bits),
+        .p_wide_bits (p_wide_bits)
+      ) u_div (.*);
+    end else begin : g_div_ss
+      FpDivSS #(
+        .p_int_bits  (p_int_bits),
+        .p_frac_bits (p_frac_bits),
+        .p_total_bits(p_total_bits),
+        .p_wide_bits (p_wide_bits)
+      ) u_div (.*);
+    end
+  endgenerate
+
+endmodule
+
 // Newton-Raphson reciprocal divider. val/rdy interface; ~10 cycles per
-// divide.
+// divide. Hard-coded to 48-bit operands and Q1.16 normalization ROM --
+// only correct for p_total_bits <= 27 with p_wide_bits == 48.
 //
 // Algorithm (per-divide, ~10 internal cycles):
 //   1. Sign extract: sign = sign(a) ^ sign(b). Take |a|, |b|.
@@ -86,7 +137,7 @@ endmodule
 //   - Quotient overflow (result needs more than p_total_bits-1 bits):
 //     saturate to (1 << (p_total_bits-1)) - 1, then apply sign.
 
-module FpDiv #(
+module FpDivNR #(
   parameter p_int_bits   = 13,
   parameter p_frac_bits  = 14,
   parameter p_total_bits = p_int_bits + p_frac_bits,
@@ -551,7 +602,7 @@ module FpDiv #(
   end
 
   // -- Datapath registers -----------------------------------------------------
-  always_ff @(posedge clk) begin
+  always_ff @(posedge clk) begin // FpDivNR
     if (rst) begin
       abs_a              <= '0;
       abs_b              <= '0;
@@ -611,6 +662,148 @@ module FpDiv #(
         end
         S_QFINISH: begin
           ostream_msg_result <= sign_q ? result_neg : result_pos;
+        end
+        default: ;
+      endcase
+    end
+  end
+
+endmodule
+
+// Sequential fixed-point signed divide (restoring shift-subtract) with
+// val/rdy handshake. Ported from fpga/hw/v2/FpMath.v -- fully
+// parameterized on p_int_bits/p_frac_bits/p_total_bits/p_wide_bits, so
+// this is what the FpDiv wrapper picks when p_total_bits > 27 (where
+// the NR module's hard-coded 48-bit/Q1.16 internals can't be stretched).
+//   istream_msg = {a, b}          sent together on one handshake
+//   ostream_msg = quotient        one handshake per completed divide
+// Internal latency: p_wide_bits + p_frac_bits iterations after the
+// input handshake, then a FINISH cycle, then DONE holds until the
+// output handshake.
+
+module FpDivSS #(
+  parameter p_int_bits   = 13,
+  parameter p_frac_bits  = 14,
+  parameter p_total_bits = p_int_bits + p_frac_bits,
+  parameter p_wide_bits  = 48
+) (
+  input  logic                           clk,
+  input  logic                           rst,
+
+  // istream (CGCtrl -> FpDiv)
+  input  logic                           istream_val,
+  output logic                           istream_rdy,
+  input  logic signed [p_wide_bits-1:0]  istream_msg_a,
+  input  logic signed [p_wide_bits-1:0]  istream_msg_b,
+
+  // ostream (FpDiv -> CGCtrl)
+  output logic                           ostream_val,
+  input  logic                           ostream_rdy,
+  output logic signed [p_total_bits-1:0] ostream_msg_result
+);
+
+  localparam p_div_w  = p_wide_bits + p_frac_bits;
+  localparam p_iter_w = $clog2(p_div_w + 1);
+
+  typedef enum logic [1:0] {
+    STATE_IDLE,
+    STATE_RUN,
+    STATE_FINISH,
+    STATE_DONE
+  } state_t;
+
+  state_t state_reg, state_next;
+
+  logic [p_div_w-1:0]     dividend;
+  logic [p_wide_bits:0]   rem;
+  logic [p_div_w-1:0]     quotient;
+  logic [p_wide_bits-1:0] divisor;
+  logic                   sign;
+  logic [p_iter_w-1:0]    iter_cnt;
+
+  // Handshake wires
+  wire input_handshake;
+  wire output_handshake;
+  assign input_handshake  = istream_val && istream_rdy;
+  assign output_handshake = ostream_val && ostream_rdy;
+
+  assign istream_rdy = (state_reg == STATE_IDLE);
+  assign ostream_val = (state_reg == STATE_DONE);
+
+  // -- State register --------------------------------------------------------
+
+  always_ff @(posedge clk) begin
+    if (rst) state_reg <= STATE_IDLE;
+    else     state_reg <= state_next;
+  end
+
+  // -- Next-state logic ------------------------------------------------------
+
+  always_comb begin
+    state_next = state_reg;
+    case (state_reg)
+      STATE_IDLE:    if (input_handshake)                          state_next = STATE_RUN;
+      STATE_RUN:     if (iter_cnt == p_iter_w'(p_div_w))           state_next = STATE_FINISH;
+      STATE_FINISH:                                                state_next = STATE_DONE;
+      STATE_DONE:    if (output_handshake)                         state_next = STATE_IDLE;
+      default: ;
+    endcase
+  end
+
+  // -- Trial shift-subtract combinational helpers ---------------------------
+
+  logic [p_wide_bits:0] new_rem_pre;
+  logic [p_wide_bits:0] trial_sub;
+  assign new_rem_pre = {rem[p_wide_bits-1:0], dividend[p_div_w-1]};
+  assign trial_sub   = new_rem_pre - {1'b0, divisor};
+
+  // Absolute value of operands latched on the input handshake
+  logic [p_wide_bits-1:0] abs_a;
+  logic [p_wide_bits-1:0] abs_b;
+  assign abs_a = istream_msg_a[p_wide_bits-1] ? $unsigned(-istream_msg_a) : $unsigned(istream_msg_a);
+  assign abs_b = istream_msg_b[p_wide_bits-1] ? $unsigned(-istream_msg_b) : $unsigned(istream_msg_b);
+
+  // -- Sequential state updates ---------------------------------------------
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      rem                <= '0;
+      dividend           <= '0;
+      quotient           <= '0;
+      divisor            <= '0;
+      sign               <= 1'b0;
+      iter_cnt           <= '0;
+      ostream_msg_result <= '0;
+    end else begin
+      case (state_reg)
+        STATE_IDLE: begin
+          if (input_handshake) begin
+            dividend <= {abs_a, {p_frac_bits{1'b0}}};
+            divisor  <= abs_b;
+            rem      <= '0;
+            quotient <= '0;
+            sign     <= istream_msg_a[p_wide_bits-1] ^ istream_msg_b[p_wide_bits-1];
+            iter_cnt <= '0;
+          end
+        end
+        STATE_RUN: begin
+          if (iter_cnt < p_iter_w'(p_div_w)) begin
+            if (!trial_sub[p_wide_bits]) begin
+              rem      <= trial_sub;
+              quotient <= {quotient[p_div_w-2:0], 1'b1};
+            end else begin
+              rem      <= new_rem_pre;
+              quotient <= {quotient[p_div_w-2:0], 1'b0};
+            end
+            dividend <= {dividend[p_div_w-2:0], 1'b0};
+            iter_cnt <= iter_cnt + 1;
+          end
+        end
+        STATE_FINISH: begin
+          if (sign)
+            ostream_msg_result <= -$signed({1'b0, quotient[p_total_bits-2:0]});
+          else
+            ostream_msg_result <= $signed({1'b0, quotient[p_total_bits-2:0]});
         end
         default: ;
       endcase

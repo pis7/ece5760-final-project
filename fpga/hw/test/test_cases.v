@@ -6,11 +6,11 @@
     begin
       int row_ptr[] = '{0, 2, 4};
       int col_idx[] = '{0, 1, 0, 1};
-      int vals[]    = '{to_fp(4.0), to_fp(1.0), to_fp(1.0), to_fp(3.0)};
-      int cx[]      = '{to_fp(1.0), to_fp(2.0)};
-      int cy[]      = '{to_fp(2.0), to_fp(1.0)};
-      int x0[]      = '{0, 0};
-      int y0[]      = '{0, 0};
+      longint vals[]    = '{to_fp(4.0), to_fp(1.0), to_fp(1.0), to_fp(3.0)};
+      longint cx[]      = '{to_fp(1.0), to_fp(2.0)};
+      longint cy[]      = '{to_fp(2.0), to_fp(1.0)};
+      longint x0[]      = '{0, 0};
+      longint y0[]      = '{0, 0};
       run_test("2x2", 2, 4, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
@@ -18,13 +18,13 @@
     begin
       int row_ptr[] = '{0, 2, 5, 7};
       int col_idx[] = '{0, 1, 0, 1, 2, 1, 2};
-      int vals[]    = '{to_fp(2.0), to_fp(1.0),
+      longint vals[]    = '{to_fp(2.0), to_fp(1.0),
                         to_fp(1.0), to_fp(3.0), to_fp(1.0),
                         to_fp(1.0), to_fp(2.0)};
-      int cx[]      = '{to_fp(1.0), to_fp(1.0), to_fp(1.0)};
-      int cy[]      = '{to_fp(2.0), to_fp(0.0), to_fp(1.0)};
-      int x0[]      = '{0, 0, 0};
-      int y0[]      = '{0, 0, 0};
+      longint cx[]      = '{to_fp(1.0), to_fp(1.0), to_fp(1.0)};
+      longint cy[]      = '{to_fp(2.0), to_fp(0.0), to_fp(1.0)};
+      longint x0[]      = '{0, 0, 0};
+      longint y0[]      = '{0, 0, 0};
       run_test("3x3", 3, 7, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
@@ -32,22 +32,22 @@
     begin
       int row_ptr[] = '{0, 1, 2};
       int col_idx[] = '{0, 1};
-      int vals[]    = '{to_fp(5.0), to_fp(3.0)};
-      int cx[]      = '{to_fp(10.0), to_fp(6.0)};
-      int cy[]      = '{to_fp(5.0), to_fp(9.0)};
-      int x0[]      = '{0, 0};
-      int y0[]      = '{0, 0};
+      longint vals[]    = '{to_fp(5.0), to_fp(3.0)};
+      longint cx[]      = '{to_fp(10.0), to_fp(6.0)};
+      longint cy[]      = '{to_fp(5.0), to_fp(9.0)};
+      longint x0[]      = '{0, 0};
+      longint y0[]      = '{0, 0};
       run_test("2x2_diag", 2, 2, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 4: 4x4 tridiagonal ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx[]      = '{to_fp(1.0), to_fp(0.0), to_fp(0.0), to_fp(1.0)};
-      int cy[]      = '{to_fp(0.0), to_fp(1.0), to_fp(1.0), to_fp(0.0)};
-      int x0[]      = '{0, 0, 0, 0};
-      int y0[]      = '{0, 0, 0, 0};
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx[]      = '{to_fp(1.0), to_fp(0.0), to_fp(0.0), to_fp(1.0)};
+      longint cy[]      = '{to_fp(0.0), to_fp(1.0), to_fp(1.0), to_fp(0.0)};
+      longint x0[]      = '{0, 0, 0, 0};
+      longint y0[]      = '{0, 0, 0, 0};
       t_n = 4;
       build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
       run_test("4x4_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx, cy, x0, y0);
@@ -56,13 +56,13 @@
     // ==== Test 5: 8x8 tridiagonal ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx[]      = '{to_fp(1.0), to_fp(0.0), to_fp(0.0), to_fp(0.0),
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx[]      = '{to_fp(1.0), to_fp(0.0), to_fp(0.0), to_fp(0.0),
                          to_fp(0.0), to_fp(0.0), to_fp(0.0), to_fp(1.0)};
-      int cy[]      = '{to_fp(0.0), to_fp(1.0), to_fp(0.0), to_fp(0.0),
+      longint cy[]      = '{to_fp(0.0), to_fp(1.0), to_fp(0.0), to_fp(0.0),
                          to_fp(0.0), to_fp(0.0), to_fp(1.0), to_fp(0.0)};
-      int x0[]      = '{0, 0, 0, 0, 0, 0, 0, 0};
-      int y0[]      = '{0, 0, 0, 0, 0, 0, 0, 0};
+      longint x0[]      = '{0, 0, 0, 0, 0, 0, 0, 0};
+      longint y0[]      = '{0, 0, 0, 0, 0, 0, 0, 0};
       t_n = 8;
       build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
       run_test("8x8_tridiag", t_n, nnz, row_ptr, col_idx, vals, cx, cy, x0, y0);
@@ -71,8 +71,8 @@
     // ==== Test 6: 10x10 dense diagonally-dominant ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 10;
       nnz = t_n * t_n;
       row_ptr = new[t_n + 1];
@@ -99,8 +99,8 @@
     // ==== Test 7: 20x20 tridiagonal ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 20;
       build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
       cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
@@ -116,8 +116,8 @@
     // ==== Test 8: 50x50 tridiagonal ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 50;
       build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
       cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
@@ -136,19 +136,19 @@
     begin
       int row_ptr[] = '{0, 1};
       int col_idx[] = '{0};
-      int vals[]    = '{to_fp(5.0)};
-      int cx[]      = '{to_fp(10.0)};
-      int cy[]      = '{to_fp(3.0)};
-      int x0[]      = '{0};
-      int y0[]      = '{0};
+      longint vals[]    = '{to_fp(5.0)};
+      longint cx[]      = '{to_fp(10.0)};
+      longint cy[]      = '{to_fp(3.0)};
+      longint x0[]      = '{0};
+      longint y0[]      = '{0};
       run_test("n1", 1, 1, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 10: 49x49 tridiagonal ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 49;
       build_uniform_tridiag(t_n, to_fp(2.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
       cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
@@ -166,8 +166,8 @@
     // ==== Test 11: 10x10 diagonal-only ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 10;
       nnz = t_n;
       row_ptr = new[t_n + 1];
@@ -193,8 +193,8 @@
     // ==== Test 12: 10x10 arrow matrix ====
     begin
       int t_n, nnz, idx;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 10;
       nnz = t_n + 2 * (t_n - 1);
       row_ptr = new[t_n + 1];
@@ -228,8 +228,8 @@
     // ==== Test 13: 20x20 random-coefficient tridiagonal ====
     begin
       int t_n, nnz, idx;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       real diag_v, off_v;
       t_n = 20;
       nnz = 3 * t_n - 2;
@@ -264,8 +264,8 @@
     // ==== Test 14: 8x8 tridiagonal with nonzero x0/y0 ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 8;
       build_uniform_tridiag(t_n, to_fp(4.0), to_fp(-1.0), row_ptr, col_idx, vals, nnz);
       cx_arr = new[t_n]; cy_arr = new[t_n]; x0_arr = new[t_n]; y0_arr = new[t_n];
@@ -282,19 +282,19 @@
     begin
       int row_ptr[] = '{0, 2, 4};
       int col_idx[] = '{0, 1, 0, 1};
-      int vals[]    = '{to_fp(4.0), to_fp(1.0), to_fp(1.0), to_fp(3.0)};
-      int cx[]      = '{to_fp(1.0), to_fp(2.0)};
-      int cy[]      = '{to_fp(2.0), to_fp(1.0)};
-      int x0[]      = '{to_fp(-0.090), to_fp(-0.640)};
-      int y0[]      = '{to_fp(-0.450), to_fp(-0.180)};
+      longint vals[]    = '{to_fp(4.0), to_fp(1.0), to_fp(1.0), to_fp(3.0)};
+      longint cx[]      = '{to_fp(1.0), to_fp(2.0)};
+      longint cy[]      = '{to_fp(2.0), to_fp(1.0)};
+      longint x0[]      = '{to_fp(-0.090), to_fp(-0.640)};
+      longint y0[]      = '{to_fp(-0.450), to_fp(-0.180)};
       run_test("2x2_near", 2, 4, row_ptr, col_idx, vals, cx, cy, x0, y0);
     end
 
     // ==== Test 16: 50x50 dense SPD ====
     begin
       int t_n, nnz;
-      int row_ptr [], col_idx [], vals [];
-      int cx_arr [], cy_arr [], x0_arr [], y0_arr [];
+      int row_ptr [], col_idx []; longint vals [];
+      longint cx_arr [], cy_arr [], x0_arr [], y0_arr [];
       t_n = 50;
       nnz = t_n * t_n;
       row_ptr = new[t_n + 1];

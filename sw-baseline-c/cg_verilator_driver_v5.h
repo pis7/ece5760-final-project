@@ -1,9 +1,10 @@
-// Verilator driver for v5 CGTop (multi-block on-chip RAM topology).
+// Verilator driver for v5 / v5_deep CGTop (multi-block on-chip RAM
+// topology -- 7 dedicated slaves: q_val, q_col, q_rowp, cx, cy, x, y).
 //
-// v5 splits the v4 single SRAM into seven dedicated Qsys on-chip RAM
-// slaves (q_val, q_col, q_rowp, cx, cy, x, y). Each gets its own
-// behavioral memory in the host driver, mirroring the per-slave shim
-// in fpga/hw/test/CGTop_tb_v5.v.
+// TOTAL_BITS defaults to 27 for the FPGA bitstream; verilated builds
+// may override via HW_TOTAL_BITS up to 64. Value-port signals widen to
+// QData (uint64_t) for >32-bit, IData (uint32_t) for <=32-bit; the
+// driver uniformly snapshots them as uint64_t.
 
 #pragma once
 
@@ -18,18 +19,27 @@
 
 class CGHwDriver {
 public:
+#ifndef HW_MAX_N
     static constexpr int MAX_N       = 50;
+#else
+    static constexpr int MAX_N       = HW_MAX_N;
+#endif
+#ifndef HW_TOTAL_BITS
     static constexpr int TOTAL_BITS  = 27;
+#else
+    static constexpr int TOTAL_BITS  = HW_TOTAL_BITS;
+#endif
 #ifndef HW_FRAC_BITS
     static constexpr int FRAC_BITS   = 14;
 #else
     static constexpr int FRAC_BITS   = HW_FRAC_BITS;
 #endif
     static constexpr int INT_BITS    = TOTAL_BITS - FRAC_BITS;
-    static constexpr int FRAC_SCALE  = 1 << FRAC_BITS;
-    static constexpr int32_t BIT_MASK = static_cast<int32_t>((1LL << TOTAL_BITS) - 1);
+    static constexpr int64_t FRAC_SCALE = static_cast<int64_t>(1) << FRAC_BITS;
+    static constexpr int64_t BIT_MASK   =
+        (TOTAL_BITS >= 64) ? -1LL
+                           : ((static_cast<int64_t>(1) << TOTAL_BITS) - 1);
 
-    // Per-slave depths
     static constexpr int Q_VAL_DEPTH  = MAX_N * MAX_N;
     static constexpr int Q_COL_DEPTH  = MAX_N * MAX_N;
     static constexpr int Q_ROWP_DEPTH = MAX_N + 1;
@@ -38,16 +48,16 @@ public:
     std::vector<double> c_x, c_y, x_pos, y_pos;
     CSRMatrix Q;
 
-    CGHwDriver() {
+    CGHwDriver()
+        : q_val_mem_ (Q_VAL_DEPTH,  0),
+          q_col_mem_ (Q_COL_DEPTH,  0),
+          q_rowp_mem_(Q_ROWP_DEPTH, 0),
+          cx_mem_    (VEC_DEPTH,    0),
+          cy_mem_    (VEC_DEPTH,    0),
+          x_mem_     (VEC_DEPTH,    0),
+          y_mem_     (VEC_DEPTH,    0) {
         ctx_ = new VerilatedContext;
         dut_ = new VCGTop(ctx_);
-        std::memset(q_val_mem_,  0, sizeof(q_val_mem_));
-        std::memset(q_col_mem_,  0, sizeof(q_col_mem_));
-        std::memset(q_rowp_mem_, 0, sizeof(q_rowp_mem_));
-        std::memset(cx_mem_,     0, sizeof(cx_mem_));
-        std::memset(cy_mem_,     0, sizeof(cy_mem_));
-        std::memset(x_mem_,      0, sizeof(x_mem_));
-        std::memset(y_mem_,      0, sizeof(y_mem_));
     }
 
     ~CGHwDriver() {
@@ -106,7 +116,7 @@ public:
         dut_->sw_go = 0;
         dut_->sw_done_ack = 0;
         dut_->max_iter = max_iter;
-        dut_->eps_sq = double_to_fp(eps * eps);
+        dut_->eps_sq = static_cast<uint32_t>(double_to_fp(eps * eps));
         dut_->n = n;
         for (int i = 0; i < 5; ++i) tick();
         dut_->rst = 0;
@@ -118,7 +128,7 @@ public:
         ++last_solve_cycles_;
         dut_->sw_go = 0;
 
-        int timeout = 1000000;
+        int timeout = 100000000;
         while (!dut_->sw_done && --timeout > 0) {
             tick();
             ++last_solve_cycles_;
@@ -139,48 +149,53 @@ public:
 private:
     VerilatedContext* ctx_;
     VCGTop* dut_;
-    int32_t q_val_mem_  [Q_VAL_DEPTH];
-    int32_t q_col_mem_  [Q_COL_DEPTH];
-    int32_t q_rowp_mem_ [Q_ROWP_DEPTH];
-    int32_t cx_mem_     [VEC_DEPTH];
-    int32_t cy_mem_     [VEC_DEPTH];
-    int32_t x_mem_      [VEC_DEPTH];
-    int32_t y_mem_      [VEC_DEPTH];
+    // Value-carrying mirrors widen to int64_t for TOTAL_BITS up to 64;
+    // q_col / q_rowp are integer indices and stay 32-bit.
+    std::vector<int64_t> q_val_mem_;
+    std::vector<int32_t> q_col_mem_;
+    std::vector<int32_t> q_rowp_mem_;
+    std::vector<int64_t> cx_mem_;
+    std::vector<int64_t> cy_mem_;
+    std::vector<int64_t> x_mem_;
+    std::vector<int64_t> y_mem_;
     uint64_t last_solve_cycles_ = 0;
 
     std::vector<int> q_diag_pos_;
 
-    static int32_t double_to_fp(double v) {
-        int32_t raw = static_cast<int32_t>(v * FRAC_SCALE);
+    static int64_t double_to_fp(double v) {
+        int64_t raw = static_cast<int64_t>(v * FRAC_SCALE);
         return sign_extend(raw);
     }
 
-    static double fp_to_double(int32_t v) {
+    static double fp_to_double(int64_t v) {
         v = sign_extend(v);
         return static_cast<double>(v) / FRAC_SCALE;
     }
 
-    static int32_t sign_extend(int32_t v) {
+    static int64_t sign_extend(int64_t v) {
         v &= BIT_MASK;
-        if (v & (1 << (TOTAL_BITS - 1)))
+        if (v & (static_cast<int64_t>(1) << (TOTAL_BITS - 1)))
             v |= ~BIT_MASK;
         return v;
     }
 
-    // Service a single Avalon slave port: sample addr/wr/wdata before the
-    // rising edge, then on the rising edge either write into the local mem
-    // or drive readdata. Same semantics as the v4 driver's tick() body but
-    // applied per slave.
-    static void service_port(
+    static void service_value_port(
+        bool cs_clken, uint32_t addr, bool wr, uint64_t wdata,
+        int64_t* mem, int depth, uint64_t* readdata_out)
+    {
+        if (cs_clken && addr < static_cast<uint32_t>(depth)) {
+            if (wr) mem[addr] = static_cast<int64_t>(wdata);
+            else    *readdata_out = static_cast<uint64_t>(mem[addr]);
+        }
+    }
+
+    static void service_index_port(
         bool cs_clken, uint32_t addr, bool wr, uint32_t wdata,
         int32_t* mem, int depth, uint32_t* readdata_out)
     {
         if (cs_clken && addr < static_cast<uint32_t>(depth)) {
-            if (wr) {
-                mem[addr] = static_cast<int32_t>(wdata);
-            } else {
-                *readdata_out = static_cast<uint32_t>(mem[addr]);
-            }
+            if (wr) mem[addr] = static_cast<int32_t>(wdata);
+            else    *readdata_out = static_cast<uint32_t>(mem[addr]);
         }
     }
 
@@ -188,11 +203,10 @@ private:
         dut_->clk = 0;
         dut_->eval();
 
-        // Snapshot pre-edge port state for each of the seven slaves.
         bool     q_val_cs   = dut_->q_val_ram_chipselect  && dut_->q_val_ram_clken;
         uint32_t q_val_a    = dut_->q_val_ram_address;
         bool     q_val_wr   = dut_->q_val_ram_write;
-        uint32_t q_val_wd   = dut_->q_val_ram_writedata;
+        uint64_t q_val_wd   = dut_->q_val_ram_writedata;
 
         bool     q_col_cs   = dut_->q_col_ram_chipselect  && dut_->q_col_ram_clken;
         uint32_t q_col_a    = dut_->q_col_ram_address;
@@ -207,41 +221,41 @@ private:
         bool     cx_cs   = dut_->cx_ram_chipselect && dut_->cx_ram_clken;
         uint32_t cx_a    = dut_->cx_ram_address;
         bool     cx_wr   = dut_->cx_ram_write;
-        uint32_t cx_wd   = dut_->cx_ram_writedata;
+        uint64_t cx_wd   = dut_->cx_ram_writedata;
 
         bool     cy_cs   = dut_->cy_ram_chipselect && dut_->cy_ram_clken;
         uint32_t cy_a    = dut_->cy_ram_address;
         bool     cy_wr   = dut_->cy_ram_write;
-        uint32_t cy_wd   = dut_->cy_ram_writedata;
+        uint64_t cy_wd   = dut_->cy_ram_writedata;
 
         bool     x_cs    = dut_->x_ram_chipselect  && dut_->x_ram_clken;
         uint32_t x_a     = dut_->x_ram_address;
         bool     x_wr    = dut_->x_ram_write;
-        uint32_t x_wd    = dut_->x_ram_writedata;
+        uint64_t x_wd    = dut_->x_ram_writedata;
 
         bool     y_cs    = dut_->y_ram_chipselect  && dut_->y_ram_clken;
         uint32_t y_a     = dut_->y_ram_address;
         bool     y_wr    = dut_->y_ram_write;
-        uint32_t y_wd    = dut_->y_ram_writedata;
+        uint64_t y_wd    = dut_->y_ram_writedata;
 
         dut_->clk = 1;
         dut_->eval();
 
-        uint32_t q_val_rd  = dut_->q_val_ram_readdata;
+        uint64_t q_val_rd  = dut_->q_val_ram_readdata;
         uint32_t q_col_rd  = dut_->q_col_ram_readdata;
         uint32_t q_rowp_rd = dut_->q_rowp_ram_readdata;
-        uint32_t cx_rd     = dut_->cx_ram_readdata;
-        uint32_t cy_rd     = dut_->cy_ram_readdata;
-        uint32_t x_rd      = dut_->x_ram_readdata;
-        uint32_t y_rd      = dut_->y_ram_readdata;
+        uint64_t cx_rd     = dut_->cx_ram_readdata;
+        uint64_t cy_rd     = dut_->cy_ram_readdata;
+        uint64_t x_rd      = dut_->x_ram_readdata;
+        uint64_t y_rd      = dut_->y_ram_readdata;
 
-        service_port(q_val_cs,  q_val_a,  q_val_wr,  q_val_wd,  q_val_mem_,  Q_VAL_DEPTH,  &q_val_rd);
-        service_port(q_col_cs,  q_col_a,  q_col_wr,  q_col_wd,  q_col_mem_,  Q_COL_DEPTH,  &q_col_rd);
-        service_port(q_rowp_cs, q_rowp_a, q_rowp_wr, q_rowp_wd, q_rowp_mem_, Q_ROWP_DEPTH, &q_rowp_rd);
-        service_port(cx_cs,     cx_a,     cx_wr,     cx_wd,     cx_mem_,     VEC_DEPTH,    &cx_rd);
-        service_port(cy_cs,     cy_a,     cy_wr,     cy_wd,     cy_mem_,     VEC_DEPTH,    &cy_rd);
-        service_port(x_cs,      x_a,      x_wr,      x_wd,      x_mem_,      VEC_DEPTH,    &x_rd);
-        service_port(y_cs,      y_a,      y_wr,      y_wd,      y_mem_,      VEC_DEPTH,    &y_rd);
+        service_value_port(q_val_cs,  q_val_a,  q_val_wr,  q_val_wd,  q_val_mem_.data(),  Q_VAL_DEPTH,  &q_val_rd);
+        service_index_port(q_col_cs,  q_col_a,  q_col_wr,  q_col_wd,  q_col_mem_.data(),  Q_COL_DEPTH,  &q_col_rd);
+        service_index_port(q_rowp_cs, q_rowp_a, q_rowp_wr, q_rowp_wd, q_rowp_mem_.data(), Q_ROWP_DEPTH, &q_rowp_rd);
+        service_value_port(cx_cs,     cx_a,     cx_wr,     cx_wd,     cx_mem_.data(),     VEC_DEPTH,    &cx_rd);
+        service_value_port(cy_cs,     cy_a,     cy_wr,     cy_wd,     cy_mem_.data(),     VEC_DEPTH,    &cy_rd);
+        service_value_port(x_cs,      x_a,      x_wr,      x_wd,      x_mem_.data(),      VEC_DEPTH,    &x_rd);
+        service_value_port(y_cs,      y_a,      y_wr,      y_wd,      y_mem_.data(),      VEC_DEPTH,    &y_rd);
 
         dut_->q_val_ram_readdata  = q_val_rd;
         dut_->q_col_ram_readdata  = q_col_rd;

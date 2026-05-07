@@ -1,8 +1,6 @@
-// Toplevel v4 Verilog: synthesizable CG solver for DE1-SoC.
-//
-// Two AXPY units inside CGDpath fire in lockstep during the merged
-// S_AXPY_XR_FEED state, halving the cycles spent on x/r updates per
-// CG iteration.
+// Toplevel v4 Verilog: synthesizable CG solver for DE1-SoC. Single
+// shared on-chip RAM (one Avalon port). Two AXPY units inside CGDpath
+// fire in lockstep during the merged S_AXPY_XR_FEED state.
 
 module CGTop #(
   parameter p_lanes            = 8,
@@ -10,7 +8,12 @@ module CGTop #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  // 48 keeps the Q13.14 build bit-identical and matches the NR FpDiv's
+  // hardcoded 48-bit internals; the wider branch sizes the wide
+  // accumulator to fit a full SPMV/dot-product without overflow.
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
   parameter p_q_val_base_addr  = 0,
   parameter p_q_col_base_addr  = p_max_n * p_max_n,
@@ -19,7 +22,11 @@ module CGTop #(
   parameter p_cx_y_base_addr   = 2 * p_max_n * p_max_n + 2 * p_max_n + 1,
   parameter p_x_base_addr      = 2 * p_max_n * p_max_n + 3 * p_max_n + 1,
   parameter p_y_base_addr      = 2 * p_max_n * p_max_n + 4 * p_max_n + 1,
-  parameter p_total_words      = 2 * p_max_n * p_max_n + 5 * p_max_n + 1
+  parameter p_total_words      = 2 * p_max_n * p_max_n + 5 * p_max_n + 1,
+  // Avalon data-port width for the value-carrying on-chip RAM. 32 keeps
+  // the FPGA build identical; widen to 64 in verilated mode when a
+  // single fixed-point word no longer fits.
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -29,13 +36,14 @@ module CGTop #(
   output logic sw_done,
   input  logic sw_done_ack,
 
-  // Avalon slave interface to Qsys on-chip SRAM
+  // Avalon slave interface to Qsys on-chip SRAM. The data ports widen
+  // to p_word_bits; address/control stay as-is.
   output logic [p_m10k_addr_bits-1:0] on_chip_ram_address,
   output logic                        on_chip_ram_chipselect,
   output logic                        on_chip_ram_clken,
   output logic                        on_chip_ram_write,
-  input  logic [31:0]                 on_chip_ram_readdata,
-  output logic [31:0]                 on_chip_ram_writedata,
+  input  logic [p_word_bits-1:0]      on_chip_ram_readdata,
+  output logic [p_word_bits-1:0]      on_chip_ram_writedata,
   output logic [3:0]                  on_chip_ram_byteenable,
 
   // CG solve parameters
@@ -45,7 +53,7 @@ module CGTop #(
 );
 
   //----------------------------------------------------------------------
-  // PIO input registration (same as v3)
+  // PIO input registration
   //----------------------------------------------------------------------
   logic        sw_go_q;
   logic        sw_done_ack_q;
@@ -73,7 +81,7 @@ module CGTop #(
 
   logic [p_m10k_addr_bits-1:0] ctrl_mem_addr;
   logic                        ctrl_mem_wr_en;
-  logic [31:0]                 ctrl_mem_wdata;
+  logic [p_word_bits-1:0]      ctrl_mem_wdata;
   logic                        ctrl_mem_src_spmv;
 
   // RF read ports (4 x p_lanes-wide)
@@ -138,7 +146,7 @@ module CGTop #(
 
   logic [p_m10k_addr_bits-1:0] dp_mem_addr;
   logic                        dp_mem_wr_en;
-  logic [31:0]                 dp_mem_wdata;
+  logic [p_word_bits-1:0]      dp_mem_wdata;
 
   assign on_chip_ram_address    = dp_mem_addr;
   assign on_chip_ram_chipselect = 1'b1;
@@ -159,6 +167,7 @@ module CGTop #(
     .p_total_bits     (p_total_bits),
     .p_acc_bits       (p_acc_bits),
     .p_m10k_addr_bits (p_m10k_addr_bits),
+    .p_word_bits      (p_word_bits),
     .p_cx_x_base_addr (p_cx_x_base_addr),
     .p_cx_y_base_addr (p_cx_y_base_addr),
     .p_x_base_addr    (p_x_base_addr),
@@ -209,6 +218,7 @@ module CGTop #(
     .p_total_bits       (p_total_bits),
     .p_acc_bits         (p_acc_bits),
     .p_m10k_addr_bits   (p_m10k_addr_bits),
+    .p_word_bits        (p_word_bits),
     .p_q_val_base_addr  (p_q_val_base_addr),
     .p_q_col_base_addr  (p_q_col_base_addr),
     .p_q_rowp_base_addr (p_q_rowp_base_addr)

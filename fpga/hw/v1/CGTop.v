@@ -1,12 +1,20 @@
-// Toplevel V1 Verilog
+// Toplevel v1 Verilog: combinational reference CG solver.
 
 module CGTop #(
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  // 48 keeps the Q13.14 build bit-identical; the wider branch sizes the
+  // wide accumulator to fit a full SPMV/dot-product without overflow.
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
+  // Avalon data-port width for the value-carrying slave. 32 keeps the
+  // FPGA build identical; widen to 64 in verilated mode when a single
+  // value no longer fits.
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_q_val_base_addr  = 0,
   parameter p_q_col_base_addr  = p_max_n * p_max_n,
   parameter p_q_rowp_base_addr = 2 * p_max_n * p_max_n,
@@ -24,13 +32,13 @@ module CGTop #(
   output logic sw_done,
   input  logic sw_done_ack,
 
-  // M10K interface
+  // M10K interface (value-carrying readdata/writedata are p_word_bits wide).
   output logic [p_m10k_addr_bits-1:0] on_chip_ram_address,
   output logic                        on_chip_ram_chipselect,
   output logic                        on_chip_ram_clken,
   output logic                        on_chip_ram_write,
-  input  logic [31:0]                 on_chip_ram_readdata,
-  output logic [31:0]                 on_chip_ram_writedata,
+  input  logic [p_word_bits-1:0]      on_chip_ram_readdata,
+  output logic [p_word_bits-1:0]      on_chip_ram_writedata,
   output logic [3:0]                  on_chip_ram_byteenable,
 
   // CG solve parameters
@@ -53,8 +61,8 @@ module CGTop #(
   // Wires between loader and register array
   logic        [p_m10k_addr_bits-1:0] loader_reg_addr;
   logic                               loader_reg_wr_en;
-  logic signed [p_m10k_addr_bits-1:0] loader_reg_wr_data;
-  logic signed [p_m10k_addr_bits-1:0] loader_reg_rd_data;
+  logic signed [p_word_bits-1:0]      loader_reg_wr_data;
+  logic signed [p_word_bits-1:0]      loader_reg_rd_data;
 
   logic        [31:0]            iter;
   logic signed [p_acc_bits-1:0]  rr_new;
@@ -65,7 +73,7 @@ module CGTop #(
   logic signed [p_total_bits-1:0] x_new [p_max_n];
   logic signed [p_acc_bits-1:0]   dq;
 
-  assign loader_reg_rd_data = p_m10k_addr_bits'(cg_data[loader_reg_addr]);
+  assign loader_reg_rd_data = p_word_bits'(cg_data[loader_reg_addr]);
   always_ff @(posedge clk) begin
     if (loader_reg_wr_en)
       cg_data[loader_reg_addr] <= p_total_bits'(loader_reg_wr_data);
@@ -85,7 +93,7 @@ module CGTop #(
 
   M10KLoader #(
     .NUM_WORDS  (p_total_words),
-    .DATA_WIDTH (32),
+    .DATA_WIDTH (p_word_bits),
     .ADDR_WIDTH (p_m10k_addr_bits)
   ) loader (
     .clk                    (clk),
@@ -114,7 +122,8 @@ module CGTop #(
     .p_int_bits   (p_int_bits),
     .p_frac_bits  (p_frac_bits),
     .p_total_bits (p_total_bits),
-    .p_acc_bits   (p_acc_bits)
+    .p_acc_bits   (p_acc_bits),
+    .p_word_bits  (p_word_bits)
   ) ctrl (
     .clk              (clk),
     .rst              (rst),
@@ -144,6 +153,7 @@ module CGTop #(
     .p_frac_bits        (p_frac_bits),
     .p_total_bits       (p_total_bits),
     .p_acc_bits         (p_acc_bits),
+    .p_word_bits        (p_word_bits),
     .p_q_val_base_addr  (p_q_val_base_addr),
     .p_q_col_base_addr  (p_q_col_base_addr),
     .p_q_rowp_base_addr (p_q_rowp_base_addr),

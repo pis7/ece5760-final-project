@@ -1,8 +1,12 @@
+// v1 CG controller: top-level FSM coordinating M10K load/store and the
+// combinational CG datapath. p_word_bits matches CGTop's Avalon width.
+
 module CGCtrl #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48
+  parameter p_acc_bits         = 48,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -57,9 +61,11 @@ module CGCtrl #(
   // State Transitions
   //----------------------------------------------------------------------
 
-  // Sign-extend eps_sq to accumulator width for comparison
+  // Sign-extend eps_sq to accumulator width for comparison. eps_sq is
+  // the 32-bit PIO input; callers pre-clamp the upper bits so direct
+  // sign-extend is safe at any p_total_bits in [2, 64].
   logic signed [p_acc_bits-1:0] eps_sq_wide;
-  assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));
+  assign eps_sq_wide = p_acc_bits'($signed(eps_sq));
 
   always_comb begin
     state_next = state_reg;

@@ -562,15 +562,18 @@ module SPMVDpath #(
   parameter p_frac_bits  = 14,
   parameter p_total_bits = p_int_bits + p_frac_bits,
   parameter p_acc_bits   = 48,
-  parameter p_max_n      = 50
+  parameter p_max_n      = 50,
+  // Value-port bus width: 32 keeps the FPGA build / Q13.14 testbench
+  // identical, 64 carries up to int+frac=64 in verilated mode.
+  parameter p_word_bits  = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
 
-  // From the three M10K read ports (q_val, q_col, q_rowp) -- each
-  // produces a 32-bit rdata one cycle after the corresponding addr is
-  // driven by SPMVCtrl.
-  input  logic [31:0]                    q_val_rdata,
+  // From the three M10K read ports (q_val, q_col, q_rowp) -- q_val is
+  // a fixed-point value (sign-extended into p_total_bits below), q_col
+  // and q_rowp carry plain integer indices and stay 32-bit.
+  input  logic [p_word_bits-1:0]         q_val_rdata,
   input  logic [31:0]                    q_col_rdata,
   input  logic [31:0]                    q_rowp_rdata,
 
@@ -704,7 +707,8 @@ module SPMV_seq #(
   parameter p_total_bits      = p_int_bits + p_frac_bits,
   parameter p_acc_bits        = 48,
   parameter p_max_n           = 50,
-  parameter p_m10k_addr_bits  = 32
+  parameter p_m10k_addr_bits  = 32,
+  parameter p_word_bits       = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
@@ -723,9 +727,11 @@ module SPMV_seq #(
   input  logic [31:0]                    n,
 
   // Three independent M10K read ports (each slave is local-base 0).
-  // SPMV drives the address; rdata returns 1 cycle later.
+  // SPMV drives the address; rdata returns 1 cycle later. q_val carries
+  // a fixed-point value (p_word_bits wide); q_col / q_rowp carry plain
+  // integer indices and stay 32-bit.
   output logic [p_m10k_addr_bits-1:0]    q_val_addr,
-  input  logic [31:0]                    q_val_rdata,
+  input  logic [p_word_bits-1:0]         q_val_rdata,
   output logic [p_m10k_addr_bits-1:0]    q_col_addr,
   input  logic [31:0]                    q_col_rdata,
   output logic [p_m10k_addr_bits-1:0]    q_rowp_addr,
@@ -759,7 +765,8 @@ module SPMV_seq #(
     .p_frac_bits (p_frac_bits),
     .p_total_bits(p_total_bits),
     .p_acc_bits  (p_acc_bits),
-    .p_max_n     (p_max_n)
+    .p_max_n     (p_max_n),
+    .p_word_bits (p_word_bits)
   ) u_dpath (
     .clk, .rst,
     .q_val_rdata, .q_col_rdata, .q_rowp_rdata,

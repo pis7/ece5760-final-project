@@ -1,17 +1,7 @@
 // Toplevel v5 Verilog: synthesizable CG solver for DE1-SoC.
-//
-// Seven dedicated Qsys on-chip RAM slaves, each with its own RTL-facing
-// port:
-//   q_val_ram, q_col_ram, q_rowp_ram -- SPMV-owned, read-only
-//   cx_ram, cy_ram                   -- CGCtrl S_VNS_R serial reads
-//   x_ram, y_ram                     -- CGCtrl load + writeback
-//
-// SPMV reads q_val[j] and q_col[j] in the same cycle (parallel issue
-// and capture). Per-nz cost is 3 cycles.
-//
-// cx is read directly from cx_ram in S_VNS_R (no central cx_reg). x/y
-// stay in x_vec_reg because AXPY_X writes them p_lanes-wide every CG
-// iter.
+// Seven dedicated Qsys on-chip RAM slaves: q_val_ram, q_col_ram,
+// q_rowp_ram (SPMV-owned), cx_ram, cy_ram (S_VNS_R serial reads),
+// x_ram, y_ram (CGCtrl load + writeback). sel_y picks x vs y pass.
 
 module CGTop #(
   parameter p_lanes            = 8,
@@ -19,8 +9,11 @@ module CGTop #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
-  parameter p_m10k_addr_bits   = 32
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
+  parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -35,8 +28,8 @@ module CGTop #(
   output logic                        q_val_ram_chipselect,
   output logic                        q_val_ram_clken,
   output logic                        q_val_ram_write,
-  input  logic [31:0]                 q_val_ram_readdata,
-  output logic [31:0]                 q_val_ram_writedata,
+  input  logic [p_word_bits-1:0]      q_val_ram_readdata,
+  output logic [p_word_bits-1:0]      q_val_ram_writedata,
   output logic [3:0]                  q_val_ram_byteenable,
 
   // -- Avalon slave: q_col_ram (SPMV read-only) ---------------------------
@@ -62,8 +55,8 @@ module CGTop #(
   output logic                        cx_ram_chipselect,
   output logic                        cx_ram_clken,
   output logic                        cx_ram_write,
-  input  logic [31:0]                 cx_ram_readdata,
-  output logic [31:0]                 cx_ram_writedata,
+  input  logic [p_word_bits-1:0]      cx_ram_readdata,
+  output logic [p_word_bits-1:0]      cx_ram_writedata,
   output logic [3:0]                  cx_ram_byteenable,
 
   // -- Avalon slave: cy_ram (CGCtrl S_VNS_R read-only) --------------------
@@ -71,8 +64,8 @@ module CGTop #(
   output logic                        cy_ram_chipselect,
   output logic                        cy_ram_clken,
   output logic                        cy_ram_write,
-  input  logic [31:0]                 cy_ram_readdata,
-  output logic [31:0]                 cy_ram_writedata,
+  input  logic [p_word_bits-1:0]      cy_ram_readdata,
+  output logic [p_word_bits-1:0]      cy_ram_writedata,
   output logic [3:0]                  cy_ram_byteenable,
 
   // -- Avalon slave: x_ram (CGCtrl load + writeback) ----------------------
@@ -80,8 +73,8 @@ module CGTop #(
   output logic                        x_ram_chipselect,
   output logic                        x_ram_clken,
   output logic                        x_ram_write,
-  input  logic [31:0]                 x_ram_readdata,
-  output logic [31:0]                 x_ram_writedata,
+  input  logic [p_word_bits-1:0]      x_ram_readdata,
+  output logic [p_word_bits-1:0]      x_ram_writedata,
   output logic [3:0]                  x_ram_byteenable,
 
   // -- Avalon slave: y_ram (CGCtrl load + writeback) ----------------------
@@ -89,8 +82,8 @@ module CGTop #(
   output logic                        y_ram_chipselect,
   output logic                        y_ram_clken,
   output logic                        y_ram_write,
-  input  logic [31:0]                 y_ram_readdata,
-  output logic [31:0]                 y_ram_writedata,
+  input  logic [p_word_bits-1:0]      y_ram_readdata,
+  output logic [p_word_bits-1:0]      y_ram_writedata,
   output logic [3:0]                  y_ram_byteenable,
 
   // CG solve parameters
@@ -130,14 +123,14 @@ module CGTop #(
   // y_ram based on sel_y).
   logic [p_m10k_addr_bits-1:0] ctrl_xy_addr;
   logic                        ctrl_xy_wr_en;
-  logic [31:0]                 ctrl_xy_wdata;
+  logic [p_word_bits-1:0]      ctrl_xy_wdata;
   logic                        sel_y;
 
   // CGCtrl S_VNS_R cx serial-read port (CGDpath routes to cx_ram or
   // cy_ram based on sel_y).
   logic [p_m10k_addr_bits-1:0] vns_cx_addr;
   logic                        vns_cx_rd_en;
-  logic [31:0]                 vns_cx_rdata;
+  logic [p_word_bits-1:0]      vns_cx_rdata;
 
   // RF read ports (4 x p_lanes-wide)
   logic [2:0]                                 rd_a_sel;
@@ -203,7 +196,7 @@ module CGTop #(
   assign q_val_ram_chipselect  = 1'b1;
   assign q_val_ram_clken       = 1'b1;
   assign q_val_ram_write       = 1'b0;
-  assign q_val_ram_writedata   = 32'd0;
+  assign q_val_ram_writedata   = '0;
   assign q_val_ram_byteenable  = 4'b1111;
 
   assign q_col_ram_chipselect  = 1'b1;
@@ -222,13 +215,13 @@ module CGTop #(
   assign cx_ram_chipselect     = 1'b1;
   assign cx_ram_clken          = 1'b1;
   assign cx_ram_write          = 1'b0;
-  assign cx_ram_writedata      = 32'd0;
+  assign cx_ram_writedata      = '0;
   assign cx_ram_byteenable     = 4'b1111;
 
   assign cy_ram_chipselect     = 1'b1;
   assign cy_ram_clken          = 1'b1;
   assign cy_ram_write          = 1'b0;
-  assign cy_ram_writedata      = 32'd0;
+  assign cy_ram_writedata      = '0;
   assign cy_ram_byteenable     = 4'b1111;
 
   // x/y slaves see read+write from CGCtrl (load + writeback). ARM also
@@ -253,7 +246,7 @@ module CGTop #(
 
   // Read-back into CGCtrl during S_LD_X_CAPT: pick x_ram or y_ram based
   // on sel_y. Combinational mux of the registered Avalon readdata.
-  logic [31:0] ctrl_xy_rdata;
+  logic [p_word_bits-1:0] ctrl_xy_rdata;
   assign ctrl_xy_rdata = sel_y ? y_ram_readdata : x_ram_readdata;
 
   // SPMV port plumbing (3 independent reads).
@@ -278,7 +271,8 @@ module CGTop #(
     .p_frac_bits      (p_frac_bits),
     .p_total_bits     (p_total_bits),
     .p_acc_bits       (p_acc_bits),
-    .p_m10k_addr_bits (p_m10k_addr_bits)
+    .p_m10k_addr_bits (p_m10k_addr_bits),
+    .p_word_bits      (p_word_bits)
   ) ctrl (
     .clk,
     .rst         (rst_q),
@@ -328,7 +322,8 @@ module CGTop #(
     .p_frac_bits        (p_frac_bits),
     .p_total_bits       (p_total_bits),
     .p_acc_bits         (p_acc_bits),
-    .p_m10k_addr_bits   (p_m10k_addr_bits)
+    .p_m10k_addr_bits   (p_m10k_addr_bits),
+    .p_word_bits        (p_word_bits)
   ) dpath (
     .clk,
     .rst (rst_q),

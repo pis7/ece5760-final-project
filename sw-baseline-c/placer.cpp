@@ -32,7 +32,7 @@ static constexpr double TARGET_DENSITY = 0.75;
 // Revert if HPWL more than doubles in a single outer iter once partitioning
 // has matured -- catches partition_and_anchor blow-ups (e.g., size_extremes_mix
 // at level 7) that the density-based revert misses.
-static constexpr double HPWL_REVERT_RATIO = 2.0;
+static constexpr double HPWL_REVERT_RATIO = 5.0;
 static constexpr int    HPWL_REVERT_MIN_LEVEL = 4;
 
 // -- Data structures ----------------------------------------------------------

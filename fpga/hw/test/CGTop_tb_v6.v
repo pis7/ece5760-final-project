@@ -1,18 +1,24 @@
-// Testbench for v6 CGTop (parallel x/y solve datapaths).
+// Testbench for v6 CGTop (parallel x/y solve datapaths). 10 slaves
+// (6 Q + cx + cy + x + y); Q load writes the same data into both
+// engine copies.
 //
-// Differs from CGTop_tb_v5.v in that v6 duplicates the Q-CSR triplet
-// across x and y engines (q_val_x/q_val_y, q_col_x/q_col_y,
-// q_rowp_x/q_rowp_y). Total slaves modeled here: 10 (6 Q + cx + cy +
-// x + y). Q load writes the same data into both copies.
+// p_int_bits / p_frac_bits / p_max_n are top-level parameters,
+// overridable via -Gp_int_bits / -Gp_frac_bits / -Gp_max_n at simulator
+// build time. WORD_BITS up to 64 is supported; the FPGA build stays
+// 27-bit.
+module CGTop_tb #(
+  parameter int p_int_bits  = 13,
+  parameter int p_frac_bits = 14,
+  parameter int p_max_n     = 50
+);
 
-module CGTop_tb;
-
-  // Parameters (must match CGTop defaults)
-  localparam MAX_N       = 50;
-  localparam INT_BITS    = 13;
-  localparam FRAC_BITS   = 14;
+  localparam MAX_N       = p_max_n;
+  localparam INT_BITS    = p_int_bits;
+  localparam FRAC_BITS   = p_frac_bits;
+  localparam TOTAL_BITS  = INT_BITS + FRAC_BITS;
+  localparam WORD_BITS   = (TOTAL_BITS <= 32) ? 32 : 64;
   localparam ADDR_BITS   = 32;
-  localparam FRAC_SCALE  = 1 << FRAC_BITS;
+  localparam longint FRAC_SCALE = longint'(1) << FRAC_BITS;
 
   // Golden-side memory layout (the layout the DPI golden expects).
   // Same v4 contiguous layout shared with CGTop_tb_v5 -- only one Q
@@ -27,13 +33,15 @@ module CGTop_tb;
   localparam Y_BASE      = 2 * MAX_N * MAX_N + 4 * MAX_N + 1;
   localparam TOTAL_WORDS = 2 * MAX_N * MAX_N + 5 * MAX_N + 1;
 
-  // DPI import
+  // DPI import. mem holds both 32-bit indices and (up to 64-bit) values
+  // uniformly as longint -- the shared int64_t storage keeps the C++
+  // side simple regardless of TOTAL_BITS.
   import "DPI-C" function void dpi_cg_solve(
-    inout int mem [],
-    input int n,
-    input int max_n,
-    input int max_iter,
-    input int eps_sq
+    inout longint mem [],
+    input int     n,
+    input int     max_n,
+    input int     max_iter,
+    input longint eps_sq
   );
 
   // Clock and reset
@@ -71,30 +79,36 @@ module CGTop_tb;
   logic                 q_val_y_we,    q_col_y_we,    q_rowp_y_we;
   logic                 cx_we,         cy_we;
   logic                 x_we,          y_we;
-  logic [31:0]          q_val_x_rdata, q_col_x_rdata, q_rowp_x_rdata;
-  logic [31:0]          q_val_y_rdata, q_col_y_rdata, q_rowp_y_rdata;
-  logic [31:0]          cx_rdata,      cy_rdata;
-  logic [31:0]          x_rdata,       y_rdata;
-  logic [31:0]          q_val_x_wdata, q_col_x_wdata, q_rowp_x_wdata;
-  logic [31:0]          q_val_y_wdata, q_col_y_wdata, q_rowp_y_wdata;
-  logic [31:0]          cx_wdata,      cy_wdata;
-  logic [31:0]          x_wdata,       y_wdata;
+  // Only the value-carrying slaves widen with WORD_BITS; q_col / q_rowp
+  // are plain integer indices and stay 32-bit.
+  logic [WORD_BITS-1:0] q_val_x_rdata, q_val_y_rdata;
+  logic [31:0]          q_col_x_rdata, q_rowp_x_rdata;
+  logic [31:0]          q_col_y_rdata, q_rowp_y_rdata;
+  logic [WORD_BITS-1:0] cx_rdata,      cy_rdata;
+  logic [WORD_BITS-1:0] x_rdata,       y_rdata;
+  logic [WORD_BITS-1:0] q_val_x_wdata, q_val_y_wdata;
+  logic [31:0]          q_col_x_wdata, q_rowp_x_wdata;
+  logic [31:0]          q_col_y_wdata, q_rowp_y_wdata;
+  logic [WORD_BITS-1:0] cx_wdata,      cy_wdata;
+  logic [WORD_BITS-1:0] x_wdata,       y_wdata;
   logic [3:0]           q_val_x_be,    q_col_x_be,    q_rowp_x_be;
   logic [3:0]           q_val_y_be,    q_col_y_be,    q_rowp_y_be;
   logic [3:0]           cx_be,         cy_be;
   logic [3:0]           x_be,          y_be;
 
-  // Per-slave behavioral memories (each local-base 0).
-  int q_val_x_mem  [MAX_N * MAX_N];
-  int q_col_x_mem  [MAX_N * MAX_N];
-  int q_rowp_x_mem [MAX_N + 1];
-  int q_val_y_mem  [MAX_N * MAX_N];
-  int q_col_y_mem  [MAX_N * MAX_N];
-  int q_rowp_y_mem [MAX_N + 1];
-  int cx_mem       [MAX_N];
-  int cy_mem       [MAX_N];
-  int x_mem        [MAX_N];
-  int y_mem        [MAX_N];
+  // Per-slave behavioral memories (each local-base 0). Value-carrying
+  // slaves are sized to WORD_BITS so they can hold up to int+frac=64
+  // fixed-point words; index slaves stay 32-bit.
+  logic signed [WORD_BITS-1:0] q_val_x_mem  [MAX_N * MAX_N];
+  int                          q_col_x_mem  [MAX_N * MAX_N];
+  int                          q_rowp_x_mem [MAX_N + 1];
+  logic signed [WORD_BITS-1:0] q_val_y_mem  [MAX_N * MAX_N];
+  int                          q_col_y_mem  [MAX_N * MAX_N];
+  int                          q_rowp_y_mem [MAX_N + 1];
+  logic signed [WORD_BITS-1:0] cx_mem       [MAX_N];
+  logic signed [WORD_BITS-1:0] cy_mem       [MAX_N];
+  logic signed [WORD_BITS-1:0] x_mem        [MAX_N];
+  logic signed [WORD_BITS-1:0] y_mem        [MAX_N];
 
   // M10K shims (1-cycle synchronous read latency).
   always_ff @(posedge clk) begin
@@ -145,7 +159,8 @@ module CGTop_tb;
     .p_max_n          (MAX_N),
     .p_int_bits       (INT_BITS),
     .p_frac_bits      (FRAC_BITS),
-    .p_m10k_addr_bits (ADDR_BITS)
+    .p_m10k_addr_bits (ADDR_BITS),
+    .p_word_bits      (WORD_BITS)
   ) dut (
     .clk         (clk),
     .rst         (rst),
@@ -238,29 +253,31 @@ module CGTop_tb;
     .n        (n)
   );
 
-  // Golden reference memory (single contiguous, v4 layout)
-  int golden_mem [TOTAL_WORDS];
+  // Golden reference memory (single contiguous, v4 layout). Widened to
+  // longint so it can hold up to 64-bit fixed-point values uniformly;
+  // index slots use only the low 32 bits.
+  longint golden_mem [TOTAL_WORDS];
 
   int test_num;
   int fail_count;
 
-  function int to_fp(real v);
-    return int'(v * real'(FRAC_SCALE));
+  function automatic longint to_fp(real v);
+    return longint'(v * real'(FRAC_SCALE));
   endfunction
 
   // Load a test into both DUT (per-slave memories, with Q duplicated
   // across the x and y trios) and golden (one contiguous mem with v4
   // layout, single Q copy).
   task automatic load_test(
-    input int t_n,
-    input int nnz,
-    input int row_ptr [],
-    input int col_idx [],
-    input int vals    [],
-    input int cx      [],
-    input int x0      [],
-    input int cy      [],
-    input int y0      []
+    input int     t_n,
+    input int     nnz,
+    input int     row_ptr [],
+    input int     col_idx [],
+    input longint vals    [],
+    input longint cx      [],
+    input longint x0      [],
+    input longint cy      [],
+    input longint y0      []
   );
     // Zero everything
     for (int i = 0; i < MAX_N * MAX_N; i++) begin
@@ -341,13 +358,13 @@ module CGTop_tb;
     input string test_name,
     inout int mismatch
   );
-    int dut_v, gold_v;
+    longint dut_v, gold_v;
     real dut_real, gold_real;
     for (int i = 0; i < t_n; i++) begin
       dut_v  = pick_y ? y_mem[i] : x_mem[i];
       gold_v = golden_mem[gold_base + i];
-      dut_real  = $itor(dut_v)  / real'(FRAC_SCALE);
-      gold_real = $itor(gold_v) / real'(FRAC_SCALE);
+      dut_real  = real'(dut_v)  / real'(FRAC_SCALE);
+      gold_real = real'(gold_v) / real'(FRAC_SCALE);
       if (dut_v !== gold_v) begin
         $display("  FAIL %s: %s[%0d] dut=%.6f gold=%.6f (raw dut=%0d gold=%0d diff=%0d)",
                  test_name, vec_name, i, dut_real, gold_real, dut_v, gold_v, dut_v - gold_v);
@@ -372,16 +389,16 @@ module CGTop_tb;
   endtask
 
   task automatic run_test(
-    input string name,
-    input int    t_n,
-    input int    nnz,
-    input int    row_ptr [],
-    input int    col_idx [],
-    input int    vals    [],
-    input int    cx      [],
-    input int    cy      [],
-    input int    x0      [],
-    input int    y0      []
+    input string  name,
+    input int     t_n,
+    input int     nnz,
+    input int     row_ptr [],
+    input int     col_idx [],
+    input longint vals    [],
+    input longint cx      [],
+    input longint cy      [],
+    input longint x0      [],
+    input longint y0      []
   );
     test_num++;
     n = t_n;
@@ -393,13 +410,13 @@ module CGTop_tb;
   endtask
 
   task automatic build_uniform_tridiag(
-    input  int t_n,
-    input  int diag_fp,
-    input  int off_fp,
-    output int row_ptr [],
-    output int col_idx [],
-    output int vals    [],
-    output int nnz
+    input  int     t_n,
+    input  longint diag_fp,
+    input  longint off_fp,
+    output int     row_ptr [],
+    output int     col_idx [],
+    output longint vals    [],
+    output int     nnz
   );
     int idx;
     nnz = 3 * t_n - 2;

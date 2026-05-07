@@ -1,23 +1,7 @@
-// v2 CGCtrl: monolithic FSM. CGDpath is a pure datapath (no FSM of
-// its own); CGCtrl drives every mux select, latch enable, and val/rdy
-// handshake signal.
-//
-// A single `sel_y` register picks between x/y base addresses in the
-// inner sub-states so the same FSM runs both x and y solves.
-//
-// p_lanes parallelism:
-//   - The streaming phases (VDOT feeds, AXPY feeds, VNS, COPY_D) use
-//     stream_idx as a *group* counter, 0..num_groups-1 where
-//     num_groups = ceil(n/p_lanes). Each cycle/handshake covers
-//     p_lanes elements.
-//   - The per-element phases (LD, WB, SPMV COLLECT) still use
-//     stream_idx as an element counter, 0..n-1.
-//   - For group phases CGCtrl drives the p_lanes-wide RF ports via
-//     group_idx_packed/group_in_valid (input side) and
-//     group_out_packed/group_out_valid (AXPY output side). Out-of-n
-//     lanes have valid=0 so CGDpath returns zero on reads and we[k]
-//     is gated off for writes.
-//   - For element phases CGCtrl uses lane 0 only (other lanes masked).
+// v2 CGCtrl: monolithic FSM. CGDpath has no FSM of its own; CGCtrl
+// drives every mux select, latch enable, and val/rdy handshake signal.
+// A single sel_y register picks x/y base addresses so the same FSM
+// runs both x and y solves.
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -25,8 +9,11 @@ module CGCtrl #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_cx_x_base_addr   = 2 * p_max_n * p_max_n + p_max_n + 1,
   parameter p_cx_y_base_addr   = 2 * p_max_n * p_max_n + 2 * p_max_n + 1,
   parameter p_x_base_addr      = 2 * p_max_n * p_max_n + 3 * p_max_n + 1,
@@ -55,7 +42,7 @@ module CGCtrl #(
   // Memory bus driven by CGCtrl during LD / WB
   output logic [p_m10k_addr_bits-1:0] ctrl_mem_addr,
   output logic                        ctrl_mem_wr_en,
-  output logic [31:0]                 ctrl_mem_wdata,
+  output logic [p_word_bits-1:0]      ctrl_mem_wdata,
   output logic                        ctrl_mem_src_spmv,
 
   // RF read ports (p_lanes-wide)
@@ -208,7 +195,7 @@ module CGCtrl #(
   // Convergence test
   //----------------------------------------------------------------------
   logic signed [p_acc_bits-1:0] eps_sq_wide;
-  assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));
+  assign eps_sq_wide = p_acc_bits'($signed(eps_sq));
 
   logic run_converged;
   assign run_converged = (iter >= max_iter)
@@ -226,11 +213,8 @@ module CGCtrl #(
                              : p_m10k_addr_bits'(p_cx_x_base_addr);
 
   //----------------------------------------------------------------------
-  // Per-lane index / valid helpers.
-  //  group_* are driven from stream_idx (input side) and out_idx (AXPY
-  //  output side) with elem = (group << CLOG2_LANES) + k.
-  //  single_* are lane-0-only forms for LD / WB / SPMV-COLLECT which
-  //  use stream_idx directly as an element index.
+  // Per-lane index / valid helpers. group_* drive p_lanes-wide phases
+  // (elem = (group << CLOG2_LANES) + k); single_* are lane-0-only.
   //----------------------------------------------------------------------
   logic [p_lanes*IDX_W-1:0] group_in_idx_packed;
   logic [p_lanes-1:0]       group_in_valid;
@@ -367,9 +351,9 @@ module CGCtrl #(
   end
 
   //----------------------------------------------------------------------
-  // sel_y, stream_idx, out_idx updates
+  // sel_y, stream_idx, out_idx updates. A "phase" groups states that
+  // share the same streaming counter.
   //----------------------------------------------------------------------
-  // A "phase" groups states that share the same streaming counter.
   function automatic logic [4:0] phase_of(state_t s);
     case (s)
       S_LD_X_ADDR,         S_LD_X_CAPT:          phase_of = 5'd1;
@@ -704,7 +688,7 @@ module CGCtrl #(
         rd_a_sel        = RF_X_VEC_REG;
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_lane0_mask;
-        ctrl_mem_wdata  = 32'($signed(rd_a_data_lane0));
+        ctrl_mem_wdata  = p_word_bits'($signed(rd_a_data_lane0));
         if (stream_idx == n - 32'd1 && !sel_y)
           reset_iter = 1'b1;
       end

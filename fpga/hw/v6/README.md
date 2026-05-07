@@ -137,6 +137,58 @@ M10K trios -- see
 and
 [`cg_fpga_mmap_driver_v6.h`](../../sw/cg_fpga_mmap_driver_v6.h).
 
+## Scaling beyond the bitstream defaults (verilated only)
+
+The FPGA bitstream is locked to `p_int_bits=13`, `p_frac_bits=14`,
+`p_max_n=50`. The verilator path is fully parameterized over those and
+is the only way to explore wider Q-format / larger N for v6. Pass the
+knobs straight to `run-placer` (see the [top-level
+README](../../../README.md#quick-start) for the full story):
+
+```bash
+uv run run-placer verilated ../benchmarks/iccad04/DMA \
+    --max-n 12000 --int-bits 44 --frac-bits 20 --max-iter 30
+```
+
+What this exercised in v6 and the changes that landed for it:
+
+- **RTL** -- already parameterized via `p_int_bits`, `p_frac_bits`,
+  `p_max_n` end-to-end (CGTop -> CGEngine -> CGCtrl/CGDpath ->
+  LinAlg/FpMath). Verilator re-elaborates with `-Gp_int_bits=...`
+  `-Gp_frac_bits=...` `-Gp_max_n=...`, no RTL edits needed.
+- **FpDiv width split** -- [FpMath.v](FpMath.v) already had a
+  `generate` that picks `FpDivNR` when `p_total_bits <= 27` and
+  `FpDivSS` (parameterized shift-subtract) otherwise. NR is hard-wired
+  to 48-bit / Q1.16 internals so it can't be stretched past 27;
+  `FpDivSS` covers the wider regime correctly at the cost of
+  `(p_wide_bits + p_frac_bits)` iteration latency per divide.
+- **Verilator driver mirror** --
+  [`cg_verilator_driver_v6.h`](../../../sw-baseline-c/cg_verilator_driver_v6.h)
+  used to declare its ten behavioral memories as fixed-size C arrays
+  inline in `CGHwDriver`, which made the whole class
+  `~MAX_N*MAX_N` words on the stack. Fine at `MAX_N=50` (~30 KB) but
+  ~3 GB at `MAX_N=12000`, which segfaults `Placer placer(argv[1])` in
+  `main()` before the first printf. The mirrors are now
+  `std::vector`s, sized in the constructor's member-init list (heap).
+- **Solve timeout** -- the driver's `while (!sw_done)` polling cap
+  was 1,000,000 sim cycles, sized for `parallel_chains_50`. At
+  `MAX_N=12000` a single solve can need many millions of cycles
+  (each SPMV is `ceil(n/p_lanes)` handshakes per CG iter, and
+  `CG_MAX_ITER` is 1000); the cap is now 100,000,000.
+
+The FPGA mmap driver
+([`cg_fpga_mmap_driver_v6.h`](../../sw/cg_fpga_mmap_driver_v6.h)) is
+unchanged -- it writes through the h2f bridge instead of mirroring,
+so it has no `MAX_N`-quadratic storage to grow.
+
+**Bit-budget caveat.** `FpMul` (used in AXPY for `alpha*d[i]` and
+`beta*d[i]`) wraps on overflow, it does not saturate. `int_bits` must
+be wide enough that the largest intermediate fits in
+`2^(int_bits-1)` real units; for ICCAD04-scale positions plus the
+exponentially-growing partition `alpha`, 28 integer bits silently
+wraps and the placement piles cells at the die corners. 44 bits is
+the sweet spot for 30-iter ICCAD04 runs.
+
 ## Verification
 
 Bit-exact against the DPI golden CG in `fpga/hw/test/`:

@@ -1,9 +1,13 @@
+// v1 CG datapath: combinational SPMV/VecDot/AXPY/FpDiv chain. cg_data
+// is read-only here; CGTop owns the writeback into x/y slots.
+
 module CGDpath #(
   parameter p_max_n            = 50,
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
   parameter p_acc_bits         = 48,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_q_val_base_addr  = 0,
   parameter p_q_col_base_addr  = p_max_n * p_max_n,
   parameter p_q_rowp_base_addr = 2 * p_max_n * p_max_n,

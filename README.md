@@ -55,14 +55,47 @@ uv run run-placer fpga         ../benchmarks/custom     # runs every custom benc
 uv run run-placer verilated ../benchmarks/custom/parallel_chains_50 --sweep
 ```
 
-`golden` and `verilated` both accept `--frac-bits B` (default 14, range
-`[1, 26]`) to sweep precision; total stays at 27 bits, so `int_bits =
-27 - frac_bits`. The other backends ignore it.
+`golden` and `verilated` accept three knobs to scale past the
+synthesized 27-bit / `MAX_N=50` bitstream:
 
-`golden`, `verilated`, and `fpga` are capped at `MAX_N=50` cells (the
-synthesized bitstream + the C++ driver mirrors are sized for it). Use
-[`benchmarks/custom/`](benchmarks/custom/) for those modes; ICCAD04 only
-fits on `python`, `sw`, and `arm`.
+- `--int-bits I` (default 13) and `--frac-bits B` (default 14) set the
+  fixed-point Q-format. `int_bits + frac_bits <= 64`. Widths up to 27
+  match the locked FPGA bitstream; widths above 27 are accepted only by
+  `golden` and `verilated` (verilator re-elaborates the RTL with
+  `-Gp_int_bits` / `-Gp_frac_bits`).
+- `--max-n N` (default 50) sets the placer's hardware-N cap, the
+  Verilog `p_max_n`, and the driver's mirror sizes. Only `golden` and
+  `verilated` honor it; `sw` / `arm` / `fpga` reject it because the
+  bitstream is fixed at 50.
+- `--max-iter K` caps the outer placer loop (default 16). Useful for
+  long benchmarks where you want to push past the default cap, or to
+  shorten a debugging run. Mutually exclusive with `--sweep`.
+
+`fpga` is the only mode capped at `MAX_N=50`. `sw` / `arm` use doubles
+and dynamic vectors so they take any size; `golden` / `verilated` scale
+to whatever `--max-n` you pass at the cost of `O(MAX_N^2)` driver
+memory (~3 GB at `MAX_N=12000`, heap-allocated, fine on a workstation).
+
+```bash
+# ICCAD04 DMA (~12k cells) through the fixed-point golden CG, 30 iters,
+# Q44.20 to give alpha*d enough integer headroom (see "Picking the bit
+# split" below):
+uv run run-placer golden    ../benchmarks/iccad04/DMA \
+    --max-n 12000 --int-bits 44 --frac-bits 20 --max-iter 30
+
+# Same shape under the Verilator RTL (slow -- expect ~25s/CG solve at
+# this size since Verilator simulates every cycle in software):
+uv run run-placer verilated ../benchmarks/iccad04/DMA \
+    --max-n 12000 --int-bits 44 --frac-bits 20 --max-iter 30
+```
+
+**Picking the bit split.** `int_bits` must be wide enough that no
+intermediate (notably `alpha * d[i]` inside CG) overflows
+`2^(int_bits-1)` in real units. For ICCAD04-scale designs (positions
+~2x10^5 in DBU, alpha doubling per outer iteration), 28 integer bits
+is too narrow and CG silently wraps around iter 9; 44 integer bits has
+plenty of headroom for 30 outer iters. `frac_bits` only needs to give
+sub-DBU precision -- 12-20 is generally fine.
 
 Each run writes `<design>-initial.json`, `<design>-final.json`, and a
 `<design>-final.png` rendering of the final placement to the build dir.
@@ -432,12 +465,17 @@ mkdir -p build && cd build
 
 uv run run-placer python       ../benchmarks/iccad04/DMA               # Python baseline
 uv run run-placer sw           ../benchmarks/iccad04/DMA               # SW CG (double precision)
-uv run run-placer golden       ../benchmarks/custom/parallel_chains_50 # FP golden CG (SW); --frac-bits B (default 14)
-uv run run-placer verilated    ../benchmarks/custom/parallel_chains_50 # Verilator CG (default v6); --frac-bits B
+uv run run-placer golden       ../benchmarks/custom/parallel_chains_50 # FP golden CG (SW); --int-bits / --frac-bits / --max-n / --max-iter
+uv run run-placer verilated    ../benchmarks/custom/parallel_chains_50 # Verilator CG (default v6); same scaling knobs as golden
 uv run run-placer verilated v3 ../benchmarks/custom/parallel_chains_50 # Verilator CG (older version)
 uv run run-placer arm          ../benchmarks/iccad04/DMA               # SW CG on the DE1-SoC ARM
-uv run run-placer fpga         ../benchmarks/custom/parallel_chains_50 # Real FPGA bitstream (default v6); MAX_N=50
+uv run run-placer fpga         ../benchmarks/custom/parallel_chains_50 # Real FPGA bitstream (default v6); MAX_N=50, locked Q13.14
 ```
+
+`--int-bits I` / `--frac-bits B` / `--max-n N` / `--max-iter K` are
+documented in the [Quick start](#quick-start) section -- only `golden`
+and `verilated` honor the first three; `--max-iter` works on every
+mode except `python` and is mutually exclusive with `--sweep`.
 
 The `arm` and `fpga` modes need `arm-linux-gnueabihf-g++` on the host;
 SSH/SCP to the board are handled in-process by

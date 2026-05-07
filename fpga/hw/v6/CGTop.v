@@ -1,14 +1,8 @@
-// Toplevel v6 Verilog: synthesizable parallel-x/y CG solver for DE1-SoC.
-//
-// Two independent CGEngine instances share one FPGA: engine_x reads
-// its dimension's {q_val_x, q_col_x, q_rowp_x, cx, x} slaves and
-// engine_y reads its dimension's {q_val_y, q_col_y, q_rowp_y, cy, y}
-// slaves. The Q matrix is duplicated across two M10K trios so the two
-// SPMVs run fully in parallel with zero contention.
-//
-// One sw_go pulse from the ARM kicks off both engines simultaneously.
-// sw_done = engine_x.done & engine_y.done; sw_done_ack fans out to
-// both.
+// Toplevel v6 Verilog: parallel-x/y CG solver for DE1-SoC. Two
+// CGEngine instances run in lockstep, each owning a private {q_val,
+// q_col, q_rowp, c, xy} slave trio. Q is duplicated across two M10K
+// trios so the SPMVs run with zero contention. One sw_go pulse fires
+// both engines; sw_done = engine_x.done & engine_y.done.
 
 module CGTop #(
   parameter p_lanes            = 8,
@@ -16,8 +10,17 @@ module CGTop #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
-  parameter p_m10k_addr_bits   = 32
+  // 48 keeps the Q13.14 build bit-identical and matches the NR FpDiv's
+  // hardcoded 48-bit internals; the wider branch sizes the wide
+  // accumulator to fit a full SPMV/dot-product without overflow.
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
+  parameter p_m10k_addr_bits   = 32,
+  // Avalon data-port width for value-carrying slaves (q_val/c/xy). 32
+  // keeps the FPGA build identical; widen to 64 in verilated mode when
+  // a single Q value no longer fits.
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic clk,
   input  logic rst,
@@ -28,12 +31,14 @@ module CGTop #(
   input  logic sw_done_ack,
 
   // -- x engine's Q-CSR Avalon slaves (read-only) ------------------------
+  // q_val carries fixed-point values (p_word_bits wide); q_col / q_rowp
+  // carry plain integer indices and stay 32-bit.
   output logic [p_m10k_addr_bits-1:0] q_val_x_ram_address,
   output logic                        q_val_x_ram_chipselect,
   output logic                        q_val_x_ram_clken,
   output logic                        q_val_x_ram_write,
-  input  logic [31:0]                 q_val_x_ram_readdata,
-  output logic [31:0]                 q_val_x_ram_writedata,
+  input  logic [p_word_bits-1:0]      q_val_x_ram_readdata,
+  output logic [p_word_bits-1:0]      q_val_x_ram_writedata,
   output logic [3:0]                  q_val_x_ram_byteenable,
 
   output logic [p_m10k_addr_bits-1:0] q_col_x_ram_address,
@@ -57,8 +62,8 @@ module CGTop #(
   output logic                        q_val_y_ram_chipselect,
   output logic                        q_val_y_ram_clken,
   output logic                        q_val_y_ram_write,
-  input  logic [31:0]                 q_val_y_ram_readdata,
-  output logic [31:0]                 q_val_y_ram_writedata,
+  input  logic [p_word_bits-1:0]      q_val_y_ram_readdata,
+  output logic [p_word_bits-1:0]      q_val_y_ram_writedata,
   output logic [3:0]                  q_val_y_ram_byteenable,
 
   output logic [p_m10k_addr_bits-1:0] q_col_y_ram_address,
@@ -82,8 +87,8 @@ module CGTop #(
   output logic                        cx_ram_chipselect,
   output logic                        cx_ram_clken,
   output logic                        cx_ram_write,
-  input  logic [31:0]                 cx_ram_readdata,
-  output logic [31:0]                 cx_ram_writedata,
+  input  logic [p_word_bits-1:0]      cx_ram_readdata,
+  output logic [p_word_bits-1:0]      cx_ram_writedata,
   output logic [3:0]                  cx_ram_byteenable,
 
   // -- cy_ram (y engine's c-vector, read-only) ---------------------------
@@ -91,8 +96,8 @@ module CGTop #(
   output logic                        cy_ram_chipselect,
   output logic                        cy_ram_clken,
   output logic                        cy_ram_write,
-  input  logic [31:0]                 cy_ram_readdata,
-  output logic [31:0]                 cy_ram_writedata,
+  input  logic [p_word_bits-1:0]      cy_ram_readdata,
+  output logic [p_word_bits-1:0]      cy_ram_writedata,
   output logic [3:0]                  cy_ram_byteenable,
 
   // -- x_ram (x engine's load + writeback) -------------------------------
@@ -100,8 +105,8 @@ module CGTop #(
   output logic                        x_ram_chipselect,
   output logic                        x_ram_clken,
   output logic                        x_ram_write,
-  input  logic [31:0]                 x_ram_readdata,
-  output logic [31:0]                 x_ram_writedata,
+  input  logic [p_word_bits-1:0]      x_ram_readdata,
+  output logic [p_word_bits-1:0]      x_ram_writedata,
   output logic [3:0]                  x_ram_byteenable,
 
   // -- y_ram (y engine's load + writeback) -------------------------------
@@ -109,8 +114,8 @@ module CGTop #(
   output logic                        y_ram_chipselect,
   output logic                        y_ram_clken,
   output logic                        y_ram_write,
-  input  logic [31:0]                 y_ram_readdata,
-  output logic [31:0]                 y_ram_writedata,
+  input  logic [p_word_bits-1:0]      y_ram_readdata,
+  output logic [p_word_bits-1:0]      y_ram_writedata,
   output logic [3:0]                  y_ram_byteenable,
 
   // CG solve parameters (broadcast to both engines).
@@ -155,7 +160,8 @@ module CGTop #(
     .p_frac_bits      (p_frac_bits),
     .p_total_bits     (p_total_bits),
     .p_acc_bits       (p_acc_bits),
-    .p_m10k_addr_bits (p_m10k_addr_bits)
+    .p_m10k_addr_bits (p_m10k_addr_bits),
+    .p_word_bits      (p_word_bits)
   ) engine_x (
     .clk,
     .rst         (rst_q),
@@ -217,7 +223,8 @@ module CGTop #(
     .p_frac_bits      (p_frac_bits),
     .p_total_bits     (p_total_bits),
     .p_acc_bits       (p_acc_bits),
-    .p_m10k_addr_bits (p_m10k_addr_bits)
+    .p_m10k_addr_bits (p_m10k_addr_bits),
+    .p_word_bits      (p_word_bits)
   ) engine_y (
     .clk,
     .rst         (rst_q),

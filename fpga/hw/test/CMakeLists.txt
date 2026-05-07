@@ -3,18 +3,16 @@ project(CGTop_tb LANGUAGES CXX)
 
 set(DPI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/cg_golden_dpi.cpp")
 
+set(INT_BITS  "13" CACHE STRING "Fixed-point integer bits (sets CGTop_tb p_int_bits and CG_GOLDEN_TOTAL_BITS).")
+set(FRAC_BITS "14" CACHE STRING "Fixed-point fractional bits (sets CGTop_tb p_frac_bits and CG_GOLDEN_FRAC_BITS).")
+set(MAX_N     "50" CACHE STRING "Max problem size (sets CGTop_tb p_max_n and CGTop p_max_n).")
+math(EXPR TB_TOTAL_BITS "${INT_BITS} + ${FRAC_BITS}")
+if(TB_TOTAL_BITS GREATER 64)
+    message(FATAL_ERROR "INT_BITS + FRAC_BITS (=${TB_TOTAL_BITS}) exceeds 64.")
+endif()
+
 # Build one Verilator testbench target for an RTL version directory.
-#
 # Usage:  add_verilator_tb(<version> <rtl_dir> <tb_name> [extra_cflags])
-#   <version>    -- e.g. v1, v2, v3. Used as the target suffix.
-#   <rtl_dir>    -- absolute path to the directory holding CGTop.v et al.
-#   <tb_name>    -- testbench file basename (without .v). Allows a
-#                   per-version testbench when memory topology differs.
-#   [extra_cflags] -- optional extra -CFLAGS string (e.g. for v3 NR golden).
-#
-# The Verilator output binary V<tb_name> is staged as VCGTop_tb_<version>
-# regardless of the underlying tb_name, so consumers always invoke
-# ./VCGTop_tb_<version>.
 function(add_verilator_tb VERSION RTL_DIR TB)
   set(EXTRA_CFLAGS "${ARGN}")
   set(VDIR "${CMAKE_CURRENT_BINARY_DIR}/vobj_${VERSION}")
@@ -30,7 +28,6 @@ function(add_verilator_tb VERSION RTL_DIR TB)
   if(EXISTS "${RTL_DIR}/M10KLoader.v")
     list(APPEND RTL_SRCS ${RTL_DIR}/M10KLoader.v)
   endif()
-  # v6 adds a CGEngine wrapper that CGTop instantiates twice.
   if(EXISTS "${RTL_DIR}/CGEngine.v")
     list(APPEND RTL_SRCS ${RTL_DIR}/CGEngine.v)
   endif()
@@ -41,12 +38,13 @@ function(add_verilator_tb VERSION RTL_DIR TB)
       -Wno-UNUSEDPARAM -Wno-BLKSEQ -Wno-DECLFILENAME
       --top-module CGTop_tb
       --Mdir ${VDIR}
+      -Gp_int_bits=${INT_BITS} -Gp_frac_bits=${FRAC_BITS} -Gp_max_n=${MAX_N}
       ${CMAKE_CURRENT_SOURCE_DIR}/${TB}.v
       ${RTL_SRCS}
       ${DPI_SRC}
-      -CFLAGS "-std=c++17 ${EXTRA_CFLAGS} -I${CMAKE_CURRENT_SOURCE_DIR}/../../../sw-baseline-c"
+      -CFLAGS "-std=c++17 ${EXTRA_CFLAGS} -DCG_GOLDEN_FRAC_BITS=${FRAC_BITS} -DCG_GOLDEN_TOTAL_BITS=${TB_TOTAL_BITS} -I${CMAKE_CURRENT_SOURCE_DIR}/../../../sw-baseline-c"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Building ${TB} (${VERSION}) with Verilator"
+    COMMENT "Building ${TB} (${VERSION}) with Verilator (Q${INT_BITS}.${FRAC_BITS})"
   )
 
   add_custom_command(TARGET ${TARGET} POST_BUILD
@@ -55,13 +53,9 @@ function(add_verilator_tb VERSION RTL_DIR TB)
   )
 endfunction()
 
-# v1 / v2 use the shift-subtract divide; v3 / v4 use NR FpDiv (DPI golden
-# needs CG_GOLDEN_USE_NR). v5 uses the same NR FpDiv as v4 but has a
-# separate testbench because its memory topology is multi-block. v5_deep
-# inherits v5's memory topology and reuses CGTop_tb_v5 -- only its SPMV
-# inner loop is pipelined. v6 forks v5 to add parallel x/y solve
-# datapaths -- 10 slaves (Q duplicated across two engines), so it has
-# its own testbench.
+# v1/v2 use shift-subtract divide; v3..v5_deep use NR FpDiv (DPI golden
+# needs CG_GOLDEN_USE_NR). v5/v5_deep have multi-block memory; v6 has
+# parallel x/y engines with 10 slaves.
 add_verilator_tb(v1      ${CMAKE_CURRENT_SOURCE_DIR}/../v1      CGTop_tb)
 add_verilator_tb(v2      ${CMAKE_CURRENT_SOURCE_DIR}/../v2      CGTop_tb)
 add_verilator_tb(v3      ${CMAKE_CURRENT_SOURCE_DIR}/../v3      CGTop_tb    -DCG_GOLDEN_USE_NR)

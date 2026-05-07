@@ -552,13 +552,18 @@ module SPMVDpath #(
   parameter p_frac_bits  = 14,
   parameter p_total_bits = p_int_bits + p_frac_bits,
   parameter p_acc_bits   = 48,
-  parameter p_max_n      = 50
+  parameter p_max_n      = 50,
+  // Memory bus value-port width: 32 keeps the FPGA build / Q13.14
+  // testbench identical, 64 carries up to int+frac=64 in verilated mode.
+  parameter p_word_bits  = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
 
-  // From memory
-  input  logic [31:0]                    mem_rdata,
+  // From memory. SPMV reads val/col/rowp through this single shared
+  // port; val carries a fixed-point value (sign-extended into
+  // p_total_bits below), col and rowp carry plain integer indices.
+  input  logic [p_word_bits-1:0]         mem_rdata,
 
   // From RF read port (combinational lookup of vec[col_reg])
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -624,22 +629,26 @@ module SPMVDpath #(
       if (d_begin_op) begin
         row_idx <= '0;
       end
-      if (d_capture_rplo) rp_lo <= mem_rdata;
-      if (d_capture_rphi) rp_hi <= mem_rdata;
+      // rp_lo/rp_hi are 32-bit row pointers; truncate the wider mem
+      // word (col/rowp values fit in 32 bits regardless of p_word_bits).
+      if (d_capture_rplo) rp_lo <= mem_rdata[31:0];
+      if (d_capture_rphi) rp_hi <= mem_rdata[31:0];
       // Non-first row prologue: previous row's rp_hi becomes new row's
       // rp_lo, and the new rp_ptr[row+1] read from memory becomes the
       // new rp_hi. NBA: rp_lo gets the pre-edge rp_hi (previous row's
       // value) while rp_hi gets the new mem_rdata. Both fire same cycle.
       if (d_capture_rphi_next) begin
         rp_lo <= rp_hi;
-        rp_hi <= mem_rdata;
+        rp_hi <= mem_rdata[31:0];
       end
       if (d_init_row) begin
         j_idx <= rp_lo;
         acc   <= '0;
       end
       if (d_capture_val) val_reg <= p_total_bits'($signed(mem_rdata));
-      if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata));
+      // col_reg only carries a 32-bit index; truncate the wider mem
+      // word so synthesis doesn't warn about unused upper bits.
+      if (d_capture_col) col_reg <= p_total_bits'($signed(mem_rdata[31:0]));
       if (d_acc_en) begin
         acc   <= acc + product_wide;
         j_idx <= j_idx + 1;
@@ -659,7 +668,8 @@ module SPMV_seq #(
   parameter p_total_bits      = p_int_bits + p_frac_bits,
   parameter p_acc_bits        = 48,
   parameter p_max_n           = 50,
-  parameter p_m10k_addr_bits  = 32
+  parameter p_m10k_addr_bits  = 32,
+  parameter p_word_bits       = (p_total_bits <= 32) ? 32 : 64
 ) (
   input  logic                           clk,
   input  logic                           rst,
@@ -683,7 +693,7 @@ module SPMV_seq #(
   // Memory bus (SPMV drives addr; mem returns rdata 1 cycle later)
   output logic [p_m10k_addr_bits-1:0]    mem_addr,
   output logic                           mem_rd_en,
-  input  logic [31:0]                    mem_rdata,
+  input  logic [p_word_bits-1:0]         mem_rdata,
 
   // RF read port for vec[col]
   output logic [$clog2(p_max_n)-1:0]     vec_rd_idx,
@@ -713,7 +723,8 @@ module SPMV_seq #(
     .p_frac_bits (p_frac_bits),
     .p_total_bits(p_total_bits),
     .p_acc_bits  (p_acc_bits),
-    .p_max_n     (p_max_n)
+    .p_max_n     (p_max_n),
+    .p_word_bits (p_word_bits)
   ) u_dpath (
     .clk, .rst,
     .mem_rdata,
