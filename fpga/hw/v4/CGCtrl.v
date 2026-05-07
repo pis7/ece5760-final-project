@@ -1,20 +1,9 @@
-// v4 CGCtrl: parallel x-AXPY and r-AXPY, plus fused S_VNS_R that
-// writes r_reg and d_reg in the same cycle.
-//
-// S_AXPY_XR_FEED fires the x and r updates in lockstep using two AXPY
-// units in CGDpath:
-//   u_axpy_x: x += alpha * d   (ADD, reads via rd_a/rd_b)
-//   u_axpy_r: r -= alpha * q   (SUB, reads via rd_c/rd_d)
-// Both consume the same alpha coef; both produce a p_lanes-wide z per
-// handshake; both write back through independent write paths in the
-// same cycle (x_vec_reg via primary, r_reg via secondary).
-//
-// The secondary write port is also reused in S_VNS_R: the computed
-// r_new = -(cx + q) is written into both r_reg (primary) and d_reg
-// (secondary) on the same cycle.
-//
-// S_AXPY_D_FEED reuses u_axpy_x only; u_axpy_r idles outside
-// S_AXPY_XR_FEED.
+// v4 CGCtrl: solves Q*x = -cx, then Q*y = -cy via the sel_y latch.
+// S_AXPY_XR_FEED fires u_axpy_x (x += alpha*d) and u_axpy_r
+// (r -= alpha*q) in lockstep so both writebacks land in one cycle
+// (x_vec_reg primary, r_reg secondary). The secondary port is also
+// reused by S_VNS_R to write -(cx+q) into d_reg in parallel with the
+// primary r_reg write. S_AXPY_D_FEED reuses u_axpy_x only.
 
 module CGCtrl #(
   parameter p_lanes            = 4,
@@ -22,8 +11,11 @@ module CGCtrl #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_cx_x_base_addr   = 2 * p_max_n * p_max_n + p_max_n + 1,
   parameter p_cx_y_base_addr   = 2 * p_max_n * p_max_n + 2 * p_max_n + 1,
   parameter p_x_base_addr      = 2 * p_max_n * p_max_n + 3 * p_max_n + 1,
@@ -52,7 +44,7 @@ module CGCtrl #(
   // Memory bus driven by CGCtrl during LD / WB
   output logic [p_m10k_addr_bits-1:0] ctrl_mem_addr,
   output logic                        ctrl_mem_wr_en,
-  output logic [31:0]                 ctrl_mem_wdata,
+  output logic [p_word_bits-1:0]      ctrl_mem_wdata,
   output logic                        ctrl_mem_src_spmv,
 
   // RF read ports (p_lanes-wide). rd_a/rd_b are shared across all states;
@@ -272,7 +264,11 @@ module CGCtrl #(
   // Convergence test
   //----------------------------------------------------------------------
   logic signed [p_acc_bits-1:0] eps_sq_wide;
-  assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));
+  // eps_sq is the 32-bit ARM/PIO input (a small positive fixed-point
+  // threshold); sign-extending the whole word to p_acc_bits is safe at
+  // any p_total_bits in [2, 64] -- callers pre-clamp the value so the
+  // upper bits are zero.
+  assign eps_sq_wide = p_acc_bits'($signed(eps_sq));
 
   logic run_converged;
   assign run_converged = (iter >= max_iter)
@@ -629,7 +625,7 @@ module CGCtrl #(
         vdot_istream_val = (stream_idx < num_groups_reg);
         vdot_ostream_rdy = 1'b1;
         latch_rr_new     = vdot_out_hs;
-        init_rr_reg      = vdot_out_hs;  // bypass S_RR_REG_COPY: rr_reg <= vdot_result this cycle
+        init_rr_reg      = vdot_out_hs;
       end
 
       S_SPMV_RUN_FIRE: begin
@@ -751,7 +747,7 @@ module CGCtrl #(
         rd_a_sel        = RF_X_VEC_REG;
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_active_mask;
-        ctrl_mem_wdata  = 32'($signed(rd_a_data_active));
+        ctrl_mem_wdata  = p_word_bits'($signed(rd_a_data_active));
         if (stream_idx == n_minus_1_reg && !sel_y)
           reset_iter = 1'b1;
       end

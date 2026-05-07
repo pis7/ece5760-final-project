@@ -1,12 +1,6 @@
-// Toplevel v3 Verilog: synthesizable CG solver for DE1-SoC.
-//
-// Datapath talks directly to the Qsys on-chip SRAM via the Avalon
-// slave interface. A single flat FSM in CGCtrl drives every mux and
-// handshake in CGDpath -- there is no FSM inside CGDpath.
-//
-// The FPGA monopolizes the Avalon slave port for the duration of the
-// solve. That is fine because the ARM is blocked on the sw_done PIO
-// and is not touching the memory while sw_done is low.
+// Toplevel v3 Verilog: CG solver for DE1-SoC. Single shared on-chip
+// RAM (one Avalon port). Newton-Raphson FpDiv + row-prologue collapse
+// in SPMV.
 
 module CGTop #(
   parameter p_lanes            = 4,
@@ -14,8 +8,17 @@ module CGTop #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  // 48 keeps the Q13.14 build bit-identical and matches the NR FpDiv's
+  // hardcoded 48-bit internals; the wider branch sizes the wide
+  // accumulator to fit a full SPMV/dot-product without overflow.
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
+  // Avalon data-port width. 32 keeps the FPGA build identical; widen
+  // to 64 in verilated mode when a single fixed-point value no longer
+  // fits in 32 bits.
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_q_val_base_addr  = 0,
   parameter p_q_col_base_addr  = p_max_n * p_max_n,
   parameter p_q_rowp_base_addr = 2 * p_max_n * p_max_n,
@@ -38,8 +41,8 @@ module CGTop #(
   output logic                        on_chip_ram_chipselect,
   output logic                        on_chip_ram_clken,
   output logic                        on_chip_ram_write,
-  input  logic [31:0]                 on_chip_ram_readdata,
-  output logic [31:0]                 on_chip_ram_writedata,
+  input  logic [p_word_bits-1:0]      on_chip_ram_readdata,
+  output logic [p_word_bits-1:0]      on_chip_ram_writedata,
   output logic [3:0]                  on_chip_ram_byteenable,
 
   // CG solve parameters
@@ -49,22 +52,11 @@ module CGTop #(
 );
 
   //----------------------------------------------------------------------
-  // PIO input registration
-  //
-  // Every value coming from a Qsys PIO (cg_n, cg_max_iter, cg_eps_sq,
-  // and the cg_ctrl bits sw_go / sw_done_ack / rst) is registered once
-  // here on CLOCK_50 before being routed to CGCtrl or CGDpath. This
-  // breaks long combinational fanout from PIO outputs into the inner
-  // FSM next-state mux (sw_go), the dpath comparators in VecDot, AXPY
-  // and SPMV (n), and the convergence test (max_iter, eps_sq). Quartus
-  // had been reporting setup-time failures on cg_n -> cx_reg and
-  // cg_ctrl -> dpath flop paths; with these flops in front, every such
-  // path now starts at a CLOCK_50 register, not at the PIO directly.
-  //
-  // 1 cycle of latency on each of these inputs is harmless: cg_n /
-  // cg_max_iter / cg_eps_sq are stable for the whole solve, sw_go /
-  // sw_done_ack are level pulses that the FSM samples until acted on,
-  // and the soft-reset path holds rst for ~50000 cycles via usleep().
+  // PIO input registration. Every Qsys PIO (sw_go, sw_done_ack, rst,
+  // n, max_iter, eps_sq) is registered once here so downstream paths
+  // start at a CLOCK_50 register, not at the PIO. 1 cycle of latency
+  // is harmless: control bits are level pulses sampled by the FSM, and
+  // n/max_iter/eps_sq are stable for the whole solve.
   //----------------------------------------------------------------------
   logic        sw_go_q;
   logic        sw_done_ack_q;
@@ -94,7 +86,7 @@ module CGTop #(
   // CGCtrl-driven memory bus (muxed with SPMV's inside CGDpath)
   logic [p_m10k_addr_bits-1:0] ctrl_mem_addr;
   logic                        ctrl_mem_wr_en;
-  logic [31:0]                 ctrl_mem_wdata;
+  logic [p_word_bits-1:0]      ctrl_mem_wdata;
   logic                        ctrl_mem_src_spmv;
 
   // RF read ports (p_lanes-wide)
@@ -144,7 +136,7 @@ module CGTop #(
 
   logic [p_m10k_addr_bits-1:0] dp_mem_addr;
   logic                        dp_mem_wr_en;
-  logic [31:0]                 dp_mem_wdata;
+  logic [p_word_bits-1:0]      dp_mem_wdata;
 
   assign on_chip_ram_address    = dp_mem_addr;
   assign on_chip_ram_chipselect = 1'b1;
@@ -165,6 +157,7 @@ module CGTop #(
     .p_total_bits     (p_total_bits),
     .p_acc_bits       (p_acc_bits),
     .p_m10k_addr_bits (p_m10k_addr_bits),
+    .p_word_bits      (p_word_bits),
     .p_cx_x_base_addr (p_cx_x_base_addr),
     .p_cx_y_base_addr (p_cx_y_base_addr),
     .p_x_base_addr    (p_x_base_addr),
@@ -210,6 +203,7 @@ module CGTop #(
     .p_total_bits       (p_total_bits),
     .p_acc_bits         (p_acc_bits),
     .p_m10k_addr_bits   (p_m10k_addr_bits),
+    .p_word_bits        (p_word_bits),
     .p_q_val_base_addr  (p_q_val_base_addr),
     .p_q_col_base_addr  (p_q_col_base_addr),
     .p_q_rowp_base_addr (p_q_rowp_base_addr)

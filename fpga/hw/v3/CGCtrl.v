@@ -25,8 +25,11 @@ module CGCtrl #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_cx_x_base_addr   = 2 * p_max_n * p_max_n + p_max_n + 1,
   parameter p_cx_y_base_addr   = 2 * p_max_n * p_max_n + 2 * p_max_n + 1,
   parameter p_x_base_addr      = 2 * p_max_n * p_max_n + 3 * p_max_n + 1,
@@ -55,7 +58,7 @@ module CGCtrl #(
   // Memory bus driven by CGCtrl during LD / WB
   output logic [p_m10k_addr_bits-1:0] ctrl_mem_addr,
   output logic                        ctrl_mem_wr_en,
-  output logic [31:0]                 ctrl_mem_wdata,
+  output logic [p_word_bits-1:0]      ctrl_mem_wdata,
   output logic                        ctrl_mem_src_spmv,
 
   // RF read ports (p_lanes-wide)
@@ -116,10 +119,10 @@ module CGCtrl #(
   localparam IDX_W       = $clog2(p_max_n);
   localparam CLOG2_LANES = $clog2(p_lanes);
   // Narrow width for n, n-1, num_groups, num_groups-1, stream/out indices
-  // and e_in/e_out. n is in [0..p_max_n], so $clog2(p_max_n+1) bits suffice
-  // (6 bits for p_max_n=50 vs the original 32). Also the natural bound for
-  // stream_elem_base/e_in since (num_groups-1)*p_lanes + p_lanes-1 < p_max_n
-  // + p_lanes <= 2^N_W for typical configs (e.g. 50+4=54 fits in 6 bits).
+  // and e_in/e_out. n is in [0..p_max_n], so $clog2(p_max_n+1) bits
+  // suffice (e.g. 6 bits for p_max_n=50). Also the natural bound for
+  // stream_elem_base/e_in since (num_groups-1)*p_lanes + p_lanes-1 <
+  // p_max_n + p_lanes fits in N_W for typical configs (50+4=54 -> 6).
   localparam N_W         = $clog2(p_max_n + 1);
 
   //----------------------------------------------------------------------
@@ -205,16 +208,10 @@ module CGCtrl #(
   wire fpdiv_out_hs = fpdiv_ostream_val && fpdiv_ostream_rdy;
 
   //----------------------------------------------------------------------
-  // Registered narrow forms of n, n-1, num_groups, and num_groups-1.
-  //
-  // The cg_n PIO arrives unregistered at this module's `n` port and used
-  // to fan into 32-bit comparators / adders / shifters across the FSM
-  // next-state logic and the per-lane group_in_valid generator. Quartus
-  // reported a -19 ns WNS at 50 MHz on cg_n -> cx_reg as a result.
-  //
-  // Capturing n once at S_IDLE -> S_PREP and reusing the registered
-  // N_W-bit forms (a) breaks the long combinational chain off the PIO
-  // and (b) shrinks every dependent comparator from 32 bits to 6 bits.
+  // Registered narrow forms of n, n-1, num_groups, num_groups-1.
+  // Capturing n once at S_IDLE -> S_PREP and reusing the N_W-bit forms
+  // breaks the combinational chain off the PIO and shrinks every
+  // dependent comparator from 32 bits to N_W bits.
   //----------------------------------------------------------------------
   logic [N_W-1:0] n_narrow;
   logic [N_W-1:0] num_groups_calc;
@@ -246,7 +243,10 @@ module CGCtrl #(
   // Convergence test
   //----------------------------------------------------------------------
   logic signed [p_acc_bits-1:0] eps_sq_wide;
-  assign eps_sq_wide = p_acc_bits'($signed(eps_sq[p_total_bits-1:0]));
+  // eps_sq is a small positive fixed-point threshold from the ARM/PIO;
+  // sign-extending the whole 32-bit word is safe at any p_total_bits in
+  // [2, 64] -- callers pre-clamp the value so the upper bits are zero.
+  assign eps_sq_wide = p_acc_bits'($signed(eps_sq));
 
   logic run_converged;
   assign run_converged = (iter >= max_iter)
@@ -742,7 +742,7 @@ module CGCtrl #(
         rd_a_sel        = RF_X_VEC_REG;
         rd_a_idx_packed = single_idx_packed;
         rd_a_valid      = single_lane0_mask;
-        ctrl_mem_wdata  = 32'($signed(rd_a_data_lane0));
+        ctrl_mem_wdata  = p_word_bits'($signed(rd_a_data_lane0));
         if (stream_idx == n_minus_1_reg && !sel_y)
           reset_iter = 1'b1;
       end

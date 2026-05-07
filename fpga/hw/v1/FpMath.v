@@ -1,4 +1,4 @@
-// Fixed-point signed multiply
+// Combinational fixed-point signed multiply.
 
 module FpMul #(
   parameter p_int_bits   = 13,
@@ -20,10 +20,9 @@ module FpMul #(
 
 endmodule
 
-// Fixed-point signed divide with wide inputs
-// Accepts p_wide_bits-wide numerator/denominator (for rr, dq from dot products).
-// Produces p_total_bits-wide result (27-bit).
-// On FPGA this is LUT-based (not DSP), so input width is flexible.
+// Combinational fixed-point signed divide with wide inputs. Accepts
+// p_wide_bits-wide a/b (for rr, dq from dot products); returns a
+// p_total_bits-wide quotient.
 
 module FpDiv #(
   parameter p_int_bits   = 13,

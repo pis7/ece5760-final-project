@@ -1,14 +1,8 @@
-// Toplevel v6 Verilog: synthesizable parallel-x/y CG solver for DE1-SoC.
-//
-// Two independent CGEngine instances share one FPGA: engine_x reads
-// its dimension's {q_val_x, q_col_x, q_rowp_x, cx, x} slaves and
-// engine_y reads its dimension's {q_val_y, q_col_y, q_rowp_y, cy, y}
-// slaves. The Q matrix is duplicated across two M10K trios so the two
-// SPMVs run fully in parallel with zero contention.
-//
-// One sw_go pulse from the ARM kicks off both engines simultaneously.
-// sw_done = engine_x.done & engine_y.done; sw_done_ack fans out to
-// both.
+// Toplevel v6 Verilog: parallel-x/y CG solver for DE1-SoC. Two
+// CGEngine instances run in lockstep, each owning a private {q_val,
+// q_col, q_rowp, c, xy} slave trio. Q is duplicated across two M10K
+// trios so the SPMVs run with zero contention. One sw_go pulse fires
+// both engines; sw_done = engine_x.done & engine_y.done.
 
 module CGTop #(
   parameter p_lanes            = 8,

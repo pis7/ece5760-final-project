@@ -1,21 +1,25 @@
-// Testbench for v5 CGTop (multi-block on-chip RAM topology).
+// Testbench for v5/v5_deep CGTop (multi-block on-chip RAM topology --
+// 7 dedicated slaves: q_val, q_col, q_rowp, cx, cy, x, y).
 //
-// Differs from CGTop_tb.v in that it models seven separate behavioral
-// memories (one per Qsys on-chip RAM slave) instead of one shared
-// SRAM. Pack/unpack into a contiguous golden_mem (with the v4 layout)
-// before/after the DPI golden call so cg_golden_dpi.cpp stays
-// unchanged.
+// p_int_bits / p_frac_bits / p_max_n are top-level parameters,
+// overridable via -Gp_int_bits / -Gp_frac_bits / -Gp_max_n at simulator
+// build time. WORD_BITS up to 64 is supported; the FPGA build stays
+// 27-bit.
 
-module CGTop_tb;
+module CGTop_tb #(
+  parameter int p_int_bits  = 13,
+  parameter int p_frac_bits = 14,
+  parameter int p_max_n     = 50
+);
 
-  // Parameters (must match CGTop defaults)
-  localparam MAX_N       = 50;
-  localparam INT_BITS    = 13;
-  localparam FRAC_BITS   = 14;
+  localparam MAX_N       = p_max_n;
+  localparam INT_BITS    = p_int_bits;
+  localparam FRAC_BITS   = p_frac_bits;
+  localparam TOTAL_BITS  = INT_BITS + FRAC_BITS;
+  localparam WORD_BITS   = (TOTAL_BITS <= 32) ? 32 : 64;
   localparam ADDR_BITS   = 32;
-  localparam FRAC_SCALE  = 1 << FRAC_BITS;
+  localparam longint FRAC_SCALE = longint'(1) << FRAC_BITS;
 
-  // Golden-side memory layout (the layout the DPI golden expects).
   localparam Q_VAL_BASE  = 0;
   localparam Q_COL_BASE  = MAX_N * MAX_N;
   localparam Q_ROWP_BASE = 2 * MAX_N * MAX_N;
@@ -25,16 +29,14 @@ module CGTop_tb;
   localparam Y_BASE      = 2 * MAX_N * MAX_N + 4 * MAX_N + 1;
   localparam TOTAL_WORDS = 2 * MAX_N * MAX_N + 5 * MAX_N + 1;
 
-  // DPI import
   import "DPI-C" function void dpi_cg_solve(
-    inout int mem [],
-    input int n,
-    input int max_n,
-    input int max_iter,
-    input int eps_sq
+    inout longint mem [],
+    input int     n,
+    input int     max_n,
+    input int     max_iter,
+    input longint eps_sq
   );
 
-  // Clock and reset
   logic clk, rst;
   initial clk = 0;
   always #5 clk = ~clk;
@@ -48,11 +50,9 @@ module CGTop_tb;
     end
   end
 
-  // DUT signals
   logic        sw_go, sw_done, sw_done_ack;
   logic [31:0] max_iter, eps_sq, n;
 
-  // Per-slave Avalon wires
   logic [ADDR_BITS-1:0] q_val_addr,  q_col_addr,  q_rowp_addr;
   logic [ADDR_BITS-1:0] cx_addr,     cy_addr;
   logic [ADDR_BITS-1:0] x_addr,      y_addr;
@@ -65,26 +65,26 @@ module CGTop_tb;
   logic                 q_val_we,    q_col_we,    q_rowp_we;
   logic                 cx_we,       cy_we;
   logic                 x_we,        y_we;
-  logic [31:0]          q_val_rdata, q_col_rdata, q_rowp_rdata;
-  logic [31:0]          cx_rdata,    cy_rdata;
-  logic [31:0]          x_rdata,     y_rdata;
-  logic [31:0]          q_val_wdata, q_col_wdata, q_rowp_wdata;
-  logic [31:0]          cx_wdata,    cy_wdata;
-  logic [31:0]          x_wdata,     y_wdata;
+  logic [WORD_BITS-1:0] q_val_rdata;
+  logic [31:0]          q_col_rdata, q_rowp_rdata;
+  logic [WORD_BITS-1:0] cx_rdata,    cy_rdata;
+  logic [WORD_BITS-1:0] x_rdata,     y_rdata;
+  logic [WORD_BITS-1:0] q_val_wdata;
+  logic [31:0]          q_col_wdata, q_rowp_wdata;
+  logic [WORD_BITS-1:0] cx_wdata,    cy_wdata;
+  logic [WORD_BITS-1:0] x_wdata,     y_wdata;
   logic [3:0]           q_val_be,    q_col_be,    q_rowp_be;
   logic [3:0]           cx_be,       cy_be;
   logic [3:0]           x_be,        y_be;
 
-  // Per-slave behavioral memories (each local-base 0).
-  int q_val_mem  [MAX_N * MAX_N];
-  int q_col_mem  [MAX_N * MAX_N];
-  int q_rowp_mem [MAX_N + 1];
-  int cx_mem     [MAX_N];
-  int cy_mem     [MAX_N];
-  int x_mem      [MAX_N];
-  int y_mem      [MAX_N];
+  logic signed [WORD_BITS-1:0] q_val_mem  [MAX_N * MAX_N];
+  int                          q_col_mem  [MAX_N * MAX_N];
+  int                          q_rowp_mem [MAX_N + 1];
+  logic signed [WORD_BITS-1:0] cx_mem     [MAX_N];
+  logic signed [WORD_BITS-1:0] cy_mem     [MAX_N];
+  logic signed [WORD_BITS-1:0] x_mem      [MAX_N];
+  logic signed [WORD_BITS-1:0] y_mem      [MAX_N];
 
-  // M10K shims (1-cycle synchronous read latency, same as v4 shim).
   always_ff @(posedge clk) begin
     if (q_val_cs && q_val_clken) begin
       if (q_val_we) q_val_mem[q_val_addr] <= q_val_wdata;
@@ -116,7 +116,6 @@ module CGTop_tb;
     end
   end
 
-  // DUT
   CGTop #(
     .p_max_n          (MAX_N),
     .p_int_bits       (INT_BITS),
@@ -190,30 +189,26 @@ module CGTop_tb;
     .n        (n)
   );
 
-  // Golden reference memory (single contiguous, v4 layout)
-  int golden_mem [TOTAL_WORDS];
+  longint golden_mem [TOTAL_WORDS];
 
   int test_num;
   int fail_count;
 
-  function int to_fp(real v);
-    return int'(v * real'(FRAC_SCALE));
+  function automatic longint to_fp(real v);
+    return longint'(v * real'(FRAC_SCALE));
   endfunction
 
-  // Load a test into both DUT (per-slave memories) and golden (one
-  // contiguous mem with v4 layout).
   task automatic load_test(
-    input int t_n,
-    input int nnz,
-    input int row_ptr [],
-    input int col_idx [],
-    input int vals    [],
-    input int cx      [],
-    input int x0      [],
-    input int cy      [],
-    input int y0      []
+    input int     t_n,
+    input int     nnz,
+    input int     row_ptr [],
+    input int     col_idx [],
+    input longint vals    [],
+    input longint cx      [],
+    input longint x0      [],
+    input longint cy      [],
+    input longint y0      []
   );
-    // Zero everything
     for (int i = 0; i < MAX_N * MAX_N; i++) begin
       q_val_mem[i] = 0;
       q_col_mem[i] = 0;
@@ -227,7 +222,6 @@ module CGTop_tb;
     end
     for (int i = 0; i < TOTAL_WORDS; i++) golden_mem[i] = 0;
 
-    // Per-slave loads (local-base 0 in each)
     for (int j = 0; j < nnz; j++) begin
       q_val_mem[j] = vals[j];
       q_col_mem[j] = col_idx[j];
@@ -240,7 +234,6 @@ module CGTop_tb;
       y_mem [i] = y0[i];
     end
 
-    // Golden mirror (v4 contiguous layout)
     for (int j = 0; j < nnz; j++) begin
       golden_mem[Q_VAL_BASE + j] = vals[j];
       golden_mem[Q_COL_BASE + j] = col_idx[j];
@@ -272,8 +265,6 @@ module CGTop_tb;
     repeat(2) @(posedge clk);
   endtask
 
-  // Compare a single DUT vector (x_mem or y_mem) vs the golden_mem at
-  // the corresponding base.
   task automatic check_vec(
     input int t_n,
     input int gold_base,
@@ -282,13 +273,13 @@ module CGTop_tb;
     input string test_name,
     inout int mismatch
   );
-    int dut_v, gold_v;
+    longint dut_v, gold_v;
     real dut_real, gold_real;
     for (int i = 0; i < t_n; i++) begin
       dut_v  = pick_y ? y_mem[i] : x_mem[i];
       gold_v = golden_mem[gold_base + i];
-      dut_real  = $itor(dut_v)  / real'(FRAC_SCALE);
-      gold_real = $itor(gold_v) / real'(FRAC_SCALE);
+      dut_real  = real'(dut_v)  / real'(FRAC_SCALE);
+      gold_real = real'(gold_v) / real'(FRAC_SCALE);
       if (dut_v !== gold_v) begin
         $display("  FAIL %s: %s[%0d] dut=%.6f gold=%.6f (raw dut=%0d gold=%0d diff=%0d)",
                  test_name, vec_name, i, dut_real, gold_real, dut_v, gold_v, dut_v - gold_v);
@@ -313,16 +304,16 @@ module CGTop_tb;
   endtask
 
   task automatic run_test(
-    input string name,
-    input int    t_n,
-    input int    nnz,
-    input int    row_ptr [],
-    input int    col_idx [],
-    input int    vals    [],
-    input int    cx      [],
-    input int    cy      [],
-    input int    x0      [],
-    input int    y0      []
+    input string  name,
+    input int     t_n,
+    input int     nnz,
+    input int     row_ptr [],
+    input int     col_idx [],
+    input longint vals    [],
+    input longint cx      [],
+    input longint cy      [],
+    input longint x0      [],
+    input longint y0      []
   );
     test_num++;
     n = t_n;
@@ -334,13 +325,13 @@ module CGTop_tb;
   endtask
 
   task automatic build_uniform_tridiag(
-    input  int t_n,
-    input  int diag_fp,
-    input  int off_fp,
-    output int row_ptr [],
-    output int col_idx [],
-    output int vals    [],
-    output int nnz
+    input  int     t_n,
+    input  longint diag_fp,
+    input  longint off_fp,
+    output int     row_ptr [],
+    output int     col_idx [],
+    output longint vals    [],
+    output int     nnz
   );
     int idx;
     nnz = 3 * t_n - 2;

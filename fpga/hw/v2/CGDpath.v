@@ -1,22 +1,5 @@
-// v2 datapath -- pure datapath, no FSM.
-//
-// Owns all register files, scalar registers, linalg submodule
-// instances (each with its own Ctrl+Dpath internally), and a small
-// set of muxes. CGCtrl drives every enable / select / handshake
-// signal; this module has no state machine of its own.
-//
-// p_lanes parallelism:
-//   - VecDot and AXPY each take p_lanes (a,b) pairs per handshake.
-//   - Two p_lanes-wide addressed RF read ports (rd_a, rd_b) plus
-//     one single-lane vec read port for SPMV (memory-bound).
-//   - One p_lanes-wide RF write port. AXPY writeback uses all lanes;
-//     single-element writes (LD, SPMV result, VNS, COPY) use lane 0
-//     and gate we[k>=1] to 0.
-//   - Per-lane read valid mask: out-of-range lanes (for the final
-//     partial group) read as zero, so a*b contributes 0 to VecDot
-//     and AXPY's computed-but-unwritten z is harmless.
-//
-// DSP count: VecDot p_lanes + AXPY p_lanes + SPMV 1.
+// v2 datapath -- no FSM. Owns the RFs, scalar regs, linalg
+// submodule instances, and the SPMV/CGCtrl memory-bus mux.
 
 module CGDpath #(
   parameter p_lanes            = 4,
@@ -24,8 +7,11 @@ module CGDpath #(
   parameter p_int_bits         = 13,
   parameter p_frac_bits        = 14,
   parameter p_total_bits       = p_int_bits + p_frac_bits,
-  parameter p_acc_bits         = 48,
+  parameter p_acc_bits         = (p_total_bits <= 27)
+      ? 48
+      : (2*p_total_bits - p_frac_bits + $clog2(p_max_n+1) + 4),
   parameter p_m10k_addr_bits   = 32,
+  parameter p_word_bits        = (p_total_bits <= 32) ? 32 : 64,
   parameter p_q_val_base_addr  = 0,
   parameter p_q_col_base_addr  = p_max_n * p_max_n,
   parameter p_q_rowp_base_addr = 2 * p_max_n * p_max_n
@@ -39,13 +25,13 @@ module CGDpath #(
   // --- Memory bus: one of CGCtrl (for LD/WB) or SPMV (for CSR) owns it ---
   output logic [p_m10k_addr_bits-1:0] mem_addr,
   output logic                        mem_wr_en,
-  output logic [31:0]                 mem_wdata,
-  input  logic [31:0]                 mem_rdata,
+  output logic [p_word_bits-1:0]      mem_wdata,
+  input  logic [p_word_bits-1:0]      mem_rdata,
 
   // CGCtrl's memory bus (for LD / WB phases)
   input  logic [p_m10k_addr_bits-1:0] ctrl_mem_addr,
   input  logic                        ctrl_mem_wr_en,
-  input  logic [31:0]                 ctrl_mem_wdata,
+  input  logic [p_word_bits-1:0]      ctrl_mem_wdata,
   input  logic                        ctrl_mem_src_spmv,     // 0 = CGCtrl, 1 = SPMV
 
   // --- Addressed RF read ports (combinational) ---------------------------
@@ -272,7 +258,8 @@ module CGDpath #(
     .p_total_bits      (p_total_bits),
     .p_acc_bits        (p_acc_bits),
     .p_max_n           (p_max_n),
-    .p_m10k_addr_bits  (p_m10k_addr_bits)
+    .p_m10k_addr_bits  (p_m10k_addr_bits),
+    .p_word_bits       (p_word_bits)
   ) u_spmv (
     .clk, .rst,
     .istream_val        (spmv_istream_val),
@@ -320,9 +307,9 @@ module CGDpath #(
   // Memory bus ownership mux
   //----------------------------------------------------------------------
 
-  assign mem_addr  = ctrl_mem_src_spmv ? spmv_mem_addr  : ctrl_mem_addr;
-  assign mem_wr_en = ctrl_mem_src_spmv ? 1'b0           : ctrl_mem_wr_en;
-  assign mem_wdata = ctrl_mem_src_spmv ? 32'd0          : ctrl_mem_wdata;
+  assign mem_addr  = ctrl_mem_src_spmv ? spmv_mem_addr      : ctrl_mem_addr;
+  assign mem_wr_en = ctrl_mem_src_spmv ? 1'b0               : ctrl_mem_wr_en;
+  assign mem_wdata = ctrl_mem_src_spmv ? p_word_bits'(1'b0) : ctrl_mem_wdata;
 
   //----------------------------------------------------------------------
   // RF write port (per-lane)

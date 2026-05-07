@@ -1,25 +1,21 @@
-// Testbench for v6 CGTop (parallel x/y solve datapaths).
+// Testbench for v6 CGTop (parallel x/y solve datapaths). 10 slaves
+// (6 Q + cx + cy + x + y); Q load writes the same data into both
+// engine copies.
 //
-// Differs from CGTop_tb_v5.v in that v6 duplicates the Q-CSR triplet
-// across x and y engines (q_val_x/q_val_y, q_col_x/q_col_y,
-// q_rowp_x/q_rowp_y). Total slaves modeled here: 10 (6 Q + cx + cy +
-// x + y). Q load writes the same data into both copies.
-
-// INT_BITS / FRAC_BITS are top-level parameters so Verilator can
-// override them via -Gp_int_bits / -Gp_frac_bits. TOTAL_BITS up to 64
-// is supported in verilated mode (the FPGA build stays 27-bit).
+// p_int_bits / p_frac_bits / p_max_n are top-level parameters,
+// overridable via -Gp_int_bits / -Gp_frac_bits / -Gp_max_n at simulator
+// build time. WORD_BITS up to 64 is supported; the FPGA build stays
+// 27-bit.
 module CGTop_tb #(
   parameter int p_int_bits  = 13,
-  parameter int p_frac_bits = 14
+  parameter int p_frac_bits = 14,
+  parameter int p_max_n     = 50
 );
 
-  // Parameters (must match CGTop defaults)
-  localparam MAX_N       = 50;
+  localparam MAX_N       = p_max_n;
   localparam INT_BITS    = p_int_bits;
   localparam FRAC_BITS   = p_frac_bits;
   localparam TOTAL_BITS  = INT_BITS + FRAC_BITS;
-  // Avalon data-port width for value-carrying slaves: 32 keeps the
-  // Q13.14 build identical, 64 carries up to Q32.32.
   localparam WORD_BITS   = (TOTAL_BITS <= 32) ? 32 : 64;
   localparam ADDR_BITS   = 32;
   localparam longint FRAC_SCALE = longint'(1) << FRAC_BITS;
@@ -455,7 +451,7 @@ module CGTop_tb #(
     rst = 0;
     repeat(2) @(posedge clk);
 
-    `include "test_cases_v6.v"
+    `include "test_cases.v"
 
     $display("");
     if (fail_count == 0)
