@@ -17,6 +17,19 @@ uv sync                          # one-time: creates .venv/ and installs deps + 
 source .venv/bin/activate        # per-terminal: puts entry points (e.g. `visualizer`) on PATH
 ```
 
+For the `arm` and `fpga` backends you also need the
+`arm-linux-gnueabihf-g++` cross-compiler so the host can build the
+DE1-SoC ARM binary. On Debian/Ubuntu:
+
+```bash
+sudo apt install g++-arm-linux-gnueabihf    # provides arm-linux-gnueabihf-g++
+```
+
+(On Fedora/RHEL the equivalent is `gcc-arm-linux-gnu` +
+`gcc-c++-arm-linux-gnu`; on macOS, install via Homebrew's
+`messense/macos-cross-toolchains` tap.) The other backends
+(`python`, `sw`, `golden`, `verilated`) don't need this.
+
 `uv sync` only needs to be re-run when `pyproject.toml` / `uv.lock` change
 or after blowing away `.venv/`. If you'd rather not activate the venv, you
 can prefix any project command with `uv run` (e.g.
