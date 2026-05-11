@@ -66,6 +66,10 @@ uv run run-placer fpga         ../benchmarks/custom     # runs every custom benc
 
 # --- Iter sweep + slideshow (every mode except python) ---
 uv run run-placer verilated ../benchmarks/custom/parallel_chains_50 --sweep
+
+# --- Benchmark arm vs fpga: N reps each, averaged CSV + per-metric bar plots ---
+uv run bench-avg  ../benchmarks/custom    # 5x arm + 5x fpga -> bench-avg.csv
+uv run bench-plot                          # bench-avg.csv -> plots/<metric>.png
 ```
 
 `golden` and `verilated` accept three knobs to scale past the
@@ -552,6 +556,70 @@ backends as a single run except `python`.
 uv run run-placer sw ../benchmarks/iccad04/DMA --sweep
 ```
 
+## Benchmarking arm vs fpga
+
+[`bench-avg`](python-utils/bench_avg.py) runs the placer on the
+DE1-SoC's ARM N times and on the FPGA-accelerated build N times
+(default 5 each) over every benchmark in a folder, parses each run's
+metrics, averages them, and writes a single CSV. Like the `arm` /
+`fpga` modes of `run-placer`, it needs `.env` with `BOARD` / `PASS`
+and the FPGA bitstream already programmed onto the DE1-SoC.
+
+```bash
+mkdir -p build && cd build
+uv run bench-avg ../benchmarks/custom                              # default: 5x arm + 5x fpga -> bench-avg.csv
+uv run bench-avg ../benchmarks/custom --runs 10 --out other.csv    # 10 reps per mode, custom CSV path
+```
+
+Each mode's artifacts land in its own subdir of the build dir so the
+arm and fpga binaries / JSONs never overwrite each other, and the
+CSV sits at the build dir's top level:
+
+```
+build/
+  arm/                     # ARM cmake state + cross-compiled placer + input JSONs
+    placer
+    <design>.json          # input netlists (parse_lefdef)
+    <design>-initial.json  # placer's initial placement (last rep)
+    <design>-final.json    # placer's final placement (last rep)
+    <design>-final.png     # rendered final placement
+    ...
+  fpga/                    # same shape, FPGA-driver-linked placer
+  bench-avg.csv            # one row per (benchmark, mode)
+```
+
+Unlike `run-placer arm/fpga` -- which rebuilds the placer and reopens
+the SSH session on every invocation -- `bench-avg` runs **one cmake +
+one SSH session per mode**: the placer binary is built once into the
+mode's subdir, scp'd to the board once per benchmark, then
+ssh-invoked N times over the same session. The `<design>-initial.json` /
+`<design>-final.json` / `<design>-final.png` artifacts are pulled
+back / rendered after the last rep only (the placer is deterministic
+given a fixed input, so last-wins).
+
+[`bench-plot`](python-utils/bench_plot.py) turns the CSV into one
+grouped (ARM vs FPGA) bar PNG per metric column, with every bar
+labelled with its numeric value. Default input is `./bench-avg.csv`;
+default output dir is `./plots/`:
+
+```bash
+uv run bench-plot                                    # -> plots/<metric>.png
+uv run bench-plot --csv other.csv --out-dir charts   # explicit CSV + output dir
+```
+
+One PNG per metric -- `iters-used.png`, `converged-frac.png`,
+`reverted-frac.png`, `hpwl-final.png`, `max-bin-density.png`,
+`cg-avg-ms.png`, `cg-total-ms.png`, `placer-total-ms.png`,
+`hw-cg-avg-cycles.png`, `hw-cg-total-cycles.png`. Metrics whose CSV
+column is empty for both modes (e.g. `hw_cg_*` when neither side
+reports cycle counts) are silently skipped; metrics that are populated
+for only one mode show that mode's bar with the other side blank. The
+metric list is a single `METRICS` list at the top of
+[`bench_plot.py`](python-utils/bench_plot.py) -- append a `Metric(...)`
+entry to add a new plot. Bars use the official
+[Cornell brand palette](https://brand.cornell.edu/design-center/colors/):
+ARM is Navy (`#073949`), FPGA is Carnelian (`#B31B1B`).
+
 ## Visualizing a placement
 
 [`python-utils/visualizer.py`](python-utils/visualizer.py) opens a Tk window
@@ -609,7 +677,7 @@ print `Result: 19/19 tests passed`.
 | [fpga/hw/v6/](fpga/hw/v6/)                 | (10) Parallel x/y solve datapaths (10 slaves, 2 engines) |
 | [fpga/hw/test/](fpga/hw/test/)             | Verilator + DPI golden testbench (one binary per RTL version) |
 | [fpga/sw/](fpga/sw/)                       | (11) ARM-side mmap drivers (`cg_fpga_mmap_driver{,_v5,_v6}.h`) and `placer.cpp` symlink to canonical source; `FPGATop.v` lives per-version under `fpga/hw/v*/` |
-| [python-utils/](python-utils/)             | LEF/DEF parser, visualizer, run-placer entry points |
+| [python-utils/](python-utils/)             | LEF/DEF parser, visualizer, run-placer, bench-avg, bench-plot entry points |
 | [benchmarks/](benchmarks/)                 | ICCAD04 + custom designs |
 | [background-knowledge/](background-knowledge/) | Reference material on placement algorithms |
 
