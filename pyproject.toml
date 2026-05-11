@@ -12,12 +12,15 @@ dependencies = [
     "imageio-ffmpeg>=0.5",
     "fabric>=3.2",
     "python-dotenv>=1.0",
+    "matplotlib>=3.8",
 ]
 
 [project.scripts]
 vis = "visualizer:main"
 lefdef-parser = "lefdef_parser:main"
 run-placer = "run_placer:main"
+bench-avg = "bench_avg:main"
+bench-plot = "bench_plot:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -29,6 +32,8 @@ only-include = [
     "python-utils/json_utils.py",
     "python-utils/lefdef_parser.py",
     "python-utils/run_placer.py",
+    "python-utils/bench_avg.py",
+    "python-utils/bench_plot.py",
 ]
 
 [tool.hatch.build.targets.wheel.sources]
