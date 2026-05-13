@@ -65,8 +65,11 @@
             margin-bottom: 4px;
         }
         p {
-            margin-top: 4px;
-            margin-bottom: 4px;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        figure {
+            margin-top: 30px;
         }
     </style>
     <script id="MathJax-script" async
@@ -348,7 +351,37 @@
 
             <h3>Design Visualizer</h3>
             <p>
-                [TODO: Tk visualization of JSON format and its features]
+                A script called <code>visualizer.py</code> allows any JSON file containing physical layout information to be rendered and
+                visualized more clearly. When run normally with a single JSON file path as an argument, the code will boot up a Tkinter window. 
+                Components are rendered as blue rectangles of the specified size, and I/O pins are displayed as yellow circles
+                along the die outline. Hovering over any of the displayed components will provide information about that component's name and 
+                macro for identification purposes. To make the visualizer tool more interactive, the user has some control over the pop-up window:
+            </p>
+            <ul>
+                <li>Scroll to zoom in or out</li>
+                <li>Drag to pan</li>
+                <li>'F' to fit-all</li>
+                <li>'Q' to quit</LI>
+            </ul>
+            <div>
+                <figure>
+                    <img src="images/dma_lefdef_visualizer_output.png"
+                        style="display: block; margin: 0 auto; width: 400px; height: auto;">
+                    <figcaption style="text-align: center;">
+                        Tkinter window when visualizer is run on ICCAD04 DMA benchmark
+                    </figcaption>
+                </figure>
+                <figure>
+                    <img src="images/dma_lefdef_visualizer_zoomed.png"
+                        style="display: block; margin: 0 auto; width: 300px; height: auto;">
+                    <figcaption style="text-align: center;">
+                        Macro information displayed when zoomed in
+                    </figcaption>
+                </figure>
+            </div>
+            <p>
+                When run with a <code>--png &ltout.png&gt &ltin.json&gt</code> flag, the script will instead run in headless mode, rendering
+                a single PNG image without a Tk window. This is useful for automating rendering images after each run.
             </p>
 
             <h3>Python Placer</h3>
