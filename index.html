@@ -39,10 +39,16 @@
             width: 240px;
             height: auto;
         }
-        pre, code {
+        pre {
             text-align: left;
             display: block;
             margin-left: 0;
+        }
+        code {
+            text-align: left;
+            display:inline;
+            margin-left: 0;
+            font-size: 13px;
         }
         figcaption {
             text-align: center;
@@ -52,6 +58,15 @@
         }
         h3 {
             margin-top: 40px;
+            margin-bottom: 10px;
+        }
+        ul, ol, {
+            margin-top: 4px;
+            margin-bottom: 4px;
+        }
+        p {
+            margin-top: 4px;
+            margin-bottom: 4px;
         }
     </style>
     <script id="MathJax-script" async
@@ -136,8 +151,8 @@
             <p>[TODO: prose.]</p>
 
             <h3>Logical Structure</h3>
-            <p>[TODO: end-to-end flow -- LEF/DEF parse -> Q/c build -> CG solve ->
-                overlap reduction -> visualization.]</p>
+            <p>[TODO: end-to-end flow -- LEF/DEF parse (explain what LEF and DEF are - see "What each file
+                contains" from GitHub README) -> Q/c build -> CG solve -> overlap reduction -> visualization.]</p>
 
             <!--
             <figure>
@@ -172,18 +187,179 @@
             </p>
 
             <h3>LEF/DEF Parser</h3>
-            <p>[TODO: explain LEF/DEF with examples, how we parse into JSON
-            intermediate format]</p>
+            <p>
+                To process input data, we have a dedicated LEF/DEF parser script, <code>lefdef-parser.py</code>. It is 
+                class-based, and has one public method for each of the 4 major steps it performs:
+            </p>
+            <ol>
+                <li>
+                    <b>find_files</b>
+                    <p>
+                        Every placement input is a pair of LEF and DEF files, kept in lef/ and def/ 
+                        subdirectories of the benchmark folder:
+                    </p>
+                    <pre><code>
+                        benchmarks/
+                            iccad04/
+                                DMA/   { lef/dma.lef,  def/dma.def }
+                                DSP1/  ...
+                                DSP2/  ...
+                                RISC1/ ...
+                                RISC2/ ...
+                            custom/
+                                simple_logic_10/      { lef/simple_logic_10.lef, def/simple_logic_10.def }
+                                mixed_macro_10/       ...
+                                parallel_chains_50/   ...
+                                mesh_grid_25/         ...
+                                dense_pack_36/        ...
+                                size_extremes_mix/    ...
+                                star_fanout_31/       ...
+                                two_clusters_bridge/  ...   
+                    </code></pre>
+                    <p>
+                        This method will do all of the following:
+                    </p>
+                    <ul>
+                        <li>Searches for LEF and DEF files in the benchmark directory</li>
+                        <li>Prints a debug message and exits if the relevant files are not found</li>
+                        <li>Stores the discovered file paths internally</li>
+                    </ul>
+                </li>
+                <br>
+                <li>
+                    <b>parse_lef</b>
+                    <p>
+                        Here, the script scans the LEF file and extracts relevant physical library
+                        information. It needs the name, width, and height of each macro, as well as
+                        the database unit scaling. Any other information—such as routing information
+                        on layers and vias—is not needed, and is therefore ignored by the parser. An
+                        example displaying information retrieved by the parser is shown below.
+                    </p>
+                    <pre><code>
+                        VERSION 5.4 ;
+                        NAMESCASESENSITIVE ON ;
+                        UNITS
+                            DATABASE MICRONS 100 ; <span style="color: blue;"> --> USED: unit scaling</span>
+                        END UNITS
+
+                        MACRO MED
+                            CLASS CORE ;
+                            ORIGIN 0.000 0.000 ;
+                            SIZE 0.4 BY 0.4 ; <span style="color: blue;"> --> USED: width and height</span>
+                            SYMMETRY x y ;
+                            PIN Y <span style="color: blue;"> --> USED: pin name (Y)</span>
+                                DIRECTION OUTPUT ;
+                                PORT
+                                LAYER metal1 ;
+                                RECT 0.0 0.0 0.4 0.4 ;
+                                END
+                            END Y
+                            PIN A <span style="color: blue;"> --> USED: pin name (A)</span>
+                                DIRECTION INPUT ;
+                                PORT
+                                LAYER metal1 ;
+                                RECT 0.0 0.0 0.4 0.4 ;
+                                END
+                            END A
+                        END MED
+                    </code></pre>
+                </li>
+                <li>
+                    <b>parse_def</b>
+                    <p>
+                        Like with the previous method, the script will parse the DEF file and extract only the necessary
+                        information. It picks out information on the design name, units, die area, components (instance name,
+                        macro, and position), nets (net name and pin connections), and I/O pins (pin name, associated net, and 
+                        position). Any property definitions are unneeded and skipped. An example displaying information retrieved 
+                        by the parser is shown below.
+                    </p>
+                    <code><pre>
+                        VERSION 5.4 ;
+                        NAMESCASESENSITIVE ON ;
+                        DIVIDERCHAR "/" ;
+                        BUSBITCHARS "[]" ;
+                        DESIGN dense_pack_36 ; <span style="color: blue;"> --> USED: design name</span>
+                        UNITS DISTANCE MICRONS 100 ; <span style="color: blue;"> --> USED: units</span>
+
+                        DIEAREA ( 0 0 ) ( 500 500 ) ; <span style="color: blue;"> --> USED: die area</span>
+
+                        COMPONENTS 36 ; <span style="color: blue;"> --> FROM EACH, USE: component name, macro, and position only</span>
+                        - U1 MED + PLACED ( 30 30 ) N ; 
+                        - U2 MED + PLACED ( 105 30 ) N ; 
+                        . . .
+                        - U36 MED + PLACED ( 405 405 ) N ;
+                        END COMPONENTS
+
+                        PINS 2 ; <span style="color: blue;"> --> FROM EACH, USE: pin name, net, and position only</span>
+                        - in0 + NET in0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 250 ) N ;
+                        - out0 + NET n35 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 250 ) N ;
+                        END PINS
+
+                        NETS 37 ; <span style="color: blue;"> --> USE ALL: contains net name and pin connections</span>
+                        - in0 ( PIN in0 ) ( U1 A ) ;
+                        - n0 ( U1 Y ) ( U2 A ) ;
+                        . . .
+                        - n35 ( U36 Y ) ( PIN out0 ) ;
+                        END NETS
+
+                        END DESIGN
+                    </code></pre>
+                </li>
+                <li>
+                    <b>write_json</b>
+                    <p>
+                        Once the LEF/DEF files have been parsed, they can be converted into a single JSON file. A number of dataclasses are
+                        defined in <code>json_utils.py</code> to make this easier: <code>Macro</code>, <code>Component</code>, <code>IOPin</code>, 
+                        <code>Net</code>, and <code>Netlist</code>. To create the JSON file, we initialize a <code>Netlist</code> object using 
+                        the data extracted from the LEF/DEF files previously and serialize it into JSON format. An example showing this 
+                        intermediate JSON format is shown below.
+                    </p>
+                    <pre><code class="language-json"> 
+                        {
+                        "design_name": "dma_top",
+                        "dbu_per_micron": 100,
+                        "die_area": [-204000, -204000, 204400, 204400], 
+                        // [xl, yl, xh, yh] in DBU
+
+                        "macros": {
+                            "INV":  { "width": 0.1, "height": 0.1, "pins": ["A", "Y"] },     
+                            // microns
+                            "BUF":  { "width": 0.1, "height": 0.1, "pins": ["A", "Y"] }
+                        },
+
+                        "components": {
+                            "U1": { "macro_name": "INV", "x": 10, "y": 10 },                  
+                            // DBU
+                            "U2": { "macro_name": "BUF", "x": 20, "y": 10 }
+                        },
+
+                        "io_pins": [
+                            { "name": "clk", "net_name": "clk", "x": 0, "y": 12500 }         
+                            // DBU
+                        ],
+
+                        "nets": [
+                            { "name": "n1", "pins": [["U1", "Y"], ["U2", "A"], ["U5", "A"]] }
+                        ]
+                        }
+                    </code></pre>
+                </li>
+            </ol>
 
             <h3>Design Visualizer</h3>
-            <p>[TODO: Tk visualization of JSON format and its features]</p>
+            <p>
+                [TODO: Tk visualization of JSON format and its features]
+            </p>
 
             <h3>Python Placer</h3>
-            <p>[TODO: algorithm explanation]</p>
+            <p>
+                [TODO: algorithm explanation]
+            </p>
 
             <h3>C++ Placer</h3>
-            <p>[TODO: largely just a C++ port of Python, explain hooks for
-            hardware shims to discuss next]</p>
+            <p>
+                [TODO: largely just a C++ port of Python, explain hooks for hardware shims to discuss next]
+            </p>
         </section>
 
         <!-- =============================================================
