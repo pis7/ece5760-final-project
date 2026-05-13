@@ -48,7 +48,7 @@
             text-align: left;
             display:inline;
             margin-left: 0;
-            font-size: 13px;
+            font-size: 14px;
         }
         figcaption {
             text-align: center;
@@ -173,7 +173,7 @@
         </section>
 
         <!-- =============================================================
-             SOFTWARE PLACERS
+             SOFTWARE PLACERS & UTILITIES
              ============================================================= -->
         <section id="software-placers">
             <h2>Software Placers & Utilities</h2>
@@ -346,6 +346,10 @@
                         ]
                         }
                     </code></pre>
+                    <p>
+                        The output file name is always chosen to be the <code>DESIGN</code> keyword listed in the DEF file, followed by a 
+                        .json extension.
+                    </p>
                 </li>
             </ol>
 
@@ -386,12 +390,53 @@
 
             <h3>Python Placer</h3>
             <p>
-                [TODO: algorithm explanation]
+                One baseline placer written in idiomatic Python is implemented in <code>sw-baseline-python/placer.py</code>. Its purpose is
+                simple: achieve algorithmic correctness at all costs, disregarding any tradeoff in speed. This makes it valuable as a point
+                of comparison for validating the implementations to follow. The file contains a <code>Placer</code> class that stores
+                information about the netlist, cell center positions, base and active linear systems, and the partition state. Its
+                methods are designed to streamline the execution of the full analytical placement algorithm. The sequence is roughly as follows:
             </p>
+
+            <ol>
+                <li>
+                    <b>Load Data:</b> runs <code>load_netlist()</code> to read in the JSON file produced by the LEF/DEF parser.
+                </li>
+                <li>
+                    <b>Initialize Cell Positions:</b> runs <code>init_cell_positions()</code> to place cells at initial positions within
+                    the die area; in this baseline placer, all cells are initialized to the center of the die.
+                </li>
+                <li>
+                    <b>Build Connectivity Matrix:</b> runs <code>build_system()</code> to construct the sparse quadratic system <code>Qx=-c</code> 
+                    and <code>Qy=-c</code> using clique net decomposition, where each net is converted into a set of weighted two-pin connections 
+                    between all pins.
+                </li>
+                <li>
+                    <b>Initial CG Solve:</b> runs <code>solve_cg()</code>, solving the linear system using <code>scipy.sparse.linalg.cg</code> 
+                    to obtain the initial wirelength-optimal placement; this minimizes quadratic wirelength but ignores overlap constraints. We
+                    exit when <code>max_iter=1000</code> is exceeded, or the algorithm is deemed to have converged by comparison
+                    to a predefined threshold; otherwise, Step 4 is repeated.
+                </li>
+                <li>
+                    <b>Perform Iterative Spreading:</b> this acts as the "outer loop" for the algorithm. It repeatedly applies recursive geometric 
+                    partitioning to generate spatial anchors, updates the linear system with additional quadratic penalties, and re-solves using 
+                    CG (the "inner loop", with the same exit condition as in Step 4). We exit Step 5 when <code>MAX_OUTER_ITER=15</code> is exceeded, 
+                    or when the overlap between cells is considered acceptable (i.e. max bin density < 0.75); otherwise, Step 5 is repeated.
+                </li>
+                <li>
+                    <b>Write Final Output:</b> writes the final placed design back to JSON via <code>write_output()</code>, producing a netlist
+                    with updated cell coordinates for visualization and downstream processing.
+                </li>
+            </ol>
 
             <h3>C++ Placer</h3>
             <p>
-                [TODO: largely just a C++ port of Python, explain hooks for hardware shims to discuss next]
+                The C++ baseline placer, which is stored in <code>sw-baseline-c/placer.cpp</code>, is nearly identical in its implementation to
+                the Python baseline. It follows the same JSON I/O format, same algorithm, and even the same convergence criterion. The only
+                real difference of note is that the C++ file itself is multi-purpose. As a standalone software placer, it is designed to perform 
+                <code>cg_solve()</code> using hand-rolled double-precision logic; however, when the correct flags are set, <code>placer.cpp</code>
+                doubles as a placer front-end with which a hardware-based CG solver can seamlessly connect. In such a case, all parts of the
+                algorithm in between CG solve steps are handled in C++, and the rest are done in hardware (either with a verilated model or
+                using the FPGA itself). This will be discussed in more detail in the <b>System Integration</b> section.
             </p>
         </section>
 
