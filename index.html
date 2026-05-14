@@ -127,7 +127,16 @@
             <h2>High-Level Design</h2>
 
             <h3>Rationale and Sources</h3>
-            <p>[TODO: why this project, what inspired it, key references.]</p>
+            <p>
+                The idea of accelerating placement is not new. The larger technique we consider if <em>analytical placement</em>, in which a specific cost function is minimized using analytical methods.
+                These often involve gradient decent and are ripe with parallelism.
+                The current state of the art is <a href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a> which minimizes a cost function based around weighted average wirelength, taking advantage of GPUs to speed up the minimization.
+                Jeremy came across this paper, found this cool, and Jeremy and Parker who were both working with ASICs wanted to implement something similar.
+                More specifically, we want to accelerate placement with a design taking advantage of parallelism on the FPGA in similar places to where DREAMPlace takes advantage of the GPU.
+
+                In order to lower project scope, we simply the task done by DREAMPlace by using a simpler, quadratic cost model and only implementing <em>global placement</em>, an initial, off-grid placement which, where it to be used, must be <em>legalized</em>.
+                The cost model and high level global placement algorithm we based on an old (2007) survey by Yao-Wen Chang, Zhe-Wei Jiang, and Tung-Chieh Chen: <em>Essential Issues in Analytical Placement Algorithms</em>.
+            </p>
 
             <h3>Background Math</h3>
             <p>[TODO: intro to the analytical placement formulation and explain
