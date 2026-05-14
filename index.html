@@ -794,10 +794,10 @@
 
             <h4>Speedup vs. V2</h4>
 
-            <p>From Verilator simulation, V3 reaches 1.41&times; on
-            simple_logic_10, 1.42&times; on mixed_macro_10, and 1.26&times; on
-            parallel_chains_50 against V2, with HPWL values bit-exact against
-            the V2 golden once the DPI driver is rebuilt with
+            <p>From Verilator simulation cycle-level performance, V3 reaches
+            1.41&times; on simple_logic_10, 1.42&times; on mixed_macro_10, and
+            1.26&times; on parallel_chains_50 against V2, with HPWL values
+            bit-exact against the V2 golden once the DPI driver is rebuilt with
             <code>-DCG_GOLDEN_USE_NR</code> so that the C++ golden also uses NR
             division. An earlier V3 experiment at a 2-cycle-per-nz pipelined
             SPMV inner loop passed every Verilator test but failed timing during
@@ -999,9 +999,7 @@
             <code>cy</code>), and one read-write xy port
             (<code>xy_ram_*</code>). It internally instantiates one
             <code>CGCtrl</code> plus one <code>CGDpath</code> with
-            <code>p_lanes=4</code> per engine (down from V5's
-            <code>p_lanes=8</code>) so the two engines together stay
-            within the per-FPGA DSP budget. The per-engine
+            <code>p_lanes=8</code> per engine. The per-engine
             <code>CGCtrl</code> drops <code>sel_y_reg</code> and the
             x-to-y loopback entirely, so its FSM is the simpler
             single-dimension variant whose <code>S_WB_WRITE</code>
@@ -1145,6 +1143,15 @@
         <section id="system-integration">
             <h2>System Integration</h2>
 
+            <figure>
+                <img src="images/sys-integ.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of how software and hardware placers work with
+                    the framework.
+                </figcaption>
+            </figure>
+
             <p>The placer's outer loop, partitioning, and JSON parsing live in
             a single <a href="sw-baseline-c/placer.cpp">placer.cpp</a>
             that is reused across every backend. A short
@@ -1225,24 +1232,21 @@
             from the Verilator path is which header gets included.</p>
 
             <h3>Putting It All Together: run-placer</h3>
-
             <p>The <a href="python-utils/run_placer.py">run-placer</a>
             console script is the user-facing entry point for every
             build mode (<code>python</code>, <code>sw</code>,
             <code>golden</code>, <code>verilated</code>,
-            <code>arm</code>, <code>fpga</code>). It parses LEF/DEF
-            into JSON, invokes cmake + make with the right macros to
-            select the driver header (and to cross-compile to
-            ARM for the remote modes), runs the placer either locally
-            or remotely, and renders the resulting placement to PNG.
-            For remote modes it opens one
+            <code>arm</code>, <code>fpga</code>). It parses LEF/DEF into JSON,
+            invokes cmake with the right macros to select the driver header (and
+            to cross-compile to ARM for the remote modes), runs the placer
+            either locally or remotely, and renders the resulting placement to
+            PNG. For remote modes it opens one
             <a href="https://www.fabfile.org/">fabric</a> SSH session
             against the board (credentials from a gitignored
-            <code>.env</code>), SCPs the binary and netlist over, runs
-            the placer with <code>sudo</code> on the FPGA path so the
-            mmap driver can open <code>/dev/mem</code>, and SCPs the
-            result JSONs back. Two convenience features make iteration
-            easy: a <code>--sweep</code> flag that runs
+            <code>.env</code>), SCPs the binary and netlist over, runs the
+            placer with <code>sudo</code> on the FPGA path so the mmap driver
+            can open <code>/dev/mem</code>, and SCPs the result JSONs back. Two
+            features make iteration easy: a <code>--sweep</code> flag that runs
             <code>max_outer_iter</code> from 1..16, captures a PNG per
             iteration, and stitches a GIF/MP4 slideshow; and an
             auto-detected batch mode that walks every benchmark in a
@@ -1368,10 +1372,47 @@
 
             <h3>Resource Utilization</h3>
             <p>
-                [TODO: M10K, DSP, ALM usage on Cyclone V --> also explain
-                extension of Verilated design to large placement, and state how
-                with the resource limit removed it is clear that performance is
-                in line with the baseline placers]
+                The final V6 design uses 80% of the total ALMs, 64% of the DSP
+                blocks, and 19% of the on-board M10K blocks. This shows our
+                design is mostly logic-constrained which makes sense given our
+                large adder and division subciruits as well as our multi-stage
+                FSM's. The DSP usage is directly related to the number of lanes
+                we parameterize at the toplevel, and while we could have added
+                more lanes, our attempts to do so resulted in routing failure.
+                With the current setup, we use about 53.4% of available routing
+                resources with a peak of 89.9% in the most constrained areas.
+                For memory, our low usage makes sense given that, for a 50-cell
+                design where each x and y coordinate requires 32 bits to store
+                its Q13.14 fixed-point value, we require 16384 bytes per Q
+                matrix value and column SRAM, of which we have four (two for X
+                and two for Y). We also need 256 bytes for each Q row pointer
+                SRAM, as well as 256 bytes for each position vector SRAM and
+                C-vector SRAM, so six altogether. The total amount of M10K
+                memory needed is thus \(16384*4 + 256*6 = 67072\) bytes. Given
+                we have used 76 M10K blocks, each of which holds 10,240 bits or
+                1280 bytes, this means 97,280 bytes total have been used on the
+                FPGA, of which the 67,072 bytes required for the SRAMs fits
+                within. For much larger designs, we would expect the
+                logic-to-memory ratio to be more balanced.
+            </p>
+            <figure>
+                <img src="images/v6-cp.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Quartus Chip Planner view of the V6 design on the Cyclone V.
+                    Areas in warmer colors are more highly congested than those
+                    shown in cooler colors.
+                </figcaption>
+            </figure>
+            <p>
+                To show that our design works for the full ICCAD benchmark
+                suite, we Verilated our design with a cell count of 12000 and
+                ran our placer with the Verilator driver hardware shim on the
+                ICCAD04 DMA benchmark. With Q13.14, we achieved results that
+                aligned closely with the software solution for the same
+                benchmark. Thus, given an FPGA with significantly more
+                resources, our hardware design would be able to successfully
+                place full-scale placement problems. 
             </p>
         </section>
 
@@ -1410,11 +1451,13 @@
             hardware placer implementations. He started out by making the Python
             FL and V1 Verilog by hand and then exploring optimizations to the
             base hardware in later versions.
+            </p>
             <p>[TODO: name -- responsibilities.]
+            </p>
             <p>[TODO: name -- responsibilities.]
             </p>
 
-            <h3>AI Attributioin</h3>
+            <h3>AI Attribution</h3>
             <p>Claude Code (Opus 4.7) was used extensively throughout this
             project. Our reasoning for this is simple: our group wanted to
             perform rapid design-space exploration and see real, working results
@@ -1429,7 +1472,7 @@
             introducing optimizations implemented by Claude. We finally used
             Claude to help us fill in technical details in this report,
             specifically in the hardware section, as well as to perform grammar
-            and clarity edits. </a>.</p>
+            and clarity edits.</p>
         </section>
 
         <footer>
