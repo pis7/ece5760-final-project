@@ -117,18 +117,16 @@
                 Solving this quadratic programming problem exposes ample opportunity for parallism which we take advantage of using the FPGA.
                 This allows our design to achieve 10-15x speed-ups when minimizing our cost function, improving end to end placement by roughly 10% without sacrificing much in the way of result quality.
             </p>
-
-            <!-- Optional demo video embed -->
-            <!--
-            <iframe
-                width="960"
-                height="540"
-                src="https://www.youtube.com/embed/[TODO]"
-                frameborder="0"
-                allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+            
+            <iframe width="560" height="315"
+                src="https://www.youtube.com/embed/uZk1GfxBrS0?si=I-i_Qow8zvtvmiRo"
+                title="YouTube video player" frameborder="0" allow="accelerometer;
+                    autoplay; clipboard-write; encrypted-media; gyroscope;
+                    picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin"
                 allowfullscreen>
             </iframe>
-            -->
+           
         </section>
 
         <!-- =============================================================
@@ -169,7 +167,7 @@
             <!--
             <pre>
                 <code>
-// [TODO: snippet]
+            // [TODO: snippet]
                 </code>
             </pre>
             -->
@@ -516,6 +514,16 @@
 
             <h3>V1 RTL</h3>
 
+            <figure>
+                <img src="images/v1.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V1 RTL. Red represents combinational
+                    logic. Green represent sequential logic, blue represents FSM
+                    states, and orange represents wide bus connections.
+                </figcaption>
+            </figure>
+
             <p>V1 is the first translation of the Python FL model into Verilog
             and is intentionally unsynthesizable. Its purpose is to translate
             the FL model's data flow correctly into SystemVerilog before any
@@ -561,44 +569,59 @@
 
             <h4>CGCtrl FSM</h4>
 
-            <p>The high-level FSM phases are (in execution order):
-            <code>S_IDLE</code> &rarr; <code>S_PREP</code> &rarr;
-            <code>S_LD_X_ADDR</code>/<code>S_LD_X_CAPT</code> (load
-            initial guess) &rarr; <code>S_LD_CX_ADDR</code>/<code>S_LD_CX_CAPT</code>
-            (load <code>cx</code>) &rarr;
-            <code>S_SPMV_INIT_FIRE</code>/<code>S_SPMV_INIT_COLLECT</code>
-            (compute <code>Q*x</code>) &rarr; <code>S_VNS_R</code>
-            (<code>r = -(cx + Q*x)</code>) &rarr; <code>S_COPY_D</code>
-            (<code>d &larr; r</code>) &rarr; <code>S_VDOT_INIT_FEED</code>
-            (initial <code>rr</code>) &rarr; <code>S_RR_REG_COPY</code>,
-            and then the per-iter sweep <code>S_SPMV_RUN_FIRE</code>
-            &rarr; <code>S_SPMV_RUN_COLLECT</code> &rarr;
-            <code>S_VDOT_DQ_FEED</code> &rarr; <code>S_DIV_A_SEND</code>
-            &rarr; <code>S_DIV_A_RECV</code> &rarr;
-            <code>S_AXPY_X_FEED</code> &rarr; <code>S_AXPY_R_FEED</code>
-            &rarr; <code>S_VDOT_RR_FEED</code> &rarr;
-            <code>S_DIV_B_SEND</code> &rarr; <code>S_DIV_B_RECV</code>
-            &rarr; <code>S_AXPY_D_FEED</code> &rarr;
-            <code>S_RUN_CHECK</code>, looping until the convergence
-            predicate
-            <code>iter &ge; max_iter || rr_new &le; eps_sq || (iter &gt; 1 &amp;&amp; rr_new &ge; rr_old)</code>
-            fires, then <code>S_WB_WRITE</code> and a flip of the
-            <code>sel_y</code> register to re-enter
-            <code>S_LD_X_ADDR</code> for the y solve before terminating
-            at <code>S_CG_DONE</code> on <code>sw_done_ack</code>.</p>
+            <p>The high-level FSM phases (in execution order) are:</p>
+            <ul>
+                <li><b>Init:</b> <code>S_IDLE</code> &rarr;
+                <code>S_PREP</code> &rarr;
+                <code>S_LD_X_ADDR</code>/<code>S_LD_X_CAPT</code> (load
+                initial guess) &rarr;
+                <code>S_LD_CX_ADDR</code>/<code>S_LD_CX_CAPT</code>
+                (load <code>cx</code>) &rarr;
+                <code>S_SPMV_INIT_FIRE</code>/<code>S_SPMV_INIT_COLLECT</code>
+                (compute <code>Q*x</code>) &rarr; <code>S_VNS_R</code>
+                (<code>r = -(cx + Q*x)</code>) &rarr;
+                <code>S_COPY_D</code> (<code>d &larr; r</code>) &rarr;
+                <code>S_VDOT_INIT_FEED</code> (initial <code>rr</code>)
+                &rarr; <code>S_RR_REG_COPY</code>.</li>
+                <li><b>Per-iter sweep</b> (loops until convergence):
+                <code>S_SPMV_RUN_FIRE</code> &rarr;
+                <code>S_SPMV_RUN_COLLECT</code> &rarr;
+                <code>S_VDOT_DQ_FEED</code> &rarr;
+                <code>S_DIV_A_SEND</code> &rarr;
+                <code>S_DIV_A_RECV</code> &rarr;
+                <code>S_AXPY_X_FEED</code> &rarr;
+                <code>S_AXPY_R_FEED</code> &rarr;
+                <code>S_VDOT_RR_FEED</code> &rarr;
+                <code>S_DIV_B_SEND</code> &rarr;
+                <code>S_DIV_B_RECV</code> &rarr;
+                <code>S_AXPY_D_FEED</code> &rarr;
+                <code>S_RUN_CHECK</code>.</li>
+                <li><b>Convergence predicate:</b>
+                <code>iter &ge; max_iter || rr_new &le; eps_sq || (iter &gt; 1 &amp;&amp; rr_new &ge; rr_old)</code>.</li>
+                <li><b>Termination:</b> <code>S_WB_WRITE</code>, then
+                flip the <code>sel_y</code> register and re-enter
+                <code>S_LD_X_ADDR</code> for the y solve, before
+                finally landing at <code>S_CG_DONE</code> on
+                <code>sw_done_ack</code>.</li>
+            </ul>
 
             <h4>CGDpath and Register Files</h4>
 
             <p><code>CGDpath</code> contains five FF-based unpacked-array
             register files of size <code>p_max_n</code> each at
-            <code>p_total_bits</code> wide: <code>d_reg</code> (search
-            direction), <code>r_reg</code> (residual),
-            <code>x_vec_reg</code> (iterate), <code>cx_reg</code> (loaded
-            right-hand side), and <code>q_buf</code> (SPMV result). There are
-            additional registers to hold scalar values: <code>rr_reg</code>,
-            <code>rr_new_latched</code>, <code>dq_latched</code>,
-            <code>alpha</code>, <code>beta</code>, and <code>iter</code>. The
-            register files expose three combinational read ports: two
+            <code>p_total_bits</code> wide:</p>
+            <ul>
+                <li><code>d_reg</code> &mdash; search direction</li>
+                <li><code>r_reg</code> &mdash; residual</li>
+                <li><code>x_vec_reg</code> &mdash; iterate</li>
+                <li><code>cx_reg</code> &mdash; loaded right-hand side</li>
+                <li><code>q_buf</code> &mdash; SPMV result</li>
+            </ul>
+            <p>There are additional registers to hold scalar values
+            (<code>rr_reg</code>, <code>rr_new_latched</code>,
+            <code>dq_latched</code>, <code>alpha</code>,
+            <code>beta</code>, and <code>iter</code>). The register
+            files expose three combinational read ports: two
             <code>p_lanes</code>-wide indexed ports
             (<code>rd_a_*</code> and <code>rd_b_*</code>) and one
             single-lane port (<code>rd_vec_*</code>) reserved for
@@ -612,12 +635,17 @@
             single <code>p_lanes</code>-wide write port carries
             <code>wr_sel</code>, <code>wr_idx_ctrl_packed</code>,
             <code>we</code>, and a <code>wdata_src</code> mux that
-            selects between memory readback (<code>WD_MEM</code>),
-            AXPY output (<code>WD_AXPY</code>), SPMV output
-            (<code>WD_SPMV</code>), a passthrough of
-            <code>rd_a_data</code> (<code>WD_RDA</code>, used by
-            <code>S_COPY_D</code>), and the inline VNS computation
-            <code>-(rd_a + rd_b)</code> (<code>WD_VNS</code>).</p>
+            selects between five sources:</p>
+            <ul>
+                <li><code>WD_MEM</code> &mdash; memory readback</li>
+                <li><code>WD_AXPY</code> &mdash; AXPY output</li>
+                <li><code>WD_SPMV</code> &mdash; SPMV output</li>
+                <li><code>WD_RDA</code> &mdash; passthrough of
+                <code>rd_a_data</code> (used by
+                <code>S_COPY_D</code>)</li>
+                <li><code>WD_VNS</code> &mdash; the inline VNS
+                computation <code>-(rd_a + rd_b)</code></li>
+            </ul>
 
             <h4>Linalg Kernels</h4>
 
@@ -625,57 +653,72 @@
             <code>{Kernel}Ctrl</code> + <code>{Kernel}Dpath</code> +
             <code>{Kernel}_seq</code> wrapper pattern and the same
             <code>istream_val/rdy</code> + <code>ostream_val/rdy</code>
-            handshake convention. <code>VecDot_seq</code> feeds
-            <code>p_lanes</code> instances of <code>FpMulWide</code>
-            into an adder tree summed into a 48-bit
-            <code>p_acc_bits</code> accumulator, taking one
-            <code>istream</code> handshake per <i>p_lanes</i>-group and
-            emitting one <code>ostream</code> handshake at the end with
-            self-clearing of the accumulator on output.
-            <code>AXPY_seq</code> instantiates <code>p_lanes</code>
-            <code>FpMul</code>s with a coefficient broadcast, takes a
-            <code>mode</code> bit to select ADD vs SUB, and emits
-            <code>p_lanes</code> z values one cycle after the
-            corresponding input handshake. <code>SPMV_seq</code> is
-            single-lane (memory-bandwidth-bound on the shared Avalon
-            port) and uses a 12-state inner FSM
-            <code>S_RPLO_ADDR</code>/<code>S_RPLO_CAPT</code> &rarr;
-            <code>S_RPHI_ADDR</code>/<code>S_RPHI_CAPT</code> &rarr;
-            <code>S_ROW_INIT</code> &rarr;
-            <code>S_VAL_ADDR</code>/<code>S_VAL_CAPT</code> &rarr;
-            <code>S_COL_ADDR</code>/<code>S_COL_CAPT</code> &rarr;
-            <code>S_ACC</code> &rarr; <code>S_EMIT</code> where each ADDR/CAPT
-            pair holds the same address across two cycles to support the
-            one-cycle latency required by M10K memory. The per-nz inner loop
-            thus costs five cycles
-            (<code>VAL_ADDR</code>/<code>VAL_CAPT</code>/<code>COL_ADDR</code>/<code>COL_CAPT</code>/<code>ACC</code>),
-            plus four cycles of row prologue and one cycle of
-            <code>S_EMIT</code> per row. <code>VecNegSub_seq</code>
-            exists as a kernel but is actually invoked inline by
-            <code>CGCtrl</code> through the <code>WD_VNS</code>
-            write-data mux source rather than as a streaming module.
-            <code>S_VNS_R</code> reads <code>cx</code> and
-            <code>q_buf</code> through the two RF read ports and writes
-            <code>-(rd_a + rd_b)</code> back into <code>r_reg</code>
-            directly.</p>
+            handshake convention:</p>
+            <ul>
+                <li><b><code>VecDot_seq</code>:</b> feeds
+                <code>p_lanes</code> instances of <code>FpMulWide</code>
+                into an adder tree summed into a 48-bit
+                <code>p_acc_bits</code> accumulator. It takes one
+                <code>istream</code> handshake per <i>p_lanes</i>-group
+                and emits one <code>ostream</code> handshake at the end
+                with self-clearing of the accumulator on output.</li>
+                <li><b><code>AXPY_seq</code>:</b> instantiates
+                <code>p_lanes</code> <code>FpMul</code>s with a
+                coefficient broadcast, takes a <code>mode</code> bit
+                to select ADD vs SUB, and emits <code>p_lanes</code>
+                z values one cycle after the corresponding input
+                handshake.</li>
+                <li><b><code>SPMV_seq</code>:</b> single-lane
+                (memory-bandwidth-bound on the shared Avalon port).
+                Uses a 12-state inner FSM
+                <code>S_RPLO_ADDR</code>/<code>S_RPLO_CAPT</code>
+                &rarr;
+                <code>S_RPHI_ADDR</code>/<code>S_RPHI_CAPT</code>
+                &rarr; <code>S_ROW_INIT</code> &rarr;
+                <code>S_VAL_ADDR</code>/<code>S_VAL_CAPT</code>
+                &rarr;
+                <code>S_COL_ADDR</code>/<code>S_COL_CAPT</code>
+                &rarr; <code>S_ACC</code> &rarr; <code>S_EMIT</code>,
+                where each ADDR/CAPT pair holds the same address
+                across two cycles to support the one-cycle latency
+                required by M10K memory. The per-nz inner loop thus
+                costs five cycles
+                (<code>VAL_ADDR</code>/<code>VAL_CAPT</code>/<code>COL_ADDR</code>/<code>COL_CAPT</code>/<code>ACC</code>),
+                plus four cycles of row prologue and one cycle of
+                <code>S_EMIT</code> per row.</li>
+                <li><b><code>VecNegSub_seq</code>:</b> exists as a kernel
+                but is actually invoked inline by <code>CGCtrl</code>
+                through the <code>WD_VNS</code> write-data mux source
+                rather than as a streaming module.
+                <code>S_VNS_R</code> reads <code>cx</code> and
+                <code>q_buf</code> through the two RF read ports and
+                writes <code>-(rd_a + rd_b)</code> back into
+                <code>r_reg</code> directly.</li>
+            </ul>
 
             <h4>FpMath, Avalon Bus, and Memory Layout</h4>
 
-            <p><code>FpMath</code> defines three primitives.
-            <code>FpMul</code> is a fully-combinational signed
-            27&times;27 multiply with the product truncated back to
-            <code>p_total_bits</code>, <code>FpMulWide</code> is the same
-            multiply but returns the full 48-bit shifted product so it can feed
-            accumulators that need the full result (<code>VecDot</code>,
-            <code>SPMV</code>), and
-            <code>FpDiv</code> is a sequential val/rdy shift-subtract restoring
-            divide that operates on 48-bit signed operands and returns a 27-bit
-            quotient over <code>p_wide_bits + p_frac_bits</code> + 1 iteration
-            cycles, roughly 63 cycles for the default Q13.14 widths. All three
-            multipliers are mapped to the Cyclone V's 27&times;27 DSP blocks.
-            With <code>p_lanes=2</code> V2 uses five DSPs (two for
-            <code>VecDot</code>, two for AXPY, one for SPMV) which is
-            well within the chip's 87-DSP budget. The Avalon slave bus is
+            <p><code>FpMath</code> defines three primitives:</p>
+            <ul>
+                <li><b><code>FpMul</code>:</b> fully-combinational
+                signed 27&times;27 multiply with the product truncated
+                back to <code>p_total_bits</code>.</li>
+                <li><b><code>FpMulWide</code>:</b> the same multiply but
+                returns the full 48-bit shifted product so it can feed
+                accumulators that need the full result
+                (<code>VecDot</code>, <code>SPMV</code>).</li>
+                <li><b><code>FpDiv</code>:</b> sequential val/rdy
+                shift-subtract restoring divide that operates on 48-bit
+                signed operands and returns a 27-bit quotient over
+                <code>p_wide_bits + p_frac_bits</code> + 1 iteration
+                cycles, roughly 63 cycles for the default Q13.14
+                widths.</li>
+            </ul>
+            <p>All three multipliers are mapped to the Cyclone V's
+            27&times;27 DSP blocks. With <code>p_lanes=2</code> V2 uses
+            five DSPs (two for <code>VecDot</code>, two for AXPY, one
+            for SPMV) which is well within the chip's 87-DSP budget.
+            The Avalon slave bus is
             single-ported and shared between
             <code>CGCtrl</code> (LD/WB phases) and <code>SPMV</code>
             (CSR walk), arbitrated by a <code>ctrl_mem_src_spmv</code>
@@ -724,30 +767,38 @@
             divide and is invoked twice per CG iteration (once for
             <code>alpha</code>, once for <code>beta</code>). V3
             replaces it with a Newton-Raphson reciprocal in
-            <code>FpDivNR</code> that completes in roughly nine
-            cycles. The NR divider proceeds through nine FSM
-            states: <code>S_IDLE</code> &rarr; <code>S_NORM</code>
-            (extract sign, take absolute values, leading-zero-count
-            <code>|b|</code> over a 48-bit operand) &rarr;
-            <code>S_ROM</code> (look up a Q1.16 9-bit-accurate
-            reciprocal seed <code>r0</code> from a 256&times;17 ROM
-            indexed by the high byte of the normalized <code>b_norm =
-            (|b| &lt;&lt; lzc)[47:31]</code>) &rarr;
-            <code>S_NR1_M1</code> (compute <code>m1 = b_norm * r0</code>
-            into a registered <code>nr_m1_reg</code>) &rarr;
-            <code>S_NR1_M2</code> (compute <code>r1 = r0 * (2 - m1)</code>
-            from the registered <code>m1</code>) &rarr;
-            <code>S_NR2_M1</code> &rarr; <code>S_NR2_M2</code> (a
-            second NR iteration that washes out fixed-point truncation
-            noise from the first) &rarr; <code>S_QMUL</code> (compute
-            <code>m3 = |a| * r1</code> over 48&times;17 = 65 bits)
-            &rarr; <code>S_QFINISH</code> (right-shift <code>m3</code>
-            by <code>49 - lzc</code> to denormalize, saturate to
-            <code>(1 &lt;&lt; (p_total_bits - 1)) - 1</code> on
-            overflow, apply sign). Each cycle's combinational chain is
-            held to a single multiply plus a small subtract or select,
-            so the divider closes timing at 50 MHz on the same DSP
-            blocks used by <code>FpMul</code>. A generate guard in
+            <code>FpDivNR</code> that completes in roughly nine cycles
+            via the following FSM states:</p>
+            <ul>
+                <li><code>S_IDLE</code></li>
+                <li><code>S_NORM</code> &mdash; extract sign, take
+                absolute values, leading-zero-count <code>|b|</code>
+                over a 48-bit operand.</li>
+                <li><code>S_ROM</code> &mdash; look up a Q1.16
+                9-bit-accurate reciprocal seed <code>r0</code> from a
+                256&times;17 ROM indexed by the high byte of the
+                normalized <code>b_norm = (|b| &lt;&lt; lzc)[47:31]</code>.</li>
+                <li><code>S_NR1_M1</code> &mdash; compute
+                <code>m1 = b_norm * r0</code> into a registered
+                <code>nr_m1_reg</code>.</li>
+                <li><code>S_NR1_M2</code> &mdash; compute
+                <code>r1 = r0 * (2 - m1)</code> from the registered
+                <code>m1</code>.</li>
+                <li><code>S_NR2_M1</code> &rarr; <code>S_NR2_M2</code>
+                &mdash; a second NR iteration that washes out
+                fixed-point truncation noise from the first.</li>
+                <li><code>S_QMUL</code> &mdash; compute
+                <code>m3 = |a| * r1</code> over 48&times;17 = 65 bits.</li>
+                <li><code>S_QFINISH</code> &mdash; right-shift
+                <code>m3</code> by <code>49 - lzc</code> to denormalize,
+                saturate to
+                <code>(1 &lt;&lt; (p_total_bits - 1)) - 1</code> on
+                overflow, apply sign.</li>
+            </ul>
+            <p>Each cycle's combinational chain is held to a single
+            multiply plus a small subtract or select, so the divider
+            closes timing at 50 MHz on the same DSP blocks used by
+            <code>FpMul</code>. A generate guard in
             <code>FpMath.v</code> falls back to a parameterized
             shift-subtract divider <code>FpDivSS</code> when
             <code>p_total_bits &gt; 27</code> (used by the Verilator
@@ -901,46 +952,61 @@
             no dependency on each other. The bus arbiter
             (<code>ctrl_mem_src_spmv</code>) also adds a layer of
             mux on top. V5 splits the single slave into seven
-            dedicated Qsys on-chip RAM slaves: <code>q_val_ram</code>,
-            <code>q_col_ram</code>, and <code>q_rowp_ram</code> (all
-            owned by <code>SPMV</code>); <code>cx_ram</code> and
-            <code>cy_ram</code> (read by <code>CGCtrl</code> during
-            the serialized <code>S_VNS_R_ADDR</code>/<code>S_VNS_R_CAPT</code>
-            phase); and <code>x_ram</code> and <code>y_ram</code> (read
-            during <code>S_LD_X_*</code> and written during
-            <code>S_WB_WRITE</code>, with a <code>sel_y</code> mux at
-            <code>CGTop</code> picking which of the two each engine
-            phase talks to). Each slave is a dual-port Qsys on-chip
-            RAM IP: the ARM-facing h2f port lives on one side and the
-            FPGA-facing slave port on the other, so the two domains
-            stay isolated without any explicit arbitration. Every
-            FPGA-facing port has exactly one consumer.</p>
+            dedicated Qsys on-chip RAM slaves:</p>
+            <ul>
+                <li><code>q_val_ram</code>, <code>q_col_ram</code>,
+                and <code>q_rowp_ram</code> &mdash; all owned by
+                <code>SPMV</code>.</li>
+                <li><code>cx_ram</code> and <code>cy_ram</code>
+                &mdash; read by <code>CGCtrl</code> during the
+                serialized
+                <code>S_VNS_R_ADDR</code>/<code>S_VNS_R_CAPT</code>
+                phase.</li>
+                <li><code>x_ram</code> and <code>y_ram</code> &mdash;
+                read during <code>S_LD_X_*</code> and written during
+                <code>S_WB_WRITE</code>, with a <code>sel_y</code>
+                mux at <code>CGTop</code> picking which of the two
+                each engine phase talks to.</li>
+            </ul>
+            <p>Each slave is a dual-port Qsys on-chip RAM IP: the
+            ARM-facing h2f port lives on one side and the FPGA-facing
+            slave port on the other, so the two domains stay isolated
+            without any explicit arbitration. Every FPGA-facing port
+            has exactly one consumer.</p>
 
             <h4>Rewritten SPMV Inner Loop and Serialized S_VNS_R</h4>
 
             <p>The new <code>SPMV</code> inner loop is rewritten around
             the three independent ports. The 12-state V4 FSM is
-            replaced by a shorter sequence:
-            <code>S_RP_ADDR_FIRST</code>/<code>S_RP_CAPT_FIRST</code>
-            for row 0's <code>rp_lo</code> read,
-            <code>S_RP_ADDR_HI</code>/<code>S_RP_CAPT_HI</code> for row
-            0's <code>rp_hi</code>, then
-            <code>S_RP_ADDR_NEXT</code>/<code>S_RP_CAPT_NEXT</code> for
-            subsequent rows (which carry <code>rp_hi &rarr; rp_lo</code>
-            and read only the new <code>rp_ptr[row+1]</code>), then
-            <code>S_ROW_INIT</code> followed by per-nz
-            <code>S_NZ_ADDR</code> &rarr; <code>S_NZ_CAPT</code> &rarr;
-            <code>S_ACC</code>. In <code>S_NZ_ADDR</code> the dpath
-            drives <code>q_val_addr</code> and <code>q_col_addr</code>
-            simultaneously to the same <code>j_idx</code>;
-            <code>S_NZ_CAPT</code> latches both <code>q_val_rdata</code>
-            and <code>q_col_rdata</code> in parallel.
-            <code>S_ACC</code> does <code>acc += val * vec[col]</code>
-            using the captured values. Per-nz cost drops from V4's five
-            cycles to three. The dedicated <code>cx_ram</code> and
-            <code>cy_ram</code> ports also let the central
-            <code>cx_reg</code> register file be removed entirely and
-            <code>S_VNS_R</code> is serialized to
+            replaced by a shorter sequence:</p>
+            <ul>
+                <li><code>S_RP_ADDR_FIRST</code>/<code>S_RP_CAPT_FIRST</code>
+                &mdash; row 0's <code>rp_lo</code> read.</li>
+                <li><code>S_RP_ADDR_HI</code>/<code>S_RP_CAPT_HI</code>
+                &mdash; row 0's <code>rp_hi</code> read.</li>
+                <li><code>S_RP_ADDR_NEXT</code>/<code>S_RP_CAPT_NEXT</code>
+                &mdash; subsequent rows, which carry
+                <code>rp_hi &rarr; rp_lo</code> and read only the new
+                <code>rp_ptr[row+1]</code>.</li>
+                <li><code>S_ROW_INIT</code>, then the per-nz inner
+                loop:
+                <ul>
+                    <li><code>S_NZ_ADDR</code> &mdash; dpath drives
+                    <code>q_val_addr</code> and <code>q_col_addr</code>
+                    simultaneously to the same <code>j_idx</code>.</li>
+                    <li><code>S_NZ_CAPT</code> &mdash; latches both
+                    <code>q_val_rdata</code> and <code>q_col_rdata</code>
+                    in parallel.</li>
+                    <li><code>S_ACC</code> &mdash; does
+                    <code>acc += val * vec[col]</code> using the
+                    captured values.</li>
+                </ul>
+                </li>
+            </ul>
+            <p>Per-nz cost drops from V4's five cycles to three. The
+            dedicated <code>cx_ram</code> and <code>cy_ram</code> ports
+            also let the central <code>cx_reg</code> register file be
+            removed entirely, and <code>S_VNS_R</code> is serialized to
             <code>S_VNS_R_ADDR</code> &rarr; <code>S_VNS_R_CAPT</code>
             with single-lane writeback, where
             <code>S_VNS_R_CAPT</code> uses a new
@@ -999,18 +1065,22 @@
             back to <code>S_LD_X_ADDR</code> for the y pass. V6
             introduces a new <code>CGEngine</code> wrapper module
             whose port list exposes exactly one dimension's worth of
-            slave bundles which are the three read-only Q ports
-            (<code>q_val_ram_*</code>, <code>q_col_ram_*</code>,
-            <code>q_rowp_ram_*</code>), one read-only c port
-            (<code>c_ram_*</code>, generic over <code>cx</code> vs
-            <code>cy</code>), and one read-write xy port
-            (<code>xy_ram_*</code>). It internally instantiates one
-            <code>CGCtrl</code> plus one <code>CGDpath</code> with
-            <code>p_lanes=8</code> per engine. The per-engine
-            <code>CGCtrl</code> drops <code>sel_y_reg</code> and the
-            x-to-y loopback entirely, so its FSM is the simpler
-            single-dimension variant whose <code>S_WB_WRITE</code>
-            transitions unconditionally to <code>S_CG_DONE</code>.</p>
+            slave bundles:</p>
+            <ul>
+                <li>Three read-only Q ports:
+                <code>q_val_ram_*</code>, <code>q_col_ram_*</code>,
+                <code>q_rowp_ram_*</code>.</li>
+                <li>One read-only c port (<code>c_ram_*</code>),
+                generic over <code>cx</code> vs <code>cy</code>.</li>
+                <li>One read-write xy port (<code>xy_ram_*</code>).</li>
+            </ul>
+            <p>It internally instantiates one <code>CGCtrl</code> plus
+            one <code>CGDpath</code> with <code>p_lanes=8</code> per
+            engine. The per-engine <code>CGCtrl</code> drops
+            <code>sel_y_reg</code> and the x-to-y loopback entirely, so
+            its FSM is the simpler single-dimension variant whose
+            <code>S_WB_WRITE</code> transitions unconditionally to
+            <code>S_CG_DONE</code>.</p>
 
             <h4>CGTop and Done Signal</h4>
 
@@ -1084,23 +1154,27 @@
 
             <p>Every RTL revision (V1 through V6 inclusive) is tested
             against the same Verilator-driven DPI testbench framework
-            in <a href="fpga/hw/test/">fpga/hw/test/</a>. The
-            framework consists of three layers: a per-version SystemVerilog
-            testbench top (<a href="fpga/hw/test/CGTop_tb.v">CGTop_tb.v</a>
-            for V1-V4's single-slave topology,
-            <a href="fpga/hw/test/CGTop_tb_V5.v">CGTop_tb_V5.v</a> for
-            V5/V5_deep's seven-slave topology, and
-            <a href="fpga/hw/test/CGTop_tb_V6.v">CGTop_tb_V6.v</a> for
-            V6's ten-slave parallel-engine topology), a single shared
-            test-case file
-            <a href="fpga/hw/test/test_cases.v">test_cases.v</a> that
-            defines all 16 directed cases, and a DPI bridge
-            <a href="fpga/hw/test/cg_golden_dpi.cpp">cg_golden_dpi.cpp</a>
-            that wraps the canonical C++ fixed-point CG golden model
-            from
-            <a href="sw-baseline-c/cg_golden_model.h">sw-baseline-c/cg_golden_model.h</a>.
-            For each test case the testbench loads identical input data
-            into the DUT's behavioral memories and a parallel
+            in <a href="fpga/hw/test/">fpga/hw/test/</a>. The framework
+            consists of three layers:</p>
+            <ul>
+                <li><b>Per-version SystemVerilog testbench top</b>
+                &mdash; <a href="fpga/hw/test/CGTop_tb.v">CGTop_tb.v</a>
+                for V1-V4's single-slave topology,
+                <a href="fpga/hw/test/CGTop_tb_V5.v">CGTop_tb_V5.v</a>
+                for V5/V5_deep's seven-slave topology, and
+                <a href="fpga/hw/test/CGTop_tb_V6.v">CGTop_tb_V6.v</a>
+                for V6's ten-slave parallel-engine topology.</li>
+                <li><b>Shared test-case file</b>
+                <a href="fpga/hw/test/test_cases.v">test_cases.v</a>
+                &mdash; defines all 16 directed cases.</li>
+                <li><b>DPI bridge</b>
+                <a href="fpga/hw/test/cg_golden_dpi.cpp">cg_golden_dpi.cpp</a>
+                &mdash; wraps the canonical C++ fixed-point CG golden
+                model from
+                <a href="sw-baseline-c/cg_golden_model.h">sw-baseline-c/cg_golden_model.h</a>.</li>
+            </ul>
+            <p>For each test case the testbench loads identical input
+            data into the DUT's behavioral memories and a parallel
             <code>golden_mem</code> array, pulses <code>sw_go</code>,
             waits for <code>sw_done</code>, and then calls
             <code>dpi_cg_solve</code> on the golden array. The DPI
@@ -1109,12 +1183,20 @@
             back into <code>golden_mem</code>. The testbench then
             compares the DUT's output region against the golden region
             element-by-element and reports any mismatch. The 16 cases
-            cover small SPD systems (2&times;2 through 3&times;3),
-            uniform tridiagonals at <i>n</i>=4, 8, 20, and 50, dense
-            diagonally-dominant <i>n</i>=10 and 20 matrices, the
-            arrow pattern, the <i>n</i>=1 and <i>n</i>=49 boundaries
-            (the latter testing the <code>p_lanes</code> partial-group
-            mask), non-zero initial guesses, and pre-converged starts.</p>
+            cover:</p>
+            <ul>
+                <li>Small SPD systems (2&times;2 through 3&times;3).</li>
+                <li>Uniform tridiagonals at <i>n</i>=4, 8, 20, and
+                50.</li>
+                <li>Dense diagonally-dominant <i>n</i>=10 and 20
+                matrices.</li>
+                <li>The arrow pattern.</li>
+                <li>The <i>n</i>=1 and <i>n</i>=49 boundaries (the
+                latter testing the <code>p_lanes</code> partial-group
+                mask).</li>
+                <li>Non-zero initial guesses.</li>
+                <li>Pre-converged starts.</li>
+            </ul>
 
             <h4>CMake and Per-Version Targets</h4>
 
