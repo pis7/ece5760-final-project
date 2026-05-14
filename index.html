@@ -19,7 +19,7 @@
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
         }
         section {
-            margin-bottom: 20px;
+            margin-bottom: 60px;
         }
         img {
             max-width: 100%;
@@ -40,15 +40,40 @@
             height: auto;
         }
         pre {
+        pre {
             text-align: left;
             display: block;
             margin-left: 0;
+        }
+        code {
+            text-align: left;
+            display:inline;
+            margin-left: 0;
+            font-size: 14px;
         }
         figcaption {
             text-align: center;
             font-style: italic;
             color: #555;
             margin-top: 5px;
+        }
+        h3 {
+            margin-top: 40px;
+            margin-bottom: 10px;
+        }
+        ul, ol, {
+            margin-top: 4px;
+            margin-bottom: 4px;
+        }
+        p {
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        figure {
+            margin-top: 30px;
+        }
+        table {
+            margin-top: 20px;
         }
     </style>
     <script id="MathJax-script" async
@@ -66,7 +91,7 @@
              ============================================================= -->
         <section id="introduction">
             <h2>Project Introduction</h2>
-            <p><i>[TODO: one-sentence italicized summary of the project.]</i></p>
+            <p><i>Using an accelerator to layout an accelerator.</i></p>
 
             <!-- Hero figure (e.g., DE1-SoC running the placer, or a final placement plot) -->
             <!--
@@ -76,8 +101,15 @@
             </figure>
             -->
 
-            <p>[TODO: motivation paragraph -- what problem does analytical placement
-                solve, why accelerate it, why on the DE1-SoC.]</p>
+            <p>
+                ASICs are composed of many <em>macros</em> atomic logic units wired together.
+                To make an ASIC, a design is specified in an HDL which is then lowered to a set of macros and <em>nets</em> connections between macros.
+                Macros are then placed on a grid and routed together.
+                Our design accelerates the <em>placement</em> step on the DE1-SoC.
+                We use a quadratic cost function for judging placements which we minimize.
+                Solving this quadratic programming problem exposes ample opertunity for parallism which we take advantage of using the FPGA.
+                This lets our design achieve 10-15x speedups when minimizing our cost function, improving end to end placement by roughly 10% without significant differences in the quality of results.
+            </p>
 
             <!-- Optional demo video embed -->
             <!--
@@ -99,7 +131,16 @@
             <h2>High-Level Design</h2>
 
             <h3>Rationale and Sources</h3>
-            <p>[TODO: why this project, what inspired it, key references.]</p>
+            <p>
+                The idea of accelerating placement is not new. The larger technique we consider if <em>analytical placement</em>, in which a specific cost function is minimized using analytical methods.
+                These often involve gradient decent and are ripe with parallelism.
+                The current state of the art is <a href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a> which minimizes a cost function based around weighted average wirelength, taking advantage of GPUs to speed up the minimization.
+                Jeremy came across this paper, found this cool, and Jeremy and Parker who were both working with ASICs wanted to implement something similar.
+                More specifically, we want to accelerate placement with a design taking advantage of parallelism on the FPGA in similar places to where DREAMPlace takes advantage of the GPU.
+
+                In order to lower project scope, we simply the task done by DREAMPlace by using a simpler, quadratic cost model and only implementing <em>global placement</em>, an initial, off-grid placement which, where it to be used, must be <em>legalized</em>.
+                The cost model and high level global placement algorithm we based on an old (2007) survey by Yao-Wen Chang, Zhe-Wei Jiang, and Tung-Chieh Chen: <em>Essential Issues in Analytical Placement Algorithms</em>.
+            </p>
 
             <h3>Background Math</h3>
             <p>[TODO: intro to the analytical placement formulation and explain
@@ -133,8 +174,8 @@
             <p>[TODO: prose.]</p>
 
             <h3>Logical Structure</h3>
-            <p>[TODO: end-to-end flow -- LEF/DEF parse -> Q/c build -> CG solve ->
-                overlap reduction -> visualization.]</p>
+            <p>[TODO: end-to-end flow -- LEF/DEF parse (explain what LEF and DEF are - see "What each file
+                contains" from GitHub README) -> Q/c build -> CG solve -> overlap reduction -> visualization.]</p>
 
             <!--
             <figure>
@@ -152,26 +193,271 @@
         </section>
 
         <!-- =============================================================
-             SOFTWARE PLACERS
+             SOFTWARE PLACERS & UTILITIES
              ============================================================= -->
         <section id="software-placers">
-            <h2>Software Placers</h2>
-            <p>[TODO: easier to start with software and derive hardware from
-            it]</p>
+            <h2>Software Placers & Utilities</h2>
+            <p>
+                Before delving into any logic implemented on the FPGA, it is worth spending some time
+                giving insight into relevant software. This comes in two forms: 
+            </p>
+            <ol>
+                <li>Utilities that create a more convenient interface for processing inputs or observing outputs</li>
+                <li>Placer scripts that act as a software baseline to which we can compare hardware speed-up later</li>
+            </ol>
+            <p>
+                Both of these are explained in detail in the sections below.
+            </p>
 
             <h3>LEF/DEF Parser</h3>
-            <p>[TODO: explain LEF/DEF with examples, how we parse into JSON
-            intermediate format]</p>
+            <p>
+                To process input data, we have a dedicated LEF/DEF parser script, <code>lefdef-parser.py</code>. It is 
+                class-based, and has one public method for each of the 4 major steps it performs:
+            </p>
+            <ol>
+                <li>
+                    <b>find_files</b>
+                    <p>
+                        Every placement input is a pair of LEF and DEF files, kept in lef/ and def/ 
+                        subdirectories of the benchmark folder:
+                    </p>
+                    <pre><code>
+                        benchmarks/
+                            iccad04/
+                                DMA/   { lef/dma.lef,  def/dma.def }
+                                DSP1/  ...
+                                DSP2/  ...
+                                RISC1/ ...
+                                RISC2/ ...
+                            custom/
+                                simple_logic_10/      { lef/simple_logic_10.lef, def/simple_logic_10.def }
+                                mixed_macro_10/       ...
+                                parallel_chains_50/   ...
+                                mesh_grid_25/         ...
+                                dense_pack_36/        ...
+                                size_extremes_mix/    ...
+                                star_fanout_31/       ...
+                                two_clusters_bridge/  ...   
+                    </code></pre>
+                    <p>
+                        This method will do all of the following:
+                    </p>
+                    <ul>
+                        <li>Searches for LEF and DEF files in the benchmark directory</li>
+                        <li>Prints a debug message and exits if the relevant files are not found</li>
+                        <li>Stores the discovered file paths internally</li>
+                    </ul>
+                </li>
+                <br>
+                <li>
+                    <b>parse_lef</b>
+                    <p>
+                        Here, the script scans the LEF file and extracts relevant physical library
+                        information. It needs the name, width, and height of each macro, as well as
+                        the database unit scaling. Any other information—such as routing information
+                        on layers and vias—is not needed, and is therefore ignored by the parser. An
+                        example displaying information retrieved by the parser is shown below.
+                    </p>
+                    <pre><code>
+                        VERSION 5.4 ;
+                        NAMESCASESENSITIVE ON ;
+                        UNITS
+                            DATABASE MICRONS 100 ; <span style="color: blue;"> --> USED: unit scaling</span>
+                        END UNITS
+
+                        MACRO MED
+                            CLASS CORE ;
+                            ORIGIN 0.000 0.000 ;
+                            SIZE 0.4 BY 0.4 ; <span style="color: blue;"> --> USED: width and height</span>
+                            SYMMETRY x y ;
+                            PIN Y <span style="color: blue;"> --> USED: pin name (Y)</span>
+                                DIRECTION OUTPUT ;
+                                PORT
+                                LAYER metal1 ;
+                                RECT 0.0 0.0 0.4 0.4 ;
+                                END
+                            END Y
+                            PIN A <span style="color: blue;"> --> USED: pin name (A)</span>
+                                DIRECTION INPUT ;
+                                PORT
+                                LAYER metal1 ;
+                                RECT 0.0 0.0 0.4 0.4 ;
+                                END
+                            END A
+                        END MED
+                    </code></pre>
+                </li>
+                <li>
+                    <b>parse_def</b>
+                    <p>
+                        Like with the previous method, the script will parse the DEF file and extract only the necessary
+                        information. It picks out information on the design name, units, die area, components (instance name,
+                        macro, and position), nets (net name and pin connections), and I/O pins (pin name, associated net, and 
+                        position). Any property definitions are unneeded and skipped. An example displaying information retrieved 
+                        by the parser is shown below.
+                    </p>
+                    <code><pre>
+                        VERSION 5.4 ;
+                        NAMESCASESENSITIVE ON ;
+                        DIVIDERCHAR "/" ;
+                        BUSBITCHARS "[]" ;
+                        DESIGN dense_pack_36 ; <span style="color: blue;"> --> USED: design name</span>
+                        UNITS DISTANCE MICRONS 100 ; <span style="color: blue;"> --> USED: units</span>
+
+                        DIEAREA ( 0 0 ) ( 500 500 ) ; <span style="color: blue;"> --> USED: die area</span>
+
+                        COMPONENTS 36 ; <span style="color: blue;"> --> FROM EACH, USE: component name, macro, and position only</span>
+                        - U1 MED + PLACED ( 30 30 ) N ; 
+                        - U2 MED + PLACED ( 105 30 ) N ; 
+                        . . .
+                        - U36 MED + PLACED ( 405 405 ) N ;
+                        END COMPONENTS
+
+                        PINS 2 ; <span style="color: blue;"> --> FROM EACH, USE: pin name, net, and position only</span>
+                        - in0 + NET in0 + DIRECTION INPUT + USE SIGNAL + PLACED ( 0 250 ) N ;
+                        - out0 + NET n35 + DIRECTION OUTPUT + USE SIGNAL + PLACED ( 500 250 ) N ;
+                        END PINS
+
+                        NETS 37 ; <span style="color: blue;"> --> USE ALL: contains net name and pin connections</span>
+                        - in0 ( PIN in0 ) ( U1 A ) ;
+                        - n0 ( U1 Y ) ( U2 A ) ;
+                        . . .
+                        - n35 ( U36 Y ) ( PIN out0 ) ;
+                        END NETS
+
+                        END DESIGN
+                    </code></pre>
+                </li>
+                <li>
+                    <b>write_json</b>
+                    <p>
+                        Once the LEF/DEF files have been parsed, they can be converted into a single JSON file. A number of dataclasses are
+                        defined in <code>json_utils.py</code> to make this easier: <code>Macro</code>, <code>Component</code>, <code>IOPin</code>, 
+                        <code>Net</code>, and <code>Netlist</code>. To create the JSON file, we initialize a <code>Netlist</code> object using 
+                        the data extracted from the LEF/DEF files previously and serialize it into JSON format. An example showing this 
+                        intermediate JSON format is shown below.
+                    </p>
+                    <pre><code class="language-json"> 
+                        {
+                        "design_name": "dma_top",
+                        "dbu_per_micron": 100,
+                        "die_area": [-204000, -204000, 204400, 204400], 
+                        // [xl, yl, xh, yh] in DBU
+
+                        "macros": {
+                            "INV":  { "width": 0.1, "height": 0.1, "pins": ["A", "Y"] },     
+                            // microns
+                            "BUF":  { "width": 0.1, "height": 0.1, "pins": ["A", "Y"] }
+                        },
+
+                        "components": {
+                            "U1": { "macro_name": "INV", "x": 10, "y": 10 },                  
+                            // DBU
+                            "U2": { "macro_name": "BUF", "x": 20, "y": 10 }
+                        },
+
+                        "io_pins": [
+                            { "name": "clk", "net_name": "clk", "x": 0, "y": 12500 }         
+                            // DBU
+                        ],
+
+                        "nets": [
+                            { "name": "n1", "pins": [["U1", "Y"], ["U2", "A"], ["U5", "A"]] }
+                        ]
+                        }
+                    </code></pre>
+                    <p>
+                        The output file name is always chosen to be the <code>DESIGN</code> keyword listed in the DEF file, followed by a 
+                        .json extension.
+                    </p>
+                </li>
+            </ol>
 
             <h3>Design Visualizer</h3>
-            <p>[TODO: Tk visualization of JSON format and its features]</p>
+            <p>
+                A script called <code>visualizer.py</code> allows any JSON file containing physical layout information to be rendered and
+                visualized more clearly. When run normally with a single JSON file path as an argument, the code will boot up a Tkinter window. 
+                Components are rendered as blue rectangles of the specified size, and I/O pins are displayed as yellow circles
+                along the die outline. Hovering over any of the displayed components will provide information about that component's name and 
+                macro for identification purposes. To make the visualizer tool more interactive, the user has some control over the pop-up window:
+            </p>
+            <ul>
+                <li>Scroll to zoom in or out</li>
+                <li>Drag to pan</li>
+                <li>'F' to fit-all</li>
+                <li>'Q' to quit</LI>
+            </ul>
+            <div>
+                <figure>
+                    <img src="images/dma_lefdef_visualizer_output.png"
+                        style="display: block; margin: 0 auto; width: 400px; height: auto;">
+                    <figcaption style="text-align: center;">
+                        Tkinter window when visualizer is run on ICCAD04 DMA benchmark
+                    </figcaption>
+                </figure>
+                <figure>
+                    <img src="images/dma_lefdef_visualizer_zoomed.png"
+                        style="display: block; margin: 0 auto; width: 300px; height: auto;">
+                    <figcaption style="text-align: center;">
+                        Macro information displayed when zoomed in
+                    </figcaption>
+                </figure>
+            </div>
+            <p>
+                When run with a <code>--png &ltout.png&gt &ltin.json&gt</code> flag, the script will instead run in headless mode, rendering
+                a single PNG image without a Tk window. This is useful for automating rendering images after each run.
+            </p>
 
             <h3>Python Placer</h3>
-            <p>[TODO: algorithm explanation]</p>
+            <p>
+                One baseline placer written in idiomatic Python is implemented in <code>sw-baseline-python/placer.py</code>. Its purpose is
+                simple: achieve algorithmic correctness at all costs, disregarding any tradeoff in speed. This makes it valuable as a point
+                of comparison for validating the implementations to follow. The file contains a <code>Placer</code> class that stores
+                information about the netlist, cell center positions, base and active linear systems, and the partition state. Its
+                methods are designed to streamline the execution of the full analytical placement algorithm. The sequence is roughly as follows:
+            </p>
+
+            <ol>
+                <li>
+                    <b>Load Data:</b> runs <code>load_netlist()</code> to read in the JSON file produced by the LEF/DEF parser.
+                </li>
+                <li>
+                    <b>Initialize Cell Positions:</b> runs <code>init_cell_positions()</code> to place cells at initial positions within
+                    the die area; in this baseline placer, all cells are initialized to the center of the die.
+                </li>
+                <li>
+                    <b>Build Connectivity Matrix:</b> runs <code>build_system()</code> to construct the sparse quadratic system <code>Qx=-c</code> 
+                    and <code>Qy=-c</code> using clique net decomposition, where each net is converted into a set of weighted two-pin connections 
+                    between all pins.
+                </li>
+                <li>
+                    <b>Initial CG Solve:</b> runs <code>solve_cg()</code>, solving the linear system using <code>scipy.sparse.linalg.cg</code> 
+                    to obtain the initial wirelength-optimal placement; this minimizes quadratic wirelength but ignores overlap constraints. We
+                    exit when <code>max_iter=1000</code> is exceeded, or the algorithm is deemed to have converged by comparison
+                    to a predefined threshold; otherwise, Step 4 is repeated.
+                </li>
+                <li>
+                    <b>Perform Iterative Spreading:</b> this acts as the "outer loop" for the algorithm. It repeatedly applies recursive geometric 
+                    partitioning to generate spatial anchors, updates the linear system with additional quadratic penalties, and re-solves using 
+                    CG (the "inner loop", with the same exit condition as in Step 4). We exit Step 5 when <code>MAX_OUTER_ITER=15</code> is exceeded, 
+                    or when the overlap between cells is considered acceptable (i.e. max bin density < 0.75); otherwise, Step 5 is repeated.
+                </li>
+                <li>
+                    <b>Write Final Output:</b> writes the final placed design back to JSON via <code>write_output()</code>, producing a netlist
+                    with updated cell coordinates for visualization and downstream processing.
+                </li>
+            </ol>
 
             <h3>C++ Placer</h3>
-            <p>[TODO: largely just a C++ port of Python, explain hooks for
-            hardware shims to discuss next]</p>
+            <p>
+                The C++ baseline placer, which is stored in <code>sw-baseline-c/placer.cpp</code>, is nearly identical in its implementation to
+                the Python baseline. It follows the same JSON I/O format, same algorithm, and even the same convergence criterion. The only
+                real difference of note is that the C++ file itself is multi-purpose. As a standalone software placer, it is designed to perform 
+                <code>cg_solve()</code> using hand-rolled double-precision logic; however, when the correct flags are set, <code>placer.cpp</code>
+                doubles as a placer front-end with which a hardware-based CG solver can seamlessly connect. In such a case, all parts of the
+                algorithm in between CG solve steps are handled in C++, and the rest are done in hardware (either with a verilated model or
+                using the FPGA itself). This will be discussed in more detail in the <b>System Integration</b> section.
+            </p>
         </section>
 
         <!-- =============================================================
@@ -891,30 +1177,112 @@
              ============================================================= -->
         <section id="results">
             <h2>Results of Design</h2>
+            <p>
+                To be as comprehensive as possible in gauging the results of our design, tests have been run across a range of
+                custom benchmarks. Each benchmark is a hand-written micron-scale design used to fit inside the FPGA's MAX_N=50 
+                cap (each die is 500 DBU on a side, far below the +/-4096 representable range of the Q13.14 fixed-point format).
+                A rough summary of each benchmark used in this section is listed in the following table:
+            </p>
+            <table style="width:100%; border-collapse: collapse; font-size: 15px;">
+                <thead>
+                    <tr>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Benchmark</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Cells</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Nets</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Key Structure</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Primary Stress / Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
 
-            <h3>[TODO: e.g. Functional Correctness]</h3>
-            <p>[TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>dense_pack_36</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">36</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">37</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Dense 36-stage chain using relatively large cells</td>
+                    <td style="border:1px solid #ccc; padding:8px;">High utilization (~23%) and legalization/spreading behavior</td>
+                    </tr>
 
-            <h3>[TODO: e.g. Performance / Speedup]</h3>
-            <p>[TODO: SW vs ARM vs FPGA timing on the benchmark suite - explain
-            each benchmark]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>mesh_grid_25</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">25</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">35</td>
+                    <td style="border:1px solid #ccc; padding:8px;">5x5 2D mesh with north/west neighbor dependencies</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Tests balanced 2D placement and distributed IO attraction</td>
+                    </tr>
 
-            <!--
-            <figure>
-                <img src="images/speedup.png" alt="[TODO]" class="scaled-image-960">
-                <figcaption>[TODO: caption]</figcaption>
-            </figure>
-            -->
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>mixed_macro_10</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">10</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">14</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Std cells connected between large 4.0x2.0 WIDE macros</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Macro/std-cell interaction and size disparity handling</td>
+                    </tr>
 
-            <h3>[TODO: e.g. Resource Utilization]</h3>
-            <p>[TODO: M10K, DSP, ALM usage on Cyclone V]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>parallel_chains_50</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">50</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">55</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Five parallel 10-stage pipelines with stage-wise cross-coupling</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Primary FPGA-scale benchmark (tests max cell cap); stresses full-width CG/SPMV datapaths</td>
+                    </tr>
 
-            <h3>[TODO: e.g. Placement Quality]</h3>
-            <p>[TODO: HPWL / overlap metrics across benchmarks]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>simple_logic_10</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">10</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">13</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Small INV/BUF/NAND2 logic chain with light reconvergence</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Minimal end-to-end smoke test for correctness and JSON I/O; not overly constrained on density</td>
+                    </tr>
 
-            <h3>[TODO: Extension of Verilated design to large placement
-            problems]</h3>
-            <p>[TODO: prose]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>size_extremes_mix</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">34</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">38</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Four huge macros each driving clusters of tiny cells</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Extreme 30x size disparity and clustered hub-and-spoke attraction</td>
+                    </tr>
+
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>star_fanout_31</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">31</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">8</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Single driver feeding one 31-pin global fanout net</td>
+                    <td style="border:1px solid #ccc; padding:8px;">High-degree fanout net test; dense Q-matrix clique and slower CG convergence</td>
+                    </tr>
+
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>two_clusters_bridge</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">32</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">34</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Two tightly connected 16-cell clusters joined by one weak bridge</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Tests clustered placement with minimal inter-cluster coupling</td>
+                    </tr>
+
+                </tbody>
+            </table>
+
+            <h3>Functional Correctness</h3>
+            <p>
+                [TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]
+            </p>
+
+            <h3>Performance & Relative Speed-up</h3>
+            <p>
+                [TODO: SW vs ARM vs FPGA timing on the benchmark suite - explain
+                each benchmark]
+            </p>
+
+            <h3>Placement Quality</h3>
+            <p>
+                [TODO: HPWL / overlap metrics across benchmarks]
+            </p>
+
+            <h3>Resource Utilization</h3>
+            <p>
+                [TODO: M10K, DSP, ALM usage on Cyclone V --> also explain extension of Verilated design to large placement, and state
+                how with the resource limit removed it is clear that performance is in line with the baseline placers]
+            </p>
         </section>
 
         <!-- =============================================================
@@ -936,21 +1304,21 @@
         <section id="appendix">
             <h2>Appendix</h2>
 
-            <h3>Code Repository</h3>
-            <p>Our repository is located <a href="https://github.com/pis7/ece5760-final-project">here</a>.</p>
-
-            <h3>Approvals</h3>
+            <h3>Appendix A: Permissions</h3>
             <p>The group approves this report for inclusion on the course website.</p>
             <p>The group approves the video for inclusion on the course YouTube channel.</p>
 
-            <h3>References</h3>
+            <h3>Appendix B: Code Repository</h3>
+            <p>Our repository is located <a href="https://github.com/pis7/ece5760-final-project">here</a>.</p>
+
+            <h3>Appendix C: References</h3>
             <p><a href="[TODO]">[TODO: reference 1]</a></p>
             <p><a href="[TODO]">[TODO: reference 2]</a></p>
 
-            <h3>Datasheets</h3>
+            <h3>Appendix D: Datasheets</h3>
             <p><a href="[TODO]">[TODO: datasheet 1]</a></p>
 
-            <h3>Tasks for Each Team Member</h3>
+            <h3>Appendix E: Tasks for Each Team Member</h3>
             <p>[TODO: name -- responsibilities.]
                 <a href="[TODO]">GitHub</a> <a href="[TODO]">LinkedIn</a>
             </p>
