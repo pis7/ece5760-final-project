@@ -87,7 +87,7 @@
              ============================================================= -->
         <section id="introduction">
             <h2>Project Introduction</h2>
-            <p><i>[TODO: one-sentence italicized summary of the project.]</i></p>
+            <p><i>Using an accelerator to layout an accelerator.</i></p>
 
             <!-- Hero figure (e.g., DE1-SoC running the placer, or a final placement plot) -->
             <!--
@@ -97,8 +97,15 @@
             </figure>
             -->
 
-            <p>[TODO: motivation paragraph -- what problem does analytical placement
-                solve, why accelerate it, why on the DE1-SoC.]</p>
+            <p>
+                ASICs are composed of many <em>macros</em> atomic logic units wired together.
+                To make an ASIC, a design is specified in an HDL which is then lowered to a set of macros and <em>nets</em> connections between macros.
+                Macros are then placed on a grid and routed together.
+                Our design accelerates the <em>placement</em> step on the DE1-SoC.
+                We use a quadratic cost function for judging placements which we minimize.
+                Solving this quadratic programming problem exposes ample opertunity for parallism which we take advantage of using the FPGA.
+                This lets our design achieve 10-15x speedups when minimizing our cost function, improving end to end placement by roughly 10% without significant differences in the quality of results.
+            </p>
 
             <!-- Optional demo video embed -->
             <!--
