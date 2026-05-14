@@ -1144,33 +1144,121 @@
              ============================================================= -->
         <section id="system-integration">
             <h2>System Integration</h2>
-            <p>[TODO: intro]</p>
 
-            <h3>Running placer.cpp with golden C++ model</h3>
-            <p>[TODO: explain golden C++ model from RTL testing and header
-            shim]</p>
+            <p>The placer's outer loop, partitioning, and JSON parsing live in
+            a single <a href="sw-baseline-c/placer.cpp">placer.cpp</a>
+            that is reused across every backend. A short
+            preprocessor block near the top of the file picks one of
+            three CG-driver headers at compile time
+            (<a href="sw-baseline-c/cg_golden_driver.h">cg_golden_driver.h</a>,
+            one of the
+            <a href="sw-baseline-c/cg_verilator_driver.h">cg_verilator_driver*.h</a>
+            family, or one of the
+            <a href="fpga/sw/cg_fpga_mmap_driver.h">cg_fpga_mmap_driver*.h</a>
+            family), and every header exposes the same
+            <code>CGHwDriver</code> class with identical
+            <code>set_*</code> / <code>load_q_initial</code> /
+            <code>solve</code> entry points. The placer's
+            <code>solve_cg()</code> then reduces to a single
+            <code>hw_driver.solve(...)</code> call regardless of which
+            backend is active.
+            <a href="fpga/sw/placer.cpp">fpga/sw/placer.cpp</a> is a
+            symlink to the canonical source so the FPGA build never
+            forks the placer logic.</p>
 
-            <h3>Running placer.cpp with Verilated model</h3>
-            <p>[TODO: explain how Verilated RTL is connected to placer.cpp
-            through header shim]</p>
+            <h3>Running placer.cpp with the Golden C++ Model</h3>
 
-            <h3>Running placer.cpp on FPGA</h3>
-            <p>[TODO: explain FPGA fabric header shim and show Qsys diagram]</p>
+            <p>The golden driver wraps the same fixed-point CG model
+            used by the DPI testbench and exposes it as a
+            <code>CGHwDriver</code>. Setters write directly into the
+            driver's public vectors (no SRAM mirror to keep in sync),
+            and <code>solve()</code> converts the placer's
+            <code>double</code> CSR to <code>int64_t</code> via
+            <code>v &times; 2<sup>FRAC_BITS</sup></code> with
+            sign-extension, calls the golden's
+            <code>cg_solve</code> twice (once each for x and y), and
+            writes the result back. Selected with
+            <code>-DUSE_FP_GOLDEN=ON</code>. Because no Verilator
+            elaboration is needed, this is the fast path for sweeping
+            <code>--int-bits</code> / <code>--frac-bits</code> when
+            investigating fixed-point precision.</p>
+
+            <h3>Running placer.cpp with the Verilated Model</h3>
+
+            <p>The Verilator drivers
+            (<a href="sw-baseline-c/cg_verilator_driver.h">cg_verilator_driver.h</a>
+            for V2-V4, plus <code>_v5.h</code> and <code>_v6.h</code>
+            for the multi-slave variants) instantiate the
+            Verilator-generated <code>VCGTop</code> against
+            heap-allocated behavioral memory mirrors, one per Avalon
+            slave. A <code>tick()</code> helper services the simulated
+            bus each clock period: sample addr/wr/wdata while
+            <code>clk</code> is low, rising-edge eval, then mirror
+            read/write. <code>solve()</code> drives the same
+            <code>sw_go</code> / <code>sw_done</code> handshake the
+            real board does and counts cycles while waiting for
+            <code>sw_done</code>, which gets printed through
+            <code>last_solve_cycles()</code> for performance reports.</p>
+
+            <h3>Running placer.cpp on the FPGA</h3>
+
+            <p>The on-board driver
+            (<a href="fpga/sw/cg_fpga_mmap_driver.h">cg_fpga_mmap_driver.h</a>
+            and the <code>_v5.h</code> / <code>_v6.h</code> variants)
+            replaces <code>tick()</code> with <code>mmap</code> calls
+            against <code>/dev/mem</code>. Each Qsys on-chip RAM slave
+            is projected from its H2F bridge base
+            (<code>0xC0000000</code> region) into the process's address
+            space so setters become plain <code>volatile uint32_t*</code>
+            writes that the HPS translates into Avalon transactions to
+            the FPGA. The runtime parameters and handshake travel
+            through five PIOs on the lightweight H2F bridge at
+            <code>0xFF200000</code>
+            (<code>cg_ctrl</code>, <code>cg_max_iter</code>,
+            <code>cg_eps_sq</code>, <code>cg_n</code>,
+            <code>cg_status</code>); <code>solve()</code> pulses
+            <code>sw_go</code> through <code>cg_ctrl</code> and spins
+            on <code>cg_status</code> for <code>sw_done</code> before
+            reading the result vectors back out of the SRAM regions.
+            <code>placer.cpp</code> never branches on
+            "is this the board" as the only build-time-visible difference
+            from the Verilator path is which header gets included.</p>
 
             <h3>Putting It All Together: run-placer</h3>
-            <p>[TODO: explain how run-placer links everything together, sweeps,
-            big diagram showing how everything links together]</p>
+
+            <p>The <a href="python-utils/run_placer.py">run-placer</a>
+            console script is the user-facing entry point for every
+            build mode (<code>python</code>, <code>sw</code>,
+            <code>golden</code>, <code>verilated</code>,
+            <code>arm</code>, <code>fpga</code>). It parses LEF/DEF
+            into JSON, invokes cmake + make with the right macros to
+            select the driver header (and to cross-compile to
+            ARM for the remote modes), runs the placer either locally
+            or remotely, and renders the resulting placement to PNG.
+            For remote modes it opens one
+            <a href="https://www.fabfile.org/">fabric</a> SSH session
+            against the board (credentials from a gitignored
+            <code>.env</code>), SCPs the binary and netlist over, runs
+            the placer with <code>sudo</code> on the FPGA path so the
+            mmap driver can open <code>/dev/mem</code>, and SCPs the
+            result JSONs back. Two convenience features make iteration
+            easy: a <code>--sweep</code> flag that runs
+            <code>max_outer_iter</code> from 1..16, captures a PNG per
+            iteration, and stitches a GIF/MP4 slideshow; and an
+            auto-detected batch mode that walks every benchmark in a
+            parent directory using one shared SSH session and prints a
+            cross-benchmark summary table at the end.</p>
         </section>
 
         <!-- =============================================================
              DESIGN CHALLENGES
              ============================================================= -->
-        <section id="challenges">
+        <!-- <section id="challenges">
             <h2>Design Challenges</h2>
             <p>[TODO: challenge 1 + how it was addressed.]</p>
             <p>[TODO: challenge 2 + how it was addressed.]</p>
-            <p>[TODO: challenge 3 + how it was addressed.]</p>
-        </section>
+            <p>[TODO challenge 3 + how it was addressed.]</p>
+        </section>: -->
 
         <!-- =============================================================
              RESULTS
@@ -1280,8 +1368,10 @@
 
             <h3>Resource Utilization</h3>
             <p>
-                [TODO: M10K, DSP, ALM usage on Cyclone V --> also explain extension of Verilated design to large placement, and state
-                how with the resource limit removed it is clear that performance is in line with the baseline placers]
+                [TODO: M10K, DSP, ALM usage on Cyclone V --> also explain
+                extension of Verilated design to large placement, and state how
+                with the resource limit removed it is clear that performance is
+                in line with the baseline placers]
             </p>
         </section>
 
@@ -1312,15 +1402,16 @@
             <p>Our repository is located <a href="https://github.com/pis7/ece5760-final-project">here</a>.</p>
 
             <h3>Appendix C: References</h3>
-            <p><a href="[TODO]">[TODO: reference 1]</a></p>
-            <p><a href="[TODO]">[TODO: reference 2]</a></p>
+            <p><a href="https://cc.ee.ntu.edu.tw/~ywchang/Courses/PD_Source/TSLDM_placement.pdf">Essential Issues in Analytical Placement Algorithm</a></p>
+            <p><a href="https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=4724923">An Implementation of the Conjugate Gradient Algorithm on FPGAs</a></p>
 
-            <h3>Appendix D: Datasheets</h3>
-            <p><a href="[TODO]">[TODO: datasheet 1]</a></p>
-
-            <h3>Appendix E: Tasks for Each Team Member</h3>
+            <h3>Appendix D: Tasks for Each Team Member</h3>
+            <p>Parker worked primarily on the design-space exploration of the
+            hardware placer implementations. He started out by making the Python
+            FL and V1 Verilog by hand and then exploring optimizations to the
+            base hardware in later versions.
             <p>[TODO: name -- responsibilities.]
-                <a href="[TODO]">GitHub</a> <a href="[TODO]">LinkedIn</a>
+            <p>[TODO: name -- responsibilities.]
             </p>
 
             <h3>AI Attributioin</h3>
