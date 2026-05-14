@@ -71,6 +71,9 @@
         figure {
             margin-top: 30px;
         }
+        table {
+            margin-top: 20px;
+        }
     </style>
     <script id="MathJax-script" async
         src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
@@ -526,30 +529,112 @@
              ============================================================= -->
         <section id="results">
             <h2>Results of Design</h2>
+            <p>
+                To be as comprehensive as possible in gauging the results of our design, tests have been run across a range of
+                custom benchmarks. Each benchmark is a hand-written micron-scale design used to fit inside the FPGA's MAX_N=50 
+                cap (each die is 500 DBU on a side, far below the +/-4096 representable range of the Q13.14 fixed-point format).
+                A rough summary of each benchmark used in this section is listed in the following table:
+            </p>
+            <table style="width:100%; border-collapse: collapse; font-size: 15px;">
+                <thead>
+                    <tr>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Benchmark</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Cells</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Nets</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Key Structure</th>
+                    <th style="border:1px solid #ccc; padding:8px; text-align:center;">Primary Stress / Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
 
-            <h3>[TODO: e.g. Functional Correctness]</h3>
-            <p>[TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>dense_pack_36</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">36</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">37</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Dense 36-stage chain using relatively large cells</td>
+                    <td style="border:1px solid #ccc; padding:8px;">High utilization (~23%) and legalization/spreading behavior</td>
+                    </tr>
 
-            <h3>[TODO: e.g. Performance / Speedup]</h3>
-            <p>[TODO: SW vs ARM vs FPGA timing on the benchmark suite - explain
-            each benchmark]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>mesh_grid_25</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">25</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">35</td>
+                    <td style="border:1px solid #ccc; padding:8px;">5x5 2D mesh with north/west neighbor dependencies</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Tests balanced 2D placement and distributed IO attraction</td>
+                    </tr>
 
-            <!--
-            <figure>
-                <img src="images/speedup.png" alt="[TODO]" class="scaled-image-960">
-                <figcaption>[TODO: caption]</figcaption>
-            </figure>
-            -->
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>mixed_macro_10</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">10</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">14</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Std cells connected between large 4.0x2.0 WIDE macros</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Macro/std-cell interaction and size disparity handling</td>
+                    </tr>
 
-            <h3>[TODO: e.g. Resource Utilization]</h3>
-            <p>[TODO: M10K, DSP, ALM usage on Cyclone V]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>parallel_chains_50</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">50</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">55</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Five parallel 10-stage pipelines with stage-wise cross-coupling</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Primary FPGA-scale benchmark (tests max cell cap); stresses full-width CG/SPMV datapaths</td>
+                    </tr>
 
-            <h3>[TODO: e.g. Placement Quality]</h3>
-            <p>[TODO: HPWL / overlap metrics across benchmarks]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>simple_logic_10</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">10</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">13</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Small INV/BUF/NAND2 logic chain with light reconvergence</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Minimal end-to-end smoke test for correctness and JSON I/O; not overly constrained on density</td>
+                    </tr>
 
-            <h3>[TODO: Extension of Verilated design to large placement
-            problems]</h3>
-            <p>[TODO: prose]</p>
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>size_extremes_mix</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">34</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">38</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Four huge macros each driving clusters of tiny cells</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Extreme 30x size disparity and clustered hub-and-spoke attraction</td>
+                    </tr>
+
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>star_fanout_31</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">31</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">8</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Single driver feeding one 31-pin global fanout net</td>
+                    <td style="border:1px solid #ccc; padding:8px;">High-degree fanout net test; dense Q-matrix clique and slower CG convergence</td>
+                    </tr>
+
+                    <tr>
+                    <td style="border:1px solid #ccc; padding:8px;"><code>two_clusters_bridge</code></td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">32</td>
+                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">34</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Two tightly connected 16-cell clusters joined by one weak bridge</td>
+                    <td style="border:1px solid #ccc; padding:8px;">Tests clustered placement with minimal inter-cluster coupling</td>
+                    </tr>
+
+                </tbody>
+            </table>
+
+            <h3>Functional Correctness</h3>
+            <p>
+                [TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]
+            </p>
+
+            <h3>Performance & Relative Speed-up</h3>
+            <p>
+                [TODO: SW vs ARM vs FPGA timing on the benchmark suite - explain
+                each benchmark]
+            </p>
+
+            <h3>Placement Quality</h3>
+            <p>
+                [TODO: HPWL / overlap metrics across benchmarks]
+            </p>
+
+            <h3>Resource Utilization</h3>
+            <p>
+                [TODO: M10K, DSP, ALM usage on Cyclone V --> also explain extension of Verilated design to large placement, and state
+                how with the resource limit removed it is clear that performance is in line with the baseline placers]
+            </p>
         </section>
 
         <!-- =============================================================
