@@ -40,7 +40,6 @@
             height: auto;
         }
         pre {
-        pre {
             text-align: left;
             display: block;
             margin-left: 0;
@@ -82,8 +81,16 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>ECE 5760 Spring 2026 Final Project: Analytical Placement via FPGA</h1>
+        <header style="text-align: center;">
+            <h1>
+                ECE 5760 Spring 2026 Final Project:<br>
+                Analytical Placement via FPGA
+            </h1>
+
+            <p style="font-size: 18px; margin-top: 8px;">
+                Parker Schless (pis7) &nbsp;  &nbsp; Jeremy Ku-Benjet (jk2582) &nbsp;  &nbsp; Colin Muessig (cjm369)
+            </p>
+            <br>
         </header>
 
         <!-- =============================================================
@@ -102,13 +109,13 @@
             -->
 
             <p>
-                ASICs are composed of many <em>macros</em> atomic logic units wired together.
-                To make an ASIC, a design is specified in an HDL which is then lowered to a set of macros and <em>nets</em> connections between macros.
+                ASICs are composed of many <b>macros</b>, atomic logic units wired together.
+                To make an ASIC, a design is specified in an HDL which is then lowered to a set of macros and <b>nets</b>, connections between macros.
                 Macros are then placed on a grid and routed together.
-                Our design accelerates the <em>placement</em> step on the DE1-SoC.
+                Our design accelerates the <b>placement</b> step on the DE1-SoC.
                 We use a quadratic cost function for judging placements which we minimize.
-                Solving this quadratic programming problem exposes ample opertunity for parallism which we take advantage of using the FPGA.
-                This lets our design achieve 10-15x speedups when minimizing our cost function, improving end to end placement by roughly 10% without significant differences in the quality of results.
+                Solving this quadratic programming problem exposes ample opportunity for parallism which we take advantage of using the FPGA.
+                This allows our design to achieve 10-15x speed-ups when minimizing our cost function, improving end to end placement by roughly 10% without sacrificing much in the way of result quality.
             </p>
 
             <!-- Optional demo video embed -->
@@ -132,13 +139,13 @@
 
             <h3>Rationale and Sources</h3>
             <p>
-                The idea of accelerating placement is not new. The larger technique we consider if <em>analytical placement</em>, in which a specific cost function is minimized using analytical methods.
+                The idea of accelerating placement is not new. The larger technique we consider is <b>analytical placement</b>, wherein a specific cost function is minimized using analytical methods.
                 These often involve gradient decent and are ripe with parallelism.
                 The current state of the art is <a href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a> which minimizes a cost function based around weighted average wirelength, taking advantage of GPUs to speed up the minimization.
                 Jeremy came across this paper, found this cool, and Jeremy and Parker who were both working with ASICs wanted to implement something similar.
                 More specifically, we want to accelerate placement with a design taking advantage of parallelism on the FPGA in similar places to where DREAMPlace takes advantage of the GPU.
 
-                In order to lower project scope, we simply the task done by DREAMPlace by using a simpler, quadratic cost model and only implementing <em>global placement</em>, an initial, off-grid placement which, where it to be used, must be <em>legalized</em>.
+                In order to lower project scope, we simply the task done by DREAMPlace by using a simpler, quadratic cost model and only implementing <b>global placement</b>: an initial, off-grid placement which, where it to be used, must be <b>legalized</b>.
                 The cost model and high level global placement algorithm we based on an old (2007) survey by Yao-Wen Chang, Zhe-Wei Jiang, and Tung-Chieh Chen: <em>Essential Issues in Analytical Placement Algorithms</em>.
             </p>
 
@@ -1451,10 +1458,12 @@
             hardware placer implementations. He started out by making the Python
             FL and V1 Verilog by hand and then exploring optimizations to the
             base hardware in later versions.
-            </p>
-            <p>[TODO: name -- responsibilities.]
-            </p>
-            <p>[TODO: name -- responsibilities.]
+            <p>Jeremy did a significant portion of the background research for
+            getting started on this project. He also wrote much of the code for
+            the baseline C++ placer tool.
+            <p>Colin focused mostly on writing Python utilities, architecting
+            the initial hardware architecture, and gathering results across a variety
+            of benchmarks to gauge placer results.
             </p>
 
             <h3>AI Attribution</h3>
