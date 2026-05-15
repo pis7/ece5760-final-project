@@ -1977,11 +1977,28 @@
         <section id="conclusions">
             <h2>Conclusions</h2>
 
-            <h3>Meeting Expectations</h3>
-            <p>[TODO: did the project meet its goals; what would change next time]</p>
+            <h3>Expectations</h3>
+            <p>
+                For small benchmarks our project sometimes out-performs our software baseline with gains coming from parallelism as we expected. We where surprised, however, that small benchmarks had such a minority of time dedicated to optimization using the conjugate gradient method limiting the total performance improvement we could measure and sometimes causing the extra costs associated with transmitting the problem to the FPGA to overtake speedups.
+                Though for small cases, it's often hard to predict performance. Being unable to place large designs makes it hard to do a quantitative evaluation of our claim that the conjugate gradient method will dominate the runtime, realizing the massive speedups we see on this portion of the design, even if that claim seems entirely obvious. This constraint is the largest issue with our design and a sticking point of critisism of our analysis. Given more time, it is the first we would try and rectify.
+            </p>
+            <p>
+                Additionally, the variations in quality are larger than we expected. We were aware moving from doubles to fix points would change the quality, but not to the degree it did. We pinpoint two reasons. First, we found conjugate gradient descent to somewhat less stable with respect to inprecision than we expected. Though, more impactful is the partitioning step changing HPWL more than we expected. This meant that if the FPGA found a slighly worse solution than the ARM due to lower numerical precision, it could cause an extra partition step to run, magnifying the penalty to the quality of results.
+            </p>
+            <p>
+                Despite these reservations, we still will claim the project a success. We accelerate the optimization step of global placement, conjugate gradient descent for us, and show large speedups for this. Through simulation, we've shown placement of larger benchmarks, suggesting at an ability to scale to larger designs given more FPGA resources. And save nitpicks, we are undeniably successesful in what what we sought out to do, perform placement on an FPGA.
+            </p>
 
             <h3>IP Considerations</h3>
-            <p>[TODO: licenses, third-party code, originality of design]</p>
+            <p>
+                We make use of Altera IP in our FPGA design for SRAM and PIOs. This is unavoidable. For visualization, we make use of various third-party libraries for our remote runner and for visualization. A complete list can be found in our <code>pyproject.toml</code>. Notably, we use numpy and scipy for initial design space exploration using python, pillow, matplotlib, and imageio for creating visualizations, and fabric for remotely executing code over ssh. We additionally use Ing Lohmann's JSON library for C++ JSON manipulation.
+
+                We use benchmarks released by IBM for an EDA tool competition at ICCAD04.
+
+                 Some of our code was generated with the use of LLM based tools so the licensing of this code is unclear and likely infindges on the authors' works present in the LLM's training data.
+
+                The software and RTL for our project is released publically and licensed under the open MIT license.
+            </p>
         </section>
 
         <!-- =============================================================
@@ -2012,6 +2029,12 @@
             <p><a
             href="https://github.com/nlohmann/json">C++ JSON
             Library</a></p>
+            <p>
+            <a href="https://github.com/limbo018/DREAMPlace">Y. Lin et al., "DREAMPlace: Deep Learning Toolkit-Enabled GPU Acceleration for Modern VLSI Placement," in IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems, vol. 40, no. 4, pp. 748-761, April 2021, doi: 10.1109/TCAD.2020.3003843.</a>
+            </p>
+            <p>
+            <a href="https://people.eecs.berkeley.edu/~jrs/papers/cg.pdf">Jonathan Richard Shewchuk's An introduction to the Conjugate Gradient Method Without the Agonizing Pain</a>
+            </p>
 
             <h3>Appendix D: Tasks for Each Team Member</h3>
             <p>Parker worked primarily on the design-space exploration of the
