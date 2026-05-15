@@ -179,20 +179,18 @@
                 Given a macro at position \(x_i\), there are two cases. Either it is connected to a macro at position \(x_j\), or it is connected to a pin at a constant position \(p_i\) (e.g. an I/O pin). Let the positions of constant-position pins be \(P(E)\) and the positions of macros be \(M(E)\). For convenience, let \(m = \left|M(E)\right|\).
                 $$\begin{aligned}L_E &= \frac{2}{\left|E\right|}\sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)}(x_i - x_j)^2 + \sum_{p_j \in P(E)} (x_i - p_j)^2\right) \\
                 &= \frac{2}{\left| E \right|} \sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)} x_i^2 + x_j^2 - 2x_i x_j + \sum_{p_j \in P(E)}x_i^2 + p_j^2 - 2x_ip_j \right) \\
-                &= \frac{2}{\left|E\right|}\sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)}2x_i^2 + x_j^2 -2x_ix_j + \sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
-                &= \frac{2}{\left|E\right|}\left(\sum_{x_i, x_j \in M(E)} 2x_i^2 + \sum_{x_i, x_j \in M(E)}x_j^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j + \sum_{x_i \in M(E)}\sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
-                &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} 3mx_i^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j + \sum_{x_i \in M(E)}\sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
-                &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} (3m-2)x_i^2 - \sum_{x_i, x_j \in M(E), i \neq j}2x_ix_j - \sum_{x_i \in M(E)}2x_i\sum_{p_j \in P(E)}p_j + m\sum_{p_j \in P(E)} p_j^2\right)
+                &= \frac{2}{\left|E\right|}\left(\sum_{x_i, x_j \in M(E)} x_i^2 + \sum_{x_i, x_j \in M(E)}x_j^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j + \sum_{x_i \in M(E)}\sum_{p_j \in P(E)} x_i^2 + p_j^2 - 2x_ip_j\right) \\
+                &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} (2m + \left|P(E)\right|)x_i^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j - \sum_{x_i \in M(E)}2x_i\sum_{p_j \in P(E)}p_j + m\sum_{p_j \in P(E)} p_j^2\right) \\
+                &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} (m + \left|E\right| - 2)x_i^2 - \sum_{x_i, x_j \in M(E), i \neq j}2x_ix_j - \sum_{x_i \in M(E)}2x_i\sum_{p_j \in P(E)}p_j + m\sum_{p_j \in P(E)} p_j^2\right)
                 \end{aligned}$$
                 From the above summation, we can read off the portion of \(Q_{i, j}\) and \(c_i\) that \(E\) contributes. The first two terms describe the values in \(Q\), and the third term describes the values in \(c\). We ignore the \(m \sum_{p_j \in P(E)}p_j^2\) term, as constants do not change the minimum \(\mathbf{x}\) when optimizing \(L\). We sum these contributions over each \(E \in N\) to get \(Q\) and \(c\).
                </p>
 
             <h4>Conjugate Gradient Method</h4>
             <p>
-                To minimize \(L\), find when \(\nabla L = Q\mathbf{x} + c = 0\). This finds a minimum because \(Q\) is positive definite:
-                $$\forall E \in N, 0 < \sum_{x_i, x_j \in M(E)} (x_i - x_j)^2 < \mathbf{x}^\intercal Q_E \mathbf{x} \implies 0 < \mathbf{x}^\intercal Q \mathbf{x}$$
+                To minimize \(L\), we find where \(\nabla L = Q\mathbf{x} + c = 0\). This finds a minimum because \(Q\) is positive semidefinite: each net contributes a Hessian \(Q_E\) which is a sum of squared linear forms in \(\mathbf{x}\), so \(\mathbf{x}^\intercal Q_E \mathbf{x} \ge 0\) for all \(\mathbf{x}\). Summing over nets, \(\mathbf{x}^\intercal Q \mathbf{x} \ge 0\). In practice \(Q\) is positive definite, because every movable macro is tied (directly or transitively through nets) to at least one fixed pin, which breaks the trivial translation symmetry.
 
-                We find a solution for \(Q\mathbf{x} + c = 0\) using the conjugate gradient method.
+                We find a solution to \(Q\mathbf{x} + c = 0\) using the conjugate gradient method.
             </p>
             <p>
                 A full explanation of the conjugate gradient method is beyond the scope of this article and can be found in a text or class on numerical analysis. An algebra-heavy explanation can be found in <a href="https://www.cs.cornell.edu/courses/cs6220/2017fa/">Cornell's CS 6220</a>, and a more geometric approach can be found in Jonathan Richard Shewchuk's <em>An Introduction to the Conjugate Gradient Method Without the Agonizing Pain</em>. Here, we will present a description of and loose intuition for the technique. This section is based on the two aforementioned resources and a conversation with <a href="https://jasonklein.dev/">Jason Klein</a> (thanks!!!).
@@ -201,16 +199,16 @@
                 We can notice that when defining \(Q\), \(i\) and \(j\) are symmetric, and thus \(Q\) is symmetric.
                 Therefore, we can use the conjugate gradient method to solve \(Q\mathbf{x} + c = 0 \implies Q\mathbf{x} = -c\).
                 The conjugate gradient method finds an \(\mathbf{x}_k\) close to \(\mathbf{x}\) by minimizing the <em>residual</em>: \(r = -c - Q\mathbf{x}_k\).
-                To do this, it starts with an initial guess at a solution \(\mathbf{x}_k = 0\) and computes the residual, \(r_k = -c - Q\mathbf{x}_k\).
-                It then takes a vector \(p_k\) (\(p_0 = -c\)) and scales it by some \(\alpha\), so that taking \(x_{k+1} = x_k + \alpha p_k\) causes \(r_{k+1}\) to have no \(p_k\) component.
-                The algorithm then iterates this process with more \(p_k\) pointing in different directions, formally \(p_k\) which are \(Q\)-orthogonal, i.e. \(p_iQp_j = 0\).
+                To do this, it starts with an initial guess at a solution \(\mathbf{x}_0 = 0\) and computes the residual, \(r_0 = -c - Q\mathbf{x}_0 = -c\).
+                It then takes a search direction \(p_k\) (initialized as \(p_0 = r_0 = -c\)) and scales it by some \(\alpha_k\), chosen so that taking \(\mathbf{x}_{k+1} = \mathbf{x}_k + \alpha_k p_k\) makes \(r_{k+1}\) orthogonal to \(p_k\).
+                The algorithm then iterates this process with more \(p_k\) pointing in different directions, formally \(p_k\) which are \(Q\)-orthogonal, i.e. \(p_i^\intercal Q p_j = 0\) for \(i \neq j\).
                 To do this efficiently, the algorithm maintains the following three recurrences, computing them for larger values of \(k\) until \(r_k\) is below a tunable threshold.
                 For convenience, let \(\alpha_k = \frac{r_k \cdot r_k}{p_k \cdot Qp_k}\) and \(\beta_k = \frac{r_{k+1} \cdot r_{k+1}}{r_k \cdot r_k}\).
                 Note that \(r_{k+1}\) does not depend on \(\beta_k\), so \(\beta_k\) is computable. The three recurrences are as follows:
                 $$\begin{align}
-                    \mathbf{x}_{k+1} &= \mathbf{x}_k + \alpha_k p_k &&\quad \text{removing }p_k \text{ from }\mathbf{x}_k\\
-                    r_{k+1} &= r_k - \alpha_k Q p_k &&\quad \text{updating the residual after changing the approximation of } \mathbf{x} \\
-                    p_{k+1} &= p_k + \beta_k p_k &&\quad \text{getting the next vector in the sequence of } p_i \\
+                    \mathbf{x}_{k+1} &= \mathbf{x}_k + \alpha_k p_k &&\quad \text{step along the current search direction } p_k\\
+                    r_{k+1} &= r_k - \alpha_k Q p_k &&\quad \text{update the residual to remove its } p_k \text{ component} \\
+                    p_{k+1} &= r_{k+1} + \beta_k p_k &&\quad \text{next search direction: new residual made } Q\text{-conjugate to } p_k \\
                 \end{align}$$
                 When \(r_k\) is below the threshold, the algorithm simply outputs the solution \(\mathbf{x}_k\).
             </p>
@@ -1605,16 +1603,6 @@
         </section>
 
         <!-- =============================================================
-             DESIGN CHALLENGES
-             ============================================================= -->
-        <!-- <section id="challenges">
-            <h2>Design Challenges</h2>
-            <p>[TODO: challenge 1 + how it was addressed.]</p>
-            <p>[TODO: challenge 2 + how it was addressed.]</p>
-            <p>[TODO challenge 3 + how it was addressed.]</p>
-        </section>: -->
-
-        <!-- =============================================================
              RESULTS
              ============================================================= -->
         <section id="results">
@@ -1888,6 +1876,23 @@
                 </figcaption>
             </figure>
 
+            <h3>Safety</h3>
+            <p>
+                Several guards protect the placer from invalid inputs and from
+                numerical drift on the FPGA path. <code>build_system()</code>
+                rejects any design that exceeds <code>MAX_N</code> before the
+                hardware driver is touched, and nets larger than
+                <code>MAX_NET_DEGREE</code> are skipped during Q construction so
+                a single degenerate global net cannot blow up the CSR or the
+                <code>x</code> updates. After every CG solve, all cell centers
+                are clamped to within the die area, so a noisy fixed-point
+                update can never place a cell outside the legal region. The
+                outer loop also reverts to the previous iteration's placement
+                whenever an outer step spikes HPWL or pushes max bin density the
+                wrong way, which prevents fixed-point issues on the FPGA from
+                compounding into a bad solution.
+            </p>
+
             <h3>Resource Utilization</h3>
             <p>
                 The final V6 design uses 80% of the total ALMs, 64% of the DSP
@@ -1959,7 +1964,7 @@
             channel.</p>
 
             <h3>Appendix B: Code Repository</h3>
-            <p>Our repository is located <a
+            <p>Our repository with all associated code is located <a
             href="https://github.com/pis7/ece5760-final-project">here</a>.</p>
 
             <h3>Appendix C: References</h3>
@@ -1969,6 +1974,12 @@
             <p><a
             href="https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=4724923">An
             Implementation of the Conjugate Gradient Algorithm on FPGAs</a></p>
+            <p><a
+            href="https://people.ece.cornell.edu/land/courses/ece5760/DE1_SOC/DE1-SoC_User_manualv.1.2.2_revE.pdf">DE1-SoC
+            User Manual</a></p>
+            <p><a
+            href="https://github.com/nlohmann/json">C++ JSON
+            Library</a></p>
 
             <h3>Appendix D: Tasks for Each Team Member</h3>
             <p>Parker worked primarily on the design-space exploration of the
