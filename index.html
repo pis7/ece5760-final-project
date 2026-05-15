@@ -60,7 +60,7 @@
             margin-top: 40px;
             margin-bottom: 10px;
         }
-        ul, ol, {
+        ul, ol {
             margin-top: 4px;
             margin-bottom: 4px;
         }
@@ -98,7 +98,7 @@
              ============================================================= -->
         <section id="introduction">
             <h2>Project Introduction</h2>
-            <p><i>Using an accelerator to layout an accelerator.</i></p>
+            <p><i>Using an accelerator to lay out an accelerator.</i></p>
 
             <p>
                 ASICs are composed of many <b>macros</b>, atomic logic units
@@ -442,7 +442,7 @@
                         displaying information retrieved by the parser is shown
                         below.
                     </p>
-                    <code><pre>
+                    <pre><code>
                         VERSION 5.4 ;
                         NAMESCASESENSITIVE ON ;
                         DIVIDERCHAR "/" ;
@@ -682,18 +682,18 @@
 
             <p>Before any Verilog was written, the CG solver was implemented
             as a Python functional-level model in
-            <a href="fpga/fl/CGTop.py">fpga/fl/CGTop.py</a>. The FL model
+            <code>fpga/fl/CGTop.py</code>. The FL model
             implements the structure that the RTL eventually takes, which is a
             <code>CGTop</code> driver written as a linear sequence of stages
             that instantiates the four primary linalg kernels (<code>SPMV</code>,
             <code>VecDot</code>, <code>AXPY</code>, and <code>VecNegSub</code>)
-            defined in <a href="fpga/fl/LinAlg.py">fpga/fl/LinAlg.py</a>. The
+            defined in <code>fpga/fl/LinAlg.py</code>. The
             Python sources operate on double-precision floating point values and
             dense Python lists, so the model is fast to test, easy to read
             alongside the reference CG algorithm, and serves as the
             specification of the data flow that every subsequent RTL version
             uses. A 19-case scipy-based test suite in
-            <a href="fpga/fl/test/CGTop-test.py">fpga/fl/test/CGTop-test.py</a>
+            <code>fpga/fl/test/CGTop-test.py</code>
             compares the FL solver's final state against
             <code>scipy.sparse.linalg.cg</code> on a handmade suite of
             symmetric positive-definite systems (small dense, tridiagonals up to
@@ -1268,7 +1268,7 @@
             </figure>
 
             <p>The new <code>SPMV</code> inner loop is rewritten around
-            the three independent ports. The 12-state V4 FSM is
+            the three independent ports. The 14-state V4 FSM is
             replaced by a shorter sequence:</p>
             <ul>
                 <li><code>S_RP_ADDR_FIRST</code>/<code>S_RP_CAPT_FIRST</code>
@@ -1445,23 +1445,23 @@
 
             <p>Every RTL revision (V1 through V6 inclusive) is tested
             against the same Verilator-driven DPI testbench framework
-            in <a href="fpga/hw/test/">fpga/hw/test/</a>. The framework
+            in <code>fpga/hw/test/</code>. The framework
             consists of three layers:</p>
             <ul>
                 <li><b>Per-version SystemVerilog testbench top</b>
-               : <a href="fpga/hw/test/CGTop_tb.v">CGTop_tb.v</a>
+               : <code>CGTop_tb.v</code>
                 for V1-V4's single-slave topology,
-                <a href="fpga/hw/test/CGTop_tb_V5.v">CGTop_tb_V5.v</a>
+                <code>CGTop_tb_V5.v</code>
                 for V5/V5_deep's seven-slave topology, and
-                <a href="fpga/hw/test/CGTop_tb_V6.v">CGTop_tb_V6.v</a>
+                <code>CGTop_tb_V6.v</code>
                 for V6's ten-slave parallel-engine topology.</li>
                 <li><b>Shared test-case file</b>
-                <a href="fpga/hw/test/test_cases.v">test_cases.v</a>
+                <code>test_cases.v</code>
                : defines all 16 directed cases.</li>
                 <li><b>DPI bridge</b>
-                <a href="fpga/hw/test/cg_golden_dpi.cpp">cg_golden_dpi.cpp</a>
+                <code>cg_golden_dpi.cpp</code>
                : wraps the C++ fixed-point CG golden model from
-                <a href="sw-baseline-c/cg_golden_model.h">sw-baseline-c/cg_golden_model.h</a>.</li>
+                <code>sw-baseline-c/cg_golden_model.h</code>.</li>
             </ul>
             <p>For each test case, the testbench loads identical input
             data into the DUT's simulated memories and a parallel
@@ -1491,7 +1491,7 @@
             <h4>CMake and Per-Version Targets</h4>
 
             <p>The framework is wired up through
-            <a href="fpga/hw/test/CMakeLists.txt">CMakeLists.txt</a>
+            <code>CMakeLists.txt</code>
             via an <code>add_verilator_tb</code> CMake function that
             takes a version and an RTL directory and generates a
             self-contained <code>VCGTop_tb_$version</code> Verilator
@@ -1532,15 +1532,15 @@
             </figure>
 
             <p>The placer's outer loop, partitioning, and JSON parsing live in
-            a single <a href="sw-baseline-c/placer.cpp">placer.cpp</a>
+            a single <code>placer.cpp</code>
             that is reused across every backend. A short
             preprocessor block near the top of the file picks one of
             three CG-driver headers at compile time
-            (<a href="sw-baseline-c/cg_golden_driver.h">cg_golden_driver.h</a>,
+            (<code>cg_golden_driver.h</code>,
             one of the
-            <a href="sw-baseline-c/cg_verilator_driver.h">cg_verilator_driver*.h</a>
+            <code>cg_verilator_driver*.h</code>
             family, or one of the
-            <a href="fpga/sw/cg_fpga_mmap_driver.h">cg_fpga_mmap_driver*.h</a>
+            <code>cg_fpga_mmap_driver*.h</code>
             family), and every header exposes the same
             <code>CGHwDriver</code> class with identical
             <code>set_*</code> / <code>load_q_initial</code> /
@@ -1548,7 +1548,7 @@
             <code>solve_cg()</code> then reduces to a single
             <code>hw_driver.solve(...)</code> call regardless of which
             backend is active.
-            <a href="fpga/sw/placer.cpp">fpga/sw/placer.cpp</a> is a symlink to
+            <code>fpga/sw/placer.cpp</code> is a symlink to
             the original source, so all endpoints utilize the same code, which
             needs to be modified in only one location.</p>
 
@@ -1572,7 +1572,7 @@
             <h3>Running placer.cpp with the Verilated Model</h3>
 
             <p>The Verilator drivers
-            (<a href="sw-baseline-c/cg_verilator_driver.h">cg_verilator_driver.h</a>
+            (<code>cg_verilator_driver.h</code>
             for V2-V4, plus <code>_v5.h</code> and <code>_v6.h</code>
             for the multi-slave variants) instantiate the
             Verilator-generated <code>VCGTop</code> against
@@ -1589,7 +1589,7 @@
             <h3>Running placer.cpp on the FPGA</h3>
 
             <p>The on-board driver
-            (<a href="fpga/sw/cg_fpga_mmap_driver.h">cg_fpga_mmap_driver.h</a>
+            (<code>cg_fpga_mmap_driver.h</code>
             and the <code>_v5.h</code> / <code>_v6.h</code> variants)
             replaces <code>tick()</code> with <code>mmap</code> calls
             against <code>/dev/mem</code>. Each Qsys on-chip RAM slave
@@ -1611,7 +1611,7 @@
             from the Verilator path is which header gets included.</p>
 
             <h3>Putting It All Together: run-placer</h3>
-            <p>The <a href="python-utils/run_placer.py">run-placer</a>
+            <p>The <code>run-placer</code>
             Python script is the user-facing entry point for every
             build mode (<code>python</code>, <code>sw</code>,
             <code>golden</code>, <code>verilated</code>,
@@ -1638,7 +1638,7 @@
              RESULTS
              ============================================================= -->
         <section id="results">
-            <h2>Results of Design</h2>
+            <h2>Results of the Design</h2>
             <p>
                 To be as comprehensive as possible in gauging the results of our
                 design, tests have been run across a range of custom benchmarks.
@@ -1811,7 +1811,7 @@
                 <img src="images/hpwl-final.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    Final HWPL across 8 custom benchmarks in ARM mode vs. FPGA
+                    Final HPWL across 8 custom benchmarks in ARM mode vs. FPGA
                     mode (V6 design)
                 </figcaption>
             </figure>
@@ -1979,26 +1979,67 @@
 
             <h3>Expectations</h3>
             <p>
-                For small benchmarks our project sometimes out-performs our software baseline with gains coming from parallelism as we expected. We where surprised, however, that small benchmarks had such a minority of time dedicated to optimization using the conjugate gradient method limiting the total performance improvement we could measure and sometimes causing the extra costs associated with transmitting the problem to the FPGA to overtake speedups.
-                Though for small cases, it's often hard to predict performance. Being unable to place large designs makes it hard to do a quantitative evaluation of our claim that the conjugate gradient method will dominate the runtime, realizing the massive speedups we see on this portion of the design, even if that claim seems entirely obvious. This constraint is the largest issue with our design and a sticking point of critisism of our analysis. Given more time, it is the first we would try and rectify.
+                For small benchmarks, our project sometimes outperforms our
+                software baseline, with gains coming from parallelism as we
+                expected. We were surprised, however, that small benchmarks had
+                such a small fraction of time dedicated to optimization using
+                the conjugate gradient method, limiting the total performance
+                improvement we could measure and sometimes causing the extra
+                costs associated with transmitting the problem to the FPGA to
+                overtake the speedups. For small cases, it is often hard to
+                predict performance. Being unable to place large designs makes
+                it hard to do a quantitative evaluation of our claim that the
+                conjugate gradient method will dominate the runtime, realizing
+                the massive speedups we see on this portion of the design, even
+                if that claim seems entirely obvious. This constraint is the
+                largest issue with our design and a sticking point of criticism
+                in our analysis. Given more time, it is the first we would try
+                to rectify.
             </p>
             <p>
-                Additionally, the variations in quality are larger than we expected. We were aware moving from doubles to fix points would change the quality, but not to the degree it did. We pinpoint two reasons. First, we found conjugate gradient descent to somewhat less stable with respect to inprecision than we expected. Though, more impactful is the partitioning step changing HPWL more than we expected. This meant that if the FPGA found a slighly worse solution than the ARM due to lower numerical precision, it could cause an extra partition step to run, magnifying the penalty to the quality of results.
+                Additionally, the variations in quality are larger than we
+                expected. We were aware that moving from doubles to fixed point
+                would change the quality, but not to the degree that it did. We
+                pinpoint two reasons. First, we found conjugate gradient descent
+                to be somewhat less stable with respect to imprecision than we
+                expected. More impactful, though, is the partitioning step
+                changing HPWL more than we expected. This meant that if the FPGA
+                found a slightly worse solution than the ARM due to lower
+                numerical precision, it could cause an extra partition step to
+                run, magnifying the penalty to the quality of results.
             </p>
             <p>
-                Despite these reservations, we still will claim the project a success. We accelerate the optimization step of global placement, conjugate gradient descent for us, and show large speedups for this. Through simulation, we've shown placement of larger benchmarks, suggesting at an ability to scale to larger designs given more FPGA resources. And save nitpicks, we are undeniably successesful in what what we sought out to do, perform placement on an FPGA.
+                Despite these reservations, we still claim the project a
+                success. We accelerate the optimization step of global
+                placement, conjugate gradient descent in our case, and show
+                large speedups for this. Through simulation, we have shown
+                placement of larger benchmarks, suggesting an ability to scale
+                to larger designs given more FPGA resources. And save nitpicks,
+                we are undeniably successful in what we set out to do: perform
+                placement on an FPGA.
             </p>
 
             <h3>IP Considerations</h3>
-            <p>
-                We make use of Altera IP in our FPGA design for SRAM and PIOs. This is unavoidable. For visualization, we make use of various third-party libraries for our remote runner and for visualization. A complete list can be found in our <code>pyproject.toml</code>. Notably, we use numpy and scipy for initial design space exploration using python, pillow, matplotlib, and imageio for creating visualizations, and fabric for remotely executing code over ssh. We additionally use Ing Lohmann's JSON library for C++ JSON manipulation.
-
-                We use benchmarks released by IBM for an EDA tool competition at ICCAD04.
-
-                 Some of our code was generated with the use of LLM based tools so the licensing of this code is unclear and likely infindges on the authors' works present in the LLM's training data.
-
-                The software and RTL for our project is released publically and licensed under the open MIT license.
-            </p>
+            <ul>
+                <li>We make use of Altera IP in our FPGA design for SRAM and
+                PIOs. This is unavoidable.</li>
+                <li>We make use of various third-party libraries for our remote
+                runner and for visualization. A complete list can be found in
+                our <code>pyproject.toml</code>. Notably, we use numpy and scipy
+                for initial design-space exploration in Python; pillow,
+                matplotlib, and imageio for creating visualizations; and fabric
+                for remotely executing code over SSH.</li>
+                <li>We additionally use Niels Lohmann's JSON library for C++
+                JSON manipulation.</li>
+                <li>We use benchmarks released by IBM for an EDA tool
+                competition at ICCAD04.</li>
+                <li>Some of our code was generated with the use of LLM-based
+                tools, so the licensing of this code is unclear and likely
+                infringes on the authors' works present in the LLM's training
+                data.</li>
+                <li>The software and RTL for our project is released publicly
+                and licensed under the open MIT license.</li>
+            </ul>
         </section>
 
         <!-- =============================================================
@@ -2019,7 +2060,7 @@
             <h3>Appendix C: References</h3>
             <p><a
             href="https://cc.ee.ntu.edu.tw/~ywchang/Courses/PD_Source/TSLDM_placement.pdf">Essential
-            Issues in Analytical Placement Algorithm</a></p>
+            Issues in Analytical Placement Algorithms</a></p>
             <p><a
             href="https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=4724923">An
             Implementation of the Conjugate Gradient Algorithm on FPGAs</a></p>
@@ -2033,7 +2074,7 @@
             <a href="https://github.com/limbo018/DREAMPlace">Y. Lin et al., "DREAMPlace: Deep Learning Toolkit-Enabled GPU Acceleration for Modern VLSI Placement," in IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems, vol. 40, no. 4, pp. 748-761, April 2021, doi: 10.1109/TCAD.2020.3003843.</a>
             </p>
             <p>
-            <a href="https://people.eecs.berkeley.edu/~jrs/papers/cg.pdf">Jonathan Richard Shewchuk's An introduction to the Conjugate Gradient Method Without the Agonizing Pain</a>
+            <a href="https://people.eecs.berkeley.edu/~jrs/papers/cg.pdf">Jonathan Richard Shewchuk's An Introduction to the Conjugate Gradient Method Without the Agonizing Pain</a>
             </p>
 
             <h3>Appendix D: Tasks for Each Team Member</h3>
