@@ -851,6 +851,16 @@
 
             <h4>Linalg Kernels</h4>
 
+            <figure>
+                <img src="images/spmv-v2.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V2 SPMV RTL. Red represents
+                    combinational logic, green represents sequential logic, and
+                    blue represents FSM states.
+                </figcaption>
+            </figure>
+
             <p>The four linalg kernels each follow the same
             <code>{Kernel}Ctrl</code> + <code>{Kernel}Dpath</code> +
             <code>{Kernel}_seq</code> wrapper pattern and the same
@@ -1021,6 +1031,17 @@
             cleanly parameterized.</p>
 
             <h4>SPMV Row-Prologue Collapse</h4>
+
+            <figure>
+                <img src="images/spmv-v3.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V3 SPMV RTL. Red represents
+                    combinational logic, green represents sequential logic, and
+                    blue represents FSM states. Changes from the V2 SPMV unit
+                    are highlighted in red circles.
+                </figcaption>
+            </figure>
 
             <p>The second change collapses the <code>SPMV</code> row
             prologue. V2 reads both <code>rp_ptr[row]</code> and
@@ -1234,6 +1255,17 @@
             has exactly one consumer.</p>
 
             <h4>Rewritten SPMV Inner Loop and Serialized S_VNS_R</h4>
+
+            <figure>
+                <img src="images/spmv-v5.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V5 SPMV RTL. Red represents
+                    combinational logic, green represents sequential logic, and
+                    blue represents FSM states. Changes from the V3 SPMV unit
+                    are highlighted in red circles.
+                </figcaption>
+            </figure>
 
             <p>The new <code>SPMV</code> inner loop is rewritten around
             the three independent ports. The 12-state V4 FSM is
