@@ -1959,7 +1959,7 @@
 
             <h3>IP Considerations</h3>
             <p>
-                We make use of Altera IP in our FPGA design for SRAM and PIOs. This is unavoidable. For visualization, we make use of various third-party libraries for our remote runner and for visualization. A complete list can be found in our <code>pyproject.toml</code>. Notably, we use numpy and scipy for initial design space exploration using python, pillow, matplotlib, and imageio for creating visualizations, and fabric for remotely executing code over ssh.
+                We make use of Altera IP in our FPGA design for SRAM and PIOs. This is unavoidable. For visualization, we make use of various third-party libraries for our remote runner and for visualization. A complete list can be found in our <code>pyproject.toml</code>. Notably, we use numpy and scipy for initial design space exploration using python, pillow, matplotlib, and imageio for creating visualizations, and fabric for remotely executing code over ssh. We additionally use Ing Lohmann's JSON library for C++ JSON manipulation.
 
                 We use benchmarks released by IBM for an EDA tool competition at ICCAD04.
 
@@ -1997,6 +1997,12 @@
             <p><a
             href="https://github.com/nlohmann/json">C++ JSON
             Library</a></p>
+            <p>
+            <a href="https://github.com/limbo018/DREAMPlace">Y. Lin et al., "DREAMPlace: Deep Learning Toolkit-Enabled GPU Acceleration for Modern VLSI Placement," in IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems, vol. 40, no. 4, pp. 748-761, April 2021, doi: 10.1109/TCAD.2020.3003843.</a>
+            </p>
+            <p>
+            <a href="https://people.eecs.berkeley.edu/~jrs/papers/cg.pdf">Jonathan Richard Shewchuk's An introduction to the Conjugate Gradient Method Without the Agonizing Pain</a>
+            </p>
 
             <h3>Appendix D: Tasks for Each Team Member</h3>
             <p>Parker worked primarily on the design-space exploration of the
