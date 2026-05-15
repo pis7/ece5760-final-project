@@ -1447,17 +1447,102 @@
             <p>
                 [TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]
             </p>
-
-            <h3>Performance & Relative Speed-up</h3>
+            <figure>
+                <img src="images/converged-frac.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Convergence rate across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
+            <figure>
+                <img src="images/reverted-frac.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Reversion rate across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
+            <br>
             <p>
-                [TODO: SW vs ARM vs FPGA timing on the benchmark suite - explain
-                each benchmark]
+                [TODO: (cont.) prose -- bit-exactness vs golden, scipy comparison, etc.]
             </p>
+            <figure>
+                <img src="images/iters-used.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Outer iterations used across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
 
             <h3>Placement Quality</h3>
             <p>
-                [TODO: HPWL / overlap metrics across benchmarks]
+                The final half-perimeter wirelength (HPWL) results show that the FPGA solver generally follows the ARM software baseline closely, 
+                indicating that the hardware CG solver preserves overall placement quality and connectivity behavior. Several benchmarks—including 
+                <code>mesh_grid_25</code>, <code>mixed_macro_10</code>, and <code>simple_logic_10</code>—produce identical HPWL values between the FPGA 
+                and C++ baseline, showing strong functional agreement on smaller or more regular netlists. Moderate differences appear in benchmarks such as 
+                <code>dense_pack_36</code>, <code>parallel_chains_50</code>, and <code>star_fanout_31</code>, where the FPGA implementation produces slightly 
+                higher wirelengths, likely due to small floating-point differences accumulating over multiple CG iterations. The largest difference occurs in 
+                <code>size_extremes_mix</code>, which contains extreme cell-size imbalance and clustered connectivity, making it especially sensitive to small 
+                numerical changes. Interestingly, <code>two_clusters_bridge</code> shows the opposite trend, with the FPGA solver achieving lower HPWL, 
+                demonstrating that small numerical differences can sometimes lead the solver toward a different but still valid solution.
             </p>
+            <figure>
+                <img src="images/hpwl-final.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Final HWPL across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
+            <br>
+            <p>
+                The max bin density results show larger differences between the ARM and FPGA implementations in placement spreading and 
+                overlap behavior. Benchmarks like <code>mesh_grid_25</code>, <code>simple_logic_10</code>, and <code>star_fanout_31</code> 
+                produce nearly identical density values, indicating that both solvers reached very similar final placements. However, 
+                benchmarks such as <code>parallel_chains_50</code> and <code>size_extremes_mix</code> show much higher density on the FPGA 
+                implementation, meaning the cells were not spread out as effectively and more local congestion remained.
+            </p>
+            <p>
+                This likely comes from small numerical differences in the FPGA CG solver accumulating over multiple partition-and-anchor 
+                iterations. Slight changes in cell positions can affect partition boundaries and anchor locations, leading later iterations to 
+                diverge further from the ARM baseline. These effects are strongest in benchmarks with dense connectivity or large cell-size 
+                differences. Despite these outliers, most benchmarks still remain within similar overall density ranges.
+            </p>
+            <figure>
+                <img src="images/max-bin-density.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Max bin density across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
+
+            <h3>Performance & Relative Speed-up</h3>
+            <p>
+                [TODO: ARM vs FPGA CG timing on the benchmark suite - explain each benchmark]
+            </p>
+            <figure>
+                <img src="images/cg-avg-ms.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    CG average inner loop time across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
+            <figure>
+                <img src="images/cg-total-ms.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    CG total time across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
+            <br>
+            <p>
+                [TODO: ARM vs. FPGA total placer time - explain why speed-up decreases]
+            </p>
+            <figure>
+                <img src="images/placer-total-ms.png"
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Placer total time across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                </figcaption>
+            </figure>
 
             <h3>Resource Utilization</h3>
             <p>
@@ -1486,7 +1571,7 @@
             </p>
             <figure>
                 <img src="images/v6-cp.png"
-                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                    style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
                     Quartus Chip Planner view of the V6 design on the Cyclone V.
                     Areas in warmer colors are more highly congested than those
