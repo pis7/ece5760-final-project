@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="Page-1" id="Z7P9BAeXyszPn2ujA0Bg">
-    <mxGraphModel dx="2203" dy="1537" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="1623" dy="1133" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -343,6 +343,11 @@
         </mxCell>
         <mxCell id="kG7s6Mria1I1Um4xD4_a-127" edge="1" parent="1" source="kG7s6Mria1I1Um4xD4_a-128" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.875;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="kG7s6Mria1I1Um4xD4_a-176">
           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="k-2eelI9btc5y7Wvjqhz-1" connectable="0" parent="kG7s6Mria1I1Um4xD4_a-127" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="cg_done" vertex="1">
+          <mxGeometry relative="1" x="-0.873" y="-2" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
         </mxCell>
         <mxCell id="kG7s6Mria1I1Um4xD4_a-128" parent="1" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;rounded=0;strokeColor=#6c8ebf;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=12;resizable=1;fillColor=#dae8fc;" value="S_CG_DONE" vertex="1">
           <mxGeometry height="80" width="120" x="890" y="915" as="geometry" />

@@ -100,14 +100,6 @@
             <h2>Project Introduction</h2>
             <p><i>Using an accelerator to layout an accelerator.</i></p>
 
-            <!-- Hero figure (e.g., DE1-SoC running the placer, or a final placement plot) -->
-            <!--
-            <figure>
-                <img src="images/hero.png" alt="[TODO]" class="scaled-image-960">
-                <figcaption>[TODO: caption]</figcaption>
-            </figure>
-            -->
-
             <p>
                 ASICs are composed of many <b>macros</b>, atomic logic units
                 wired together. To make an ASIC, a design is specified in an HDL
@@ -115,11 +107,11 @@
                 connections between macros. Macros are then placed on a grid and
                 routed together. Our design accelerates the <b>placement</b>
                 step on the DE1-SoC. We use a quadratic cost function for
-                judging placements which we minimize. Solving this quadratic
-                programming problem exposes ample opportunity for parallism
+                judging placements, which we minimize. Solving this quadratic
+                programming problem exposes ample opportunity for parallelism
                 which we take advantage of using the FPGA. This allows our
                 design to achieve 10-15x speed-ups when minimizing our cost
-                function, improving end to end placement by roughly 10% without
+                function, improving end-to-end placement by roughly 10% without
                 sacrificing much in the way of result quality.
             </p>
             
@@ -147,23 +139,23 @@
                 The idea of accelerating placement is not new. The larger
                 technique we consider is <b>analytical placement</b>, wherein a
                 specific cost function is minimized using analytical methods.
-                These often involve gradient decent and are ripe with
+                These often involve gradient descent and are rich with
                 parallelism. The current state of the art is <a
-                href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a>
+                href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a>,
                 which minimizes a cost function based around weighted average
                 wirelength, taking advantage of GPUs to speed up the
-                minimization. Jeremy came across this paper, found this cool,
-                and Jeremy and Parker who were both working with ASICs wanted to
-                implement something similar. More specifically, we want to
-                accelerate placement with a design taking advantage of
-                parallelism on the FPGA in similar places to where DREAMPlace
-                takes advantage of the GPU.
+                minimization. Jeremy came across this paper and thought it was
+                cool, and both he and Parker, who were already working with
+                ASICs, wanted to implement something similar. More specifically,
+                we want to accelerate placement with a design that takes
+                advantage of parallelism on the FPGA in similar places to where
+                DREAMPlace takes advantage of the GPU.
 
-                In order to lower project scope, we simply the task done by
+                In order to lower project scope, we simplify the task done by
                 DREAMPlace by using a simpler, quadratic cost model and only
                 implementing <b>global placement</b>: an initial, off-grid
-                placement which, where it to be used, must be <b>legalized</b>.
-                The cost model and high level global placement algorithm we
+                placement which, were it to be used, must be <b>legalized</b>.
+                The cost model and high-level global placement algorithm are
                 based on an old (2007) survey by Yao-Wen Chang, Zhe-Wei Jiang,
                 and Tung-Chieh Chen: <em>Essential Issues in Analytical
                 Placement Algorithms</em>.
@@ -172,19 +164,19 @@
             <h3>Background Math</h3>
             <h4>Quadratic Wirelength Cost Model</h4>
             <p>
-                Global placement can be formulated as an optimization problem minimizing an approximation for the wirelength used to connect macros without macros overlapping.
-                We begin by considering the problem of minimizing wirelength and will return overlapping.
+                Global placement can be formulated as an optimization problem that minimizes an approximation of the wirelength used to connect macros, while preventing macros from overlapping.
+                We begin by considering the problem of minimizing wirelength and will return to overlapping later.
             </p>
             <p>
-                We will use analytical methods to minimize wirelength, so we need a differentiable wirelength model. For simplicity, we choose a quadratic model for wirelength. The \(x\) and \(y\) coordinates are independant and summed so we present just the cost due to the \(x\) component. Given the \(x\) positions of all macros in a net, \(E\), we assign
+                We will use analytical methods to minimize wirelength, so we need a differentiable wirelength model. For simplicity, we choose a quadratic model for wirelength. The \(x\) and \(y\) coordinates are independent and summed, so we present just the cost due to the \(x\) component. Given the \(x\) positions of all macros in a net, \(E\), we assign
                 $$L_E = \sum_{x_i, x_j \in E}\frac{2}{\left|E\right|} (x_i - x_j)^2$$
-                Without the \(\frac{2}{\left|E\right|}\) this cost would model routing as a clique, overweighting large nets. Wires tends to look more like a spanning tree, so we scale by the ratio of connections in a spanning tree to the number in a clique, \(\frac{\left|E\right|}{\binom{\left|E\right|}{2}} = \frac{2}{\left|E\right|}\). Let \(N\) be the set of nets in the design. We sum this per net cost for every net \(E \in N\) to get a total cost:
+                Without the \(\frac{2}{\left|E\right|}\), this cost would model routing as a clique, overweighting large nets. Wires tend to look more like a spanning tree, so we scale by the ratio of connections in a spanning tree to the number in a clique, \(\frac{\left|E\right|}{\binom{\left|E\right|}{2}} = \frac{2}{\left|E\right|}\). Let \(N\) be the set of nets in the design. We sum this per-net cost for every net \(E \in N\) to get a total cost:
                 $$L = \sum_{E\in N}L_E$$
             </p>
             <p>
-                In order to optimize this, we want to frame this as a quadratic programming problem, finding \(Q\) and \(c\) such that \(L = \frac{1}{2}\mathbf{x}^\intercal Q\mathbf{x} + c^\intercal\mathbf{x}\) where \(\mathbf{x}\) is a vector of movable macro positions. We will rewrite \(L_E\) so that the values for \(Q\) and \(c\) become obvious.
+                In order to optimize this, we want to frame the problem as a quadratic programming problem, finding \(Q\) and \(c\) such that \(L = \frac{1}{2}\mathbf{x}^\intercal Q\mathbf{x} + c^\intercal\mathbf{x}\), where \(\mathbf{x}\) is a vector of movable macro positions. We will rewrite \(L_E\) so that the values for \(Q\) and \(c\) become obvious.
 
-                Given a macro at position \(x_i\) there are two cases. Either it is connected to a macro at position \(x_j\), or it is connected to a pin at a constant position \(p_i\) (e.g. an io pin). Write the positions of constant position pins \(P(E)\) and the positions of macros be \(M(E)\). For convenience, let \(m = \left|M(E)\right|\).
+                Given a macro at position \(x_i\), there are two cases. Either it is connected to a macro at position \(x_j\), or it is connected to a pin at a constant position \(p_i\) (e.g. an I/O pin). Let the positions of constant-position pins be \(P(E)\) and the positions of macros be \(M(E)\). For convenience, let \(m = \left|M(E)\right|\).
                 $$\begin{aligned}L_E &= \frac{2}{\left|E\right|}\sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)}(x_i - x_j)^2 + \sum_{p_j \in P(E)} (x_i - p_j)^2\right) \\
                 &= \frac{2}{\left| E \right|} \sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)} x_i^2 + x_j^2 - 2x_i x_j + \sum_{p_j \in P(E)}x_i^2 + p_j^2 - 2x_ip_j \right) \\
                 &= \frac{2}{\left|E\right|}\sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)}2x_i^2 + x_j^2 -2x_ix_j + \sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
@@ -192,37 +184,29 @@
                 &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} 3mx_i^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j + \sum_{x_i \in M(E)}\sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
                 &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} (3m-2)x_i^2 - \sum_{x_i, x_j \in M(E), i \neq j}2x_ix_j - \sum_{x_i \in M(E)}2x_i\sum_{p_j \in P(E)}p_j + m\sum_{p_j \in P(E)} p_j^2\right)
                 \end{aligned}$$
-                From the above summation, we can read off the portion of \(Q_{i, j}\) and \(c_i\) that \(E\) contibutes. The first two terms describe the values in \(Q\) and the third term describes the values in \(c\). We ignore the \(m \sum_{p_j \in P(E)}p_j^2\) as constants do not change the minimum \(\mathbf{x}\) when optimizing \(L\). We sum these contibutions over each \(E \in N\) to get \(Q\) and \(c\).
+                From the above summation, we can read off the portion of \(Q_{i, j}\) and \(c_i\) that \(E\) contributes. The first two terms describe the values in \(Q\), and the third term describes the values in \(c\). We ignore the \(m \sum_{p_j \in P(E)}p_j^2\) term, as constants do not change the minimum \(\mathbf{x}\) when optimizing \(L\). We sum these contributions over each \(E \in N\) to get \(Q\) and \(c\).
                </p>
-
-            <!-- Example MathJax block (delete if unused) -->
-            <!--
-            <p>The placement problem reduces to solving the linear system
-                $$Q\,x = -c$$
-                where \(Q\) is the symmetric positive-definite Laplacian-like matrix
-                derived from the netlist and \(c\) encodes the fixed-pin contributions.</p>
-            -->
 
             <h4>Conjugate Gradient Method</h4>
             <p>
-                To minimize \(L\), find when \(\nabla L = Q\mathbf{x} + c = 0\). This finds a minimum as \(Q\) is positive definite:
+                To minimize \(L\), find when \(\nabla L = Q\mathbf{x} + c = 0\). This finds a minimum because \(Q\) is positive definite:
                 $$\forall E \in N, 0 < \sum_{x_i, x_j \in M(E)} (x_i - x_j)^2 < \mathbf{x}^\intercal Q_E \mathbf{x} \implies 0 < \mathbf{x}^\intercal Q \mathbf{x}$$
 
-                We find a solution for \(Q\mathbf{x} + c = 0\) using the congugate gradient method.
+                We find a solution for \(Q\mathbf{x} + c = 0\) using the conjugate gradient method.
             </p>
             <p>
-                A full explination of the conjugate gradient method is beyond the scope of this article and can in a text or class on numerical analysis. An algebra heavy explanation can be found in <a href="https://www.cs.cornell.edu/courses/cs6220/2017fa/">Cornell's CS 6220</a> and a more geometric approach can be found in Jonathan Richard Shewchuk's <em>An Introduction to the Conjugate Gradient Method Without the Agonizing Pain</em>. Here, we will present a description of and loose intuition for the technique. This section is based on the two aformentioned resources and a conversation with <a href="https://jasonklein.dev/">Jason Klein</a>. (thanks!!!)
+                A full explanation of the conjugate gradient method is beyond the scope of this article and can be found in a text or class on numerical analysis. An algebra-heavy explanation can be found in <a href="https://www.cs.cornell.edu/courses/cs6220/2017fa/">Cornell's CS 6220</a>, and a more geometric approach can be found in Jonathan Richard Shewchuk's <em>An Introduction to the Conjugate Gradient Method Without the Agonizing Pain</em>. Here, we will present a description of and loose intuition for the technique. This section is based on the two aforementioned resources and a conversation with <a href="https://jasonklein.dev/">Jason Klein</a> (thanks!!!).
             </p>
             <p>
-                We can notice that when defining \(Q\), \(i, j\) are symmetric and thus \(Q\) is symmetric.
-                Therefore, we can use the congugate gradient method to solve \(Q\mathbf{x} + c = 0 \implies Q\mathbf{x} = 0c\).
+                We can notice that when defining \(Q\), \(i\) and \(j\) are symmetric, and thus \(Q\) is symmetric.
+                Therefore, we can use the conjugate gradient method to solve \(Q\mathbf{x} + c = 0 \implies Q\mathbf{x} = -c\).
                 The conjugate gradient method finds an \(\mathbf{x}_k\) close to \(\mathbf{x}\) by minimizing the <em>residual</em>: \(r = -c - Q\mathbf{x}_k\).
                 To do this, it starts with an initial guess at a solution \(\mathbf{x}_k = 0\) and computes the residual, \(r_k = -c - Q\mathbf{x}_k\).
-                It then takes a vector, \(p_k\) (\(p_0 = -c\)) and scales it by some \(\alpha\) so taking \(x_{k+1} = x_k + \alpha p_k\) causes \(r_{k+1}\) to have no \(p_k\) component.
+                It then takes a vector \(p_k\) (\(p_0 = -c\)) and scales it by some \(\alpha\), so that taking \(x_{k+1} = x_k + \alpha p_k\) causes \(r_{k+1}\) to have no \(p_k\) component.
                 The algorithm then iterates this process with more \(p_k\) pointing in different directions, formally \(p_k\) which are \(Q\)-orthogonal, i.e. \(p_iQp_j = 0\).
                 To do this efficiently, the algorithm maintains the following three recurrences, computing them for larger values of \(k\) until \(r_k\) is below a tunable threshold.
-                For convience, let \(\alpha_k = \frac{r_k \cdot r_k}{p_k \cdot Qp_k}, \beta_k = \frac{r_{k+1} \cdot r_{k+1}}{r_k \cdot r_k}\).
-                Note that \(r_{k+1}\) does not depend on \(\beta_k\) so \(\beta_k\) is computable. The three recurences are as follows:
+                For convenience, let \(\alpha_k = \frac{r_k \cdot r_k}{p_k \cdot Qp_k}\) and \(\beta_k = \frac{r_{k+1} \cdot r_{k+1}}{r_k \cdot r_k}\).
+                Note that \(r_{k+1}\) does not depend on \(\beta_k\), so \(\beta_k\) is computable. The three recurrences are as follows:
                 $$\begin{align}
                     \mathbf{x}_{k+1} &= \mathbf{x}_k + \alpha_k p_k &&\quad \text{removing }p_k \text{ from }\mathbf{x}_k\\
                     r_{k+1} &= r_k - \alpha_k Q p_k &&\quad \text{updating the residual after changing the approximation of } \mathbf{x} \\
@@ -230,15 +214,6 @@
                 \end{align}$$
                 When \(r_k\) is below the threshold, the algorithm simply outputs the solution \(\mathbf{x}_k\).
             </p>
-
-            <!-- Example code block (delete if unused) -->
-            <!--
-            <pre>
-                <code>
-            // [TODO: snippet]
-                </code>
-            </pre>
-            -->
 
             <h4>Overlaps</h4>
                 <figure>
@@ -253,28 +228,27 @@
                 we can minimize wirelength. However, this tends to cause macros
                 to clump together and overlap. Therefore, we add a partition
                 step to pull macros apart. First, the above algorithm is run to
-                find an inital placement with overlaps. Then a fake, stationary
-                pin is added one forth of the way across the way across the
-                placement area. The left half of the macros (measured by area)
-                are connected to this pin. This process is repeated with the
-                right side macros. Intuitively, this assigns macros a "side" of
-                the bisected placement area. The placement processes is then run
-                on this new design with the two fake nets. If there is still
-                large amounts of overlap (in particular, density below a certain
-                threshold), this process recurses until overlap is sufficiently
-                small.
+                find an initial placement with overlaps. Then a fake, stationary
+                pin is added one fourth of the way across the placement area.
+                The left half of the macros (measured by area) are connected to
+                this pin. This process is repeated for the right side macros.
+                Intuitively, this assigns macros a "side" of the bisected
+                placement area. The placement process is then run on this new
+                design with the two fake nets. If there is still a large amount
+                of overlap (specifically, density below a certain threshold),
+                this process recurses until overlap is sufficiently small.
             </p>
 
 
             <h4>Sparse Matrix Format</h4>
             <p>
-                A naive matrix representation of where \(Q_{i, j}\) is located
-                at offset \((i \times \text{number of macros} + j)\) is
+                A naive matrix representation, where \(Q_{i, j}\) is located
+                at offset \((i \times \text{number of macros} + j)\), is
                 infeasible. The memory required to store \(Q\) would grow
                 quadratically in the number of macros and quickly become too
-                large. Even if memory were not an issue, we make the observation
-                \(Q\) is sparse as macros tend to be wired to only a few other
-                macros. Therefore, improving the matrix vector multiplication
+                large. Even if memory were not an issue, we observe that
+                \(Q\) is sparse, as macros tend to be wired to only a few other
+                macros. Therefore, improving the matrix-vector multiplication
                 used by the conjugate gradient method from
                 \(\mathcal{O}(\text{entries in }Q)\) to
                 \(\mathcal{O}(\text{non-zero entries in }Q)\) is significant. To
@@ -282,94 +256,78 @@
                 format.
             </p>
             <p>
-                CSR stores a matrix in three lists, a list of values, \(v_i\), a
-                list of column indexes, \(c_i\), and a list of row indexes,
+                CSR stores a matrix in three lists: a list of values, \(v_i\), a
+                list of column indices, \(c_i\), and a list of row indices,
                 \(r_i\). \(c_i = j\) means \(v_i\) is in the \(j\)-th column of
-                \(Q\) and \(r_i = k\) means the first value in row \(i\) is
-                \(v_k\). For reasons elaborated on later, it is conveinent to
+                \(Q\), and \(r_i = k\) means the first value in row \(i\) is
+                \(v_k\). For reasons elaborated on later, it is convenient to
                 make the last element of \(r\) the number of non-zero elements
                 in the matrix, so we do so. As an example, consider representing
                 the following matrix in CSR: $$ M = \begin{bmatrix} 1 & 0 & 2 \\
-                8 & 0 & 0 \\ 0 & 0 & 2 \\ \end{bmatrix} $$ \(M\) would be become
+                8 & 0 & 0 \\ 0 & 0 & 2 \\ \end{bmatrix} $$ \(M\) would become
                 $$ \begin{align} v &= 1, 2, 8, 2 \\ c &= 0, 2, 0, 2 \\ r &= 0,
                 2, 3, 4 \end{align} $$
             </p>
             <p>
-                CSR makes matrix-vector multiplications efficient as the
-                operation can be implemented as a left to right traversal of
+                CSR makes matrix-vector multiplications efficient, as the
+                operation can be implemented as a left-to-right traversal of
                 \(v\). The implementation is simple and elegant, presented with
                 three lines of C-like pseudocode below:
                 <pre><code>
                     // Let x be the vector we want to multiply by and b be the
                     // result vector, initially zero.
                     //
-                    // Let v, c, r be the matrix we mulitply by, defined above
-                    // Let n be the dimensions of x and b
-                    for (int row = 0; row < n; row++) {
+                    // Let v, c, r be the matrix we multiply by, defined above.
+                    // Let n be the dimensions of x and b.
+                    for (int row = 0; row &lt; n; row++) {
                         // The last value of r is the number of non-zero
-                        // elements so col_idx never goes out of bounds and r
-                        // is of length n + 1 so row + 1 never goes out of
+                        // elements, so col_idx never goes out of bounds, and r
+                        // is of length n + 1, so row + 1 never goes out of
                         // bounds.
-                        for (int col_idx = r[row]; i < r[row + 1]; col_idx++) {
+                        for (int col_idx = r[row]; col_idx &lt; r[row + 1]; col_idx++) {
                             b[row] += v[col_idx] * x[c[col_idx]];
                         }
                     }
                 </code></pre>
-                Looking at the above code, we realize <code>col_idx</code> is
+                Looking at the above code, we realize <code>col_idx</code>
                 monotonically increases (even between loop iterations) because
-                <code>r</code> monitonically increases. Then, as
-                <code>col_idx</code> is upper bounded by <code>row[n + 1]</code>
-                the inner MAC runs only <code>row[n + 1] = number of non-zero
-                matrix elements</code> times. Efficient!!!
+                <code>r</code> monotonically increases. Then, since
+                <code>col_idx</code> is upper bounded by <code>r[n]</code>,
+                the inner MAC runs only <code>r[n] = number of non-zero
+                matrix elements</code> times. Efficient.
             </p>
 
-            <h3>Summery of Placement</h3>
+            <h3>Summary of Placement</h3>
             <p>
                 The end-to-end flow of placement is the following:
                 <ol>
-                    <li>Parse a list of macros and an inital placement from LEF/DEF files</li>
+                    <li>Parse a list of macros and an initial placement from LEF/DEF files</li>
                     <li>Construct \(Q\) and \(c\) from our quadratic cost function</li>
-                    <li>Repeat until solution has few enough overlaps
+                    <li>Repeat until the solution has few enough overlaps:
                         <ol>
-                        <li>Minimize wirelength using conjugate gradient method</li>
+                        <li>Minimize wirelength using the conjugate gradient method</li>
                         <li>Add fake pins to reduce overlap</li>
                     </ol></li>
                 </ol>
                 The only piece of the above we put on the FPGA is the
                 minimization using the conjugate gradient method. This method
-                requires multiple matrix vector and vector vector
+                requires multiple matrix-vector and vector-vector
                 multiplications which can be parallelized. Conjugate gradient
-                descent on the FPGA is a big improvement for performance, but
-                sacrifices some precision during computations as lower precision
-                fixed point is used instead of floating point. In theory this
+                descent on the FPGA is a big improvement for performance, but it
+                sacrifices some precision during computations because lower-precision
+                fixed point is used instead of floating point. In theory, this
                 can cause issues with the conjugate gradient method converging,
-                but in practice we did not experience this, though we found
-                individual runs on some benchmarks may have placements with
-                higher costs when run on the FPGA. We suspect the higher costs
-                are due to the inherant chaos of slightly different arithmetic.
-                Much of the rest of this processes, such as parsing the LEF/DEF
-                files or constructing \(Q\) and \(c\) is complicated, difficult
-                to parallelize, and does not infeasibly scale as designs grow.
-                Becaues of these, we choose to implement these on the ARM
-                processor with little tradeoff. The FPGA would be a poor fit for
-                these tasks.
+                but in practice we did not experience this. We did find that
+                individual runs on some benchmarks may produce placements with
+                higher costs when run on the FPGA, and we suspect these higher
+                costs are due to the inherent chaos of slightly different
+                arithmetic. Much of the rest of this process, such as parsing
+                the LEF/DEF files or constructing \(Q\) and \(c\), is
+                complicated, difficult to parallelize, and scales reasonably as
+                designs grow. Because of this, we choose to implement these
+                steps on the ARM processor with little tradeoff. The FPGA would
+                be a poor fit for these tasks.
             </p>
-
-            <!--
-            <figure>
-                <img src="images/system_block.png" alt="[TODO]" class="scaled-image-960">
-                <figcaption>[TODO: caption]</figcaption>
-            </figure>
-            -->
-
-            <!--
-            I think the below is covered by the intro but not 100% sure. People don't really use FPGAs for this because they are slow.
-            <h3>Hardware/Software Tradeoffs</h3>
-            <p>[TODO: what runs on HPS ARM vs FPGA fabric and why.]</p>
-
-            <h3>Existing Designs</h3>
-            <p>[TODO: prior work in analytical placement / FPGA-accelerated
-            linear solves]</p>-->
         </section>
 
         <!-- =============================================================
@@ -438,8 +396,8 @@
                         Here, the script scans the LEF file and extracts
                         relevant physical library information. It needs the
                         name, width, and height of each macro, as well as the
-                        database unit scaling. Any other information—such as
-                        routing information on layers and vias—is not needed,
+                        database unit scaling. Any other information, such as
+                        routing information on layers and vias, is not needed
                         and is therefore ignored by the parser. An example
                         displaying information retrieved by the parser is shown
                         below.
@@ -587,14 +545,15 @@
                 <li>Scroll to zoom in or out</li>
                 <li>Drag to pan</li>
                 <li>'F' to fit-all</li>
-                <li>'Q' to quit</LI>
+                <li>'Q' to quit</li>
             </ul>
             <div>
                 <figure>
                     <img src="images/dma_lefdef_visualizer_output.png"
                         style="display: block; margin: 0 auto; width: 400px; height: auto;">
                     <figcaption style="text-align: center;">
-                        Tkinter window when visualizer is run on ICCAD04 DMA benchmark
+                        Tkinter window when visualizer is run on ICCAD04 DMA
+                        benchmark
                     </figcaption>
                 </figure>
                 <figure>
@@ -606,7 +565,7 @@
                 </figure>
             </div>
             <p>
-                When run with a <code>--png &ltout.png&gt &ltin.json&gt</code>
+                When run with a <code>--png &lt;out.png&gt; &lt;in.json&gt;</code>
                 flag, the script will instead run in headless mode, rendering a
                 single PNG image without a Tk window. This is useful for
                 automating rendering images after each run.
@@ -635,7 +594,7 @@
                 <li>
                     <b>Initialize Cell Positions:</b> runs
                     <code>init_cell_positions()</code> to place cells at initial
-                    positions within the die area; in this baseline placer, all
+                    positions within the die area. In this baseline placer, all
                     cells are initialized to the center of the die.
                 </li>
                 <li>
@@ -649,12 +608,12 @@
                 <li>
                     <b>Initial CG Solve:</b> runs <code>solve_cg()</code>,
                     solving the linear system using
-                    <code>scipy.sparse.linalg.cg</code> 
-                    to obtain the initial wirelength-optimal placement; this
+                    <code>scipy.sparse.linalg.cg</code>
+                    to obtain the initial wirelength-optimal placement. This
                     minimizes quadratic wirelength but ignores overlap
                     constraints. We exit when <code>max_iter=1000</code> is
-                    exceeded, or the algorithm is deemed to have converged by
-                    comparison to a predefined threshold; otherwise, Step 4 is
+                    exceeded, or when the algorithm is deemed to have converged by
+                    comparison to a predefined threshold. Otherwise, Step 4 is
                     repeated.
                 </li>
                 <li>
@@ -666,7 +625,7 @@
                     condition as in Step 4). We exit Step 5 when
                     <code>MAX_OUTER_ITER=15</code> is exceeded, or when the
                     overlap between cells is considered acceptable (i.e. max bin
-                    density < 0.75); otherwise, Step 5 is repeated.
+                    density &lt; 0.75). Otherwise, Step 5 is repeated.
                 </li>
                 <li>
                     <b>Write Final Output:</b> writes the final placed design
@@ -681,12 +640,12 @@
                 The C++ baseline placer, which is stored in
                 <code>sw-baseline-c/placer.cpp</code>, is nearly identical in
                 its implementation to the Python baseline. It follows the same
-                JSON I/O format, same algorithm, and even the same convergence
+                JSON I/O format, the same algorithm, and even the same convergence
                 criterion. The only real difference of note is that the C++ file
                 itself is multi-purpose. As a standalone software placer, it is
-                designed to perform 
+                designed to perform
                 <code>cg_solve()</code> using hand-rolled double-precision
-                logic; however, when the correct flags are set,
+                logic. However, when the correct flags are set,
                 <code>placer.cpp</code>
                 doubles as a placer front-end with which a hardware-based CG
                 solver can seamlessly connect. In such a case, all parts of the
@@ -707,16 +666,16 @@
             to our final accelerated version (V6). We first began with a purely
             functional-level model developed in Python to map out key logic
             elements such as linear algebra operations to separate modules and
-            imagine the overall connectivity without worrying about
-            SystemVerilog details. The V1 Verilog is a direct implementation of
-            the Python FL model assuming infinite resources, and thus is not
-            synthesizable but is simulateable to prove functionality. The V2
-            Verilog tones down the full loop unrolling and integrated an M10K
-            memory controller to create a design which is synthesizable for the
-            Cyclone V FPGA. Each version thereafter implements performance
-            improvements as detailed below to achieve a faster and more
-            efficient CG solve implementation. Every revision shares the same
-            Q13.14 fixed-point format, the same CSR sparse layout, and the same
+            to imagine the overall connectivity without worrying about
+            SystemVerilog details. V1 is a direct implementation of the Python
+            FL model assuming infinite resources, and thus is not synthesizable,
+            but it can be simulated to prove functionality. The V2 Verilog tones
+            down the full loop unrolling and integrates an M10K memory
+            controller to create a design which is synthesizable for the Cyclone
+            V FPGA. Each version thereafter implements performance improvements
+            as detailed below, achieving a faster and more efficient CG solve
+            implementation. Every revision shares the same Q13.14 fixed-point
+            format, the same CSR sparse layout, and the same
             <code>sw_go</code> / <code>sw_done</code>
             handshake to the ARM HPS, so the C++ placer can swap CG drivers
             without modifying the outer placement loop.</p>
@@ -737,7 +696,7 @@
             specification of the data flow that every subsequent RTL version
             uses. A 19-case scipy-based test suite in
             <a href="fpga/fl/test/CGTop-test.py">fpga/fl/test/CGTop-test.py</a>
-            compares the FL solver's final iterate against
+            compares the FL solver's final state against
             <code>scipy.sparse.linalg.cg</code> on a handmade suite of
             symmetric positive-definite systems (small dense, tridiagonals up to
             <i>n</i>=50, the <i>n</i>=1 boundary, arrow-pattern matrices, and
@@ -751,7 +710,7 @@
                     style="display: block; margin: 0 auto; width: 720px; height: auto;">
                 <figcaption style="text-align: center;">
                     Block diagram of the V1 RTL. Red represents combinational
-                    logic. Green represent sequential logic, blue represents FSM
+                    logic, green represents sequential logic, blue represents FSM
                     states, and orange represents wide bus/multiple parallel
                     connections combined for brevity.
                 </figcaption>
@@ -797,14 +756,14 @@
                     style="display: block; margin: 0 auto; width: 720px; height: auto;">
                 <figcaption style="text-align: center;">
                     Block diagram of the V2 RTL. Red represents combinational
-                    logic. Green represent sequential logic, blue represents FSM
+                    logic, green represents sequential logic, blue represents FSM
                     states, orange represents wide bus/multiple parallel
                     connections combined for brevity or Qsys modules, and purple
                     represents self-contained submodules.
                 </figcaption>
             </figure>
 
-            <p>V2 is the first synthesizable revision and creates same the
+            <p>V2 is the first synthesizable revision and creates the same
             <code>CGCtrl</code>/<code>CGDpath</code> split that every subsequent
             version inherits. <code>CGCtrl</code> is the only FSM at the
             toplevel, whereas <code>CGDpath</code> holds no state machine of its
@@ -845,8 +804,8 @@
                 <code>iter &ge; max_iter || rr_new &le; eps_sq || (iter &gt; 1 &amp;&amp; rr_new &ge; rr_old)</code>.</li>
                 <li><b>Termination:</b> <code>S_WB_WRITE</code>, then
                 flip the <code>sel_y</code> register and re-enter
-                <code>S_LD_X_ADDR</code> for the y solve, before
-                finally landing at <code>S_CG_DONE</code> on
+                <code>S_LD_X_ADDR</code> for the y solve, before finally
+                entering <code>S_CG_DONE</code> on
                 <code>sw_done_ack</code>.</li>
             </ul>
 
@@ -856,11 +815,11 @@
             register files of size <code>p_max_n</code> each at
             <code>p_total_bits</code> wide:</p>
             <ul>
-                <li><code>d_reg</code> &mdash; search direction</li>
-                <li><code>r_reg</code> &mdash; residual</li>
-                <li><code>x_vec_reg</code> &mdash; iterate</li>
-                <li><code>cx_reg</code> &mdash; loaded right-hand side</li>
-                <li><code>q_buf</code> &mdash; SPMV result</li>
+                <li><code>d_reg</code>: search direction</li>
+                <li><code>r_reg</code>: residual</li>
+                <li><code>x_vec_reg</code>: iterate</li>
+                <li><code>cx_reg</code>: loaded right-hand side</li>
+                <li><code>q_buf</code>: SPMV result</li>
             </ul>
             <p>There are additional registers to hold scalar values
             (<code>rr_reg</code>, <code>rr_new_latched</code>,
@@ -882,13 +841,13 @@
             <code>we</code>, and a <code>wdata_src</code> mux that
             selects between five sources:</p>
             <ul>
-                <li><code>WD_MEM</code> &mdash; memory readback</li>
-                <li><code>WD_AXPY</code> &mdash; AXPY output</li>
-                <li><code>WD_SPMV</code> &mdash; SPMV output</li>
-                <li><code>WD_RDA</code> &mdash; passthrough of
+                <li><code>WD_MEM</code>: memory readback</li>
+                <li><code>WD_AXPY</code>: AXPY output</li>
+                <li><code>WD_SPMV</code>: SPMV output</li>
+                <li><code>WD_RDA</code>: passthrough of
                 <code>rd_a_data</code> (used by
                 <code>S_COPY_D</code>)</li>
-                <li><code>WD_VNS</code> &mdash; the inline VNS
+                <li><code>WD_VNS</code>: the inline VNS
                 computation <code>-(rd_a + rd_b)</code></li>
             </ul>
 
@@ -913,9 +872,8 @@
                 to select ADD vs SUB, and emits <code>p_lanes</code>
                 z values one cycle after the corresponding input
                 handshake.</li>
-                <li><b><code>SPMV_seq</code>:</b> single-lane
-                (memory-bandwidth-bound on the shared Avalon port).
-                Uses a 12-state inner FSM
+                <li><b><code>SPMV_seq</code>:</b> single-lane,
+                uses a 12-state inner FSM
                 <code>S_RPLO_ADDR</code>/<code>S_RPLO_CAPT</code>
                 &rarr;
                 <code>S_RPHI_ADDR</code>/<code>S_RPHI_CAPT</code>
@@ -943,7 +901,7 @@
 
             <h4>FpMath, Avalon Bus, and Memory Layout</h4>
 
-            <p><code>FpMath</code> defines three primitives:</p>
+            <p><code>FpMath</code> defines three modules:</p>
             <ul>
                 <li><b><code>FpMul</code>:</b> fully-combinational
                 signed 27&times;27 multiply with the product truncated
@@ -978,7 +936,7 @@
             runs the x-dim and y-dim solves back-to-back using the same sequence
             of FSM states.</p>
 
-            <h4>Multi-Lane Mechanism</h4>
+            <h4>Multi-Lane Multiply Mechanism</h4>
 
             <p>The multi-lane multiply mechanism is used for all subsequent
             versions up through V6. Streaming phases (<code>S_VNS_R</code>,
@@ -1005,7 +963,7 @@
                     style="display: block; margin: 0 auto; width: 720px; height: auto;">
                 <figcaption style="text-align: center;">
                     Block diagram of the V3 RTL. Red represents combinational
-                    logic. Green represent sequential logic, blue represents FSM
+                    logic, green represents sequential logic, blue represents FSM
                     states, orange represents wide bus/multiple parallel
                     connections combined for brevity or Qsys modules, and purple
                     represents self-contained submodules. Changes from V2 are
@@ -1029,25 +987,25 @@
             via the following FSM states:</p>
             <ul>
                 <li><code>S_IDLE</code></li>
-                <li><code>S_NORM</code> &mdash; extract sign, take
+                <li><code>S_NORM</code>: extract sign, take
                 absolute values, leading-zero-count <code>|b|</code>
                 over a 48-bit operand.</li>
-                <li><code>S_ROM</code> &mdash; look up a Q1.16
+                <li><code>S_ROM</code>: look up a Q1.16
                 9-bit-accurate reciprocal seed <code>r0</code> from a
                 256&times;17 ROM indexed by the high byte of the
                 normalized <code>b_norm = (|b| &lt;&lt; lzc)[47:31]</code>.</li>
-                <li><code>S_NR1_M1</code> &mdash; compute
+                <li><code>S_NR1_M1</code>: compute
                 <code>m1 = b_norm * r0</code> into a registered
                 <code>nr_m1_reg</code>.</li>
-                <li><code>S_NR1_M2</code> &mdash; compute
+                <li><code>S_NR1_M2</code>: compute
                 <code>r1 = r0 * (2 - m1)</code> from the registered
                 <code>m1</code>.</li>
                 <li><code>S_NR2_M1</code> &rarr; <code>S_NR2_M2</code>
-                &mdash; a second NR iteration that washes out
+               : a second NR iteration that washes out
                 fixed-point truncation noise from the first.</li>
-                <li><code>S_QMUL</code> &mdash; compute
+                <li><code>S_QMUL</code>: compute
                 <code>m3 = |a| * r1</code> over 48&times;17 = 65 bits.</li>
-                <li><code>S_QFINISH</code> &mdash; right-shift
+                <li><code>S_QFINISH</code>: right-shift
                 <code>m3</code> by <code>49 - lzc</code> to denormalize,
                 saturate to
                 <code>(1 &lt;&lt; (p_total_bits - 1)) - 1</code> on
@@ -1062,7 +1020,7 @@
             <code>p_total_bits &gt; 27</code> (used by the Verilator
             wide-bitwidth path) since the NR internals are hard-coded
             to 48-bit operands and a Q1.16 seed ROM that cannot be
-            cleanly stretched.</p>
+            cleanly parameterized.</p>
 
             <h4>SPMV Row-Prologue Collapse</h4>
 
@@ -1082,7 +1040,7 @@
             <code>S_RPLO_ADDR</code>, saving two cycles per row except
             for row 0.</p>
 
-            <h4>PIO Registration and Narrow Comparators</h4>
+            <h4>PIO Registers and Narrow Comparators</h4>
 
             <p>The third change is timing-driven and lives at the
             <code>CGTop</code> boundary. V2 routes the PIO inputs
@@ -1103,10 +1061,10 @@
             log2(p_lanes)</code>, and
             <code>num_groups_minus_1_reg</code> once per solve. The FSM
             comparators (<code>stream_idx == n - 1</code>,
-            <code>out_idx == num_groups - 1</code>, etc.) all switch
-            from 32-bit to N_W-bit width, shrinking their combinational
-            depth roughly five-fold and removing the most
-            critical-path-dominant comparator from the design.</p>
+            <code>out_idx == num_groups - 1</code>, etc.) all switch from 32-bit
+            to N_W-bit width, shrinking their combinational depth roughly 5x and
+            removing the most critical-path-dominant comparator from the
+            design.</p>
 
             <h4>Speedup vs. V2</h4>
 
@@ -1127,7 +1085,7 @@
                     style="display: block; margin: 0 auto; width: 720px; height: auto;">
                 <figcaption style="text-align: center;">
                     Block diagram of the V4 RTL. Red represents combinational
-                    logic. Green represent sequential logic, blue represents FSM
+                    logic, green represents sequential logic, blue represents FSM
                     states, orange represents wide bus/multiple parallel
                     connections combined for brevity or Qsys modules, and purple
                     represents self-contained submodules. Changes from V3 are
@@ -1153,10 +1111,8 @@
             <code>mode</code> hardwired to SUB. Both units share the
             same <code>axpy_coef_src_beta</code> signal (so they see
             the same coefficient <code>alpha</code> during
-            <code>S_AXPY_XR_FEED</code>), and <code>u_axpy_x</code>'s
-            handshakes are taken as canonical for FSM and counter
-            control since both units run in lockstep by construction.
-            In <code>S_AXPY_D_FEED</code> only <code>u_axpy_x</code>
+            <code>S_AXPY_XR_FEED</code>). In <code>S_AXPY_D_FEED</code> only
+            <code>u_axpy_x</code>
             is active (now feeding <code>r</code> and <code>d</code>
             through <code>rd_a</code>/<code>rd_b</code> with
             <code>axpy_coef_src_beta=1</code> to apply <code>beta</code>
@@ -1166,13 +1122,13 @@
             <h4>Secondary RF Write Port</h4>
 
             <p>Driving both AXPY units in the same cycle requires
-            <code>CGDpath</code> to grow two additional read ports
+            <code>CGDpath</code> to add two additional read ports
             (<code>rd_c_*</code> and <code>rd_d_*</code>) that feed
             <code>u_axpy_r</code> with <code>r_reg</code> and
             <code>q_buf</code> in parallel with <code>rd_a</code>
             (<code>x_vec_reg</code>) and <code>rd_b</code>
             (<code>d_reg</code>) feeding <code>u_axpy_x</code>. The
-            register file also gains a <i>secondary</i>
+            register file also adds a <i>secondary</i>
             <code>p_lanes</code>-wide write port carrying
             <code>wr_sel_sec</code>, <code>wdata_src_sec</code>, and
             <code>we_sec</code>, whose index reuses the primary write's
@@ -1204,12 +1160,11 @@
             on the merged AXPY and another <code>num_groups</code>
             cycles at init. The cost is one additional
             <code>p_lanes</code>-wide AXPY's worth of DSPs which still fits
-            comfortably inside the Cyclone V's 87-DSP budget at
+            comfortably inside the Cyclone V's 87-DSP limit at
             <code>p_lanes=8</code>. The V3 NR <code>FpDiv</code>, the
-            <code>SPMV</code> row-prologue collapse and 5-cycle-per-nz
-            inner loop, the single shared Avalon slave, the memory
-            layout, and the <code>sel_y</code> x/y sequencing are all
-            byte-identical to V3.</p>
+            <code>SPMV</code> row-prologue collapse and 5-cycle-per-nz inner
+            loop, the single shared Avalon slave, the memory layout, and the
+            <code>sel_y</code> x/y sequencing are all identical to V3.</p>
 
             <h4>Speedup vs. V3</h4>
 
@@ -1222,19 +1177,17 @@
             change needed since V4 reuses V3's NR <code>FpDiv</code>
             and 5-cycle-per-nz <code>SPMV</code>). The win is modest
             because the 5-cycle-per-nz <code>SPMV</code> inner loop
-            still dominates per-iter cost; V4's
+            still dominates per-iter cost. V4's
             <code>S_AXPY_XR_FEED</code> merge and the removed
             <code>S_COPY_D</code> each save only
             <code>num_groups</code> cycles, which is small compared
             to the <code>5 &middot; nnz</code> cycles
             <code>SPMV</code> spends per iter. The merged init-time
-            <code>S_VNS_R</code>/<code>S_COPY_D</code> also explains
-            why the parallel_chains_50 win (1.05&times;) is slightly
-            larger than the 10-cell benchmarks (1.03&times;): the
-            init-time savings scale with <code>num_groups</code>,
-            which is larger on the 50-cell design. The next
-            architectural lever &mdash; reducing the per-nz cost of
-            <code>SPMV</code> itself &mdash; is what V5 targets.</p>
+            <code>S_VNS_R</code>/<code>S_COPY_D</code> also explains why the
+            parallel_chains_50 win (1.05&times;) is slightly larger than the
+            10-cell benchmarks (1.03&times;), showing how the init-time savings
+            scale with <code>num_groups</code>, which is larger on the 50-cell
+            design.</p>
 
             <h3>V5 RTL</h3>
 
@@ -1243,7 +1196,7 @@
                     style="display: block; margin: 0 auto; width: 720px; height: auto;">
                 <figcaption style="text-align: center;">
                     Block diagram of the V5 RTL. Red represents combinational
-                    logic. Green represent sequential logic, blue represents FSM
+                    logic, green represents sequential logic, blue represents FSM
                     states, orange represents wide bus/multiple parallel
                     connections combined for brevity or Qsys modules, and purple
                     represents self-contained submodules. Changes from V4 are
@@ -1256,22 +1209,21 @@
             <p>V5 reduces the cost of the per-iter SPMV kernel by reorganizing the
             memory topology rather than the FSM. V4's single shared Avalon SRAM
             forces <code>SPMV</code> to read
-            <code>q_val[j]</code> and <code>q_col[j]</code> sequentially
-            through a multiplexed bus even though the two reads have
-            no dependency on each other. The bus arbiter
-            (<code>ctrl_mem_src_spmv</code>) also adds a layer of
-            mux on top. V5 splits the single slave into seven
-            dedicated Qsys on-chip RAM slaves:</p>
+            <code>q_val[j]</code> and <code>q_col[j]</code> sequentially through
+            a multiplexed bus even though the two reads have no dependency on
+            each other. The bus arbiter (<code>ctrl_mem_src_spmv</code>) also
+            adds muxing on top. V5 splits the single slave into seven dedicated
+            Qsys on-chip RAM slaves:</p>
             <ul>
                 <li><code>q_val_ram</code>, <code>q_col_ram</code>,
-                and <code>q_rowp_ram</code> &mdash; all owned by
+                and <code>q_rowp_ram</code>: all owned by
                 <code>SPMV</code>.</li>
                 <li><code>cx_ram</code> and <code>cy_ram</code>
-                &mdash; read by <code>CGCtrl</code> during the
+               : read by <code>CGCtrl</code> during the
                 serialized
                 <code>S_VNS_R_ADDR</code>/<code>S_VNS_R_CAPT</code>
                 phase.</li>
-                <li><code>x_ram</code> and <code>y_ram</code> &mdash;
+                <li><code>x_ram</code> and <code>y_ram</code>:
                 read during <code>S_LD_X_*</code> and written during
                 <code>S_WB_WRITE</code>, with a <code>sel_y</code>
                 mux at <code>CGTop</code> picking which of the two
@@ -1290,23 +1242,23 @@
             replaced by a shorter sequence:</p>
             <ul>
                 <li><code>S_RP_ADDR_FIRST</code>/<code>S_RP_CAPT_FIRST</code>
-                &mdash; row 0's <code>rp_lo</code> read.</li>
+               : row 0's <code>rp_lo</code> read.</li>
                 <li><code>S_RP_ADDR_HI</code>/<code>S_RP_CAPT_HI</code>
-                &mdash; row 0's <code>rp_hi</code> read.</li>
+               : row 0's <code>rp_hi</code> read.</li>
                 <li><code>S_RP_ADDR_NEXT</code>/<code>S_RP_CAPT_NEXT</code>
-                &mdash; subsequent rows, which carry
+               : subsequent rows, which carry
                 <code>rp_hi &rarr; rp_lo</code> and read only the new
                 <code>rp_ptr[row+1]</code>.</li>
                 <li><code>S_ROW_INIT</code>, then the per-nz inner
                 loop:
                 <ul>
-                    <li><code>S_NZ_ADDR</code> &mdash; dpath drives
+                    <li><code>S_NZ_ADDR</code>: dpath drives
                     <code>q_val_addr</code> and <code>q_col_addr</code>
                     simultaneously to the same <code>j_idx</code>.</li>
-                    <li><code>S_NZ_CAPT</code> &mdash; latches both
+                    <li><code>S_NZ_CAPT</code>: latches both
                     <code>q_val_rdata</code> and <code>q_col_rdata</code>
                     in parallel.</li>
-                    <li><code>S_ACC</code> &mdash; does
+                    <li><code>S_ACC</code>: does
                     <code>acc += val * vec[col]</code> using the
                     captured values.</li>
                 </ul>
@@ -1326,7 +1278,7 @@
             (with the V4 secondary-port fanout into <code>d_reg</code>
             preserved). The <code>S_LD_CX_*</code> states are gone
             entirely, and removing <code>cx_reg</code> reclaims
-            <code>p_max_n*p_total_bits</code> flops.</p>
+            <code>p_max_n*p_total_bits</code> FFs.</p>
 
             <h4>Speedup vs. V4</h4>
 
@@ -1351,16 +1303,11 @@
             <code>val_p2</code>/<code>vec_p2</code> latch &rarr;
             <code>prod_p</code> registered multiply &rarr;
             <code>acc</code> add) plus a four-cycle <code>S_DRAIN</code>
-            tail. Per row with <code>nnz=N</code>, V5 takes
-            <code>3N + 2</code> cycles and V5_deep takes
-            <code>N + 6</code>, so the crossover is at <code>N &ge; 3</code>
-            and V5_deep approaches a 3&times; <code>SPMV</code>
-            asymptote over V5 on dense rows. It passes all 16 DPI
-            golden tests bit-exactly but was not adopted as the
-            baseline because V6's parallel-engine win is orthogonal
-            and larger on the project's benchmark mix; V5_deep is
-            preserved in the tree as a drop-in alternative for future
-            mergers with V6's <code>CGEngine</code>.</p>
+            tail. It passes all 16 DPI golden tests bit-exactly but did not work
+            as intended when synthesized for the FPGA. We suspect this is
+            related to a timing failure which our group did not have time to
+            debug. V5_deep is preserved in the file tree for future work that
+            may explore a fix.</p>
 
             <h3>V6 RTL</h3>
 
@@ -1369,7 +1316,7 @@
                     style="display: block; margin: 0 auto; width: 720px; height: auto;">
                 <figcaption style="text-align: center;">
                     Block diagram of the V6 RTL. Red represents combinational
-                    logic. Green represent sequential logic, blue represents FSM
+                    logic, green represents sequential logic, blue represents FSM
                     states, orange represents wide bus/multiple parallel
                     connections combined for brevity or Qsys modules, and purple
                     represents self-contained submodules. White boxes represent
@@ -1382,7 +1329,7 @@
             <p>V6 forks V5 (not V5_deep) and fixes the remaining
             sequential dependency in the placement solve: the x and y
             CG problems are independent except for sharing the Q matrix,
-            yet V5 and earlier solve them serially by flipping
+            where V5 and earlier solve them serially by flipping
             <code>sel_y_reg</code> after the first writeback and looping
             back to <code>S_LD_X_ADDR</code> for the y pass. V6
             introduces a new <code>CGEngine</code> wrapper module
@@ -1419,16 +1366,16 @@
             <code>eps_sq</code> are broadcast identically to both
             engines. <code>engine_x</code> wires its
             <code>q_val_ram_*</code> bundle to the toplevel
-            <code>q_val_x_ram_*</code> slave and its <code>c_ram_*</code>
-            to <code>cx_ram_*</code> and its <code>xy_ram_*</code> to
-            <code>x_ram_*</code>; <code>engine_y</code> wires the
+            <code>q_val_x_ram_*</code> slave, its <code>c_ram_*</code>
+            to <code>cx_ram_*</code>, and its <code>xy_ram_*</code> to
+            <code>x_ram_*</code>. <code>engine_y</code> wires the
             corresponding <code>_y_</code> slaves. No muxing remains at
             <code>CGTop</code> as every FPGA-facing slave port has
             exactly one engine consumer.</p>
 
             <h4>Q Duplication and Qsys Layout</h4>
 
-            <p>The Avalon slave count grows from V5's seven to ten with
+            <p>The Avalon slave count increases from V5's seven to ten with
             three Q slaves per engine
             (<code>q_val_x_ram</code>, <code>q_col_x_ram</code>,
             <code>q_rowp_x_ram</code> and the <code>_y_</code>
@@ -1444,21 +1391,13 @@
             engine. A true dual-FPGA-facing-port M10K would also work but
             requires bypassing the stock Altera On-Chip Memory IP's two-port
             total limit with a custom shim that would add substantial RTL
-            complexity for roughly ten M10K of savings the project does not
-            need. At
+            complexity. At
             <code>p_max_n=50</code> the duplicated Q costs roughly
-            ten extra M10K blocks
-            (<code>q_val=2500*27b &asymp; 7</code>,
-            <code>q_col=2500*~6b &asymp; 2</code>,
-            <code>q_rowp &asymp; 1</code>, doubled), which is less than
-            3% of the Cyclone V 5CSEMA5's 397-block budget. The
+            ten to twenty extra M10K blocks, which is less than
+            3% of the Cyclone V 5CSEMA5's 397-block limit. The
             per-iter loop is thousands of solves, so the one-time
             ARM-side memcpy of Q into both physical M10K trios is
-            negligible. The Qsys system must be regenerated with the
-            ten on-chip RAM IPs at 16 KB-aligned bases (the four large
-            Q slaves each occupy 16 KB at <code>p_max_n=50</code>) and
-            the corresponding bridge bases are reflected in
-            <code>cg_fpga_mmap_driver_V6.h</code>.</p>
+            negligible.</p>
 
             <h4>Speedup vs. V5</h4>
 
@@ -1480,7 +1419,7 @@
             consists of three layers:</p>
             <ul>
                 <li><b>Per-version SystemVerilog testbench top</b>
-                &mdash; <a href="fpga/hw/test/CGTop_tb.v">CGTop_tb.v</a>
+               : <a href="fpga/hw/test/CGTop_tb.v">CGTop_tb.v</a>
                 for V1-V4's single-slave topology,
                 <a href="fpga/hw/test/CGTop_tb_V5.v">CGTop_tb_V5.v</a>
                 for V5/V5_deep's seven-slave topology, and
@@ -1488,15 +1427,14 @@
                 for V6's ten-slave parallel-engine topology.</li>
                 <li><b>Shared test-case file</b>
                 <a href="fpga/hw/test/test_cases.v">test_cases.v</a>
-                &mdash; defines all 16 directed cases.</li>
+               : defines all 16 directed cases.</li>
                 <li><b>DPI bridge</b>
                 <a href="fpga/hw/test/cg_golden_dpi.cpp">cg_golden_dpi.cpp</a>
-                &mdash; wraps the canonical C++ fixed-point CG golden
-                model from
+               : wraps the C++ fixed-point CG golden model from
                 <a href="sw-baseline-c/cg_golden_model.h">sw-baseline-c/cg_golden_model.h</a>.</li>
             </ul>
-            <p>For each test case the testbench loads identical input
-            data into the DUT's behavioral memories and a parallel
+            <p>For each test case, the testbench loads identical input
+            data into the DUT's simulated memories and a parallel
             <code>golden_mem</code> array, pulses <code>sw_go</code>,
             waits for <code>sw_done</code>, and then calls
             <code>dpi_cg_solve</code> on the golden array. The DPI
@@ -1580,9 +1518,9 @@
             <code>solve_cg()</code> then reduces to a single
             <code>hw_driver.solve(...)</code> call regardless of which
             backend is active.
-            <a href="fpga/sw/placer.cpp">fpga/sw/placer.cpp</a> is a
-            symlink to the canonical source so the FPGA build never
-            forks the placer logic.</p>
+            <a href="fpga/sw/placer.cpp">fpga/sw/placer.cpp</a> is a symlink to
+            the original source, so all endpoints utilize the same code, which
+            needs to be modified in only one location.</p>
 
             <h3>Running placer.cpp with the Golden C++ Model</h3>
 
@@ -1634,7 +1572,7 @@
             <code>0xFF200000</code>
             (<code>cg_ctrl</code>, <code>cg_max_iter</code>,
             <code>cg_eps_sq</code>, <code>cg_n</code>,
-            <code>cg_status</code>); <code>solve()</code> pulses
+            <code>cg_status</code>). <code>solve()</code> pulses
             <code>sw_go</code> through <code>cg_ctrl</code> and spins
             on <code>cg_status</code> for <code>sw_done</code> before
             reading the result vectors back out of the SRAM regions.
@@ -1644,7 +1582,7 @@
 
             <h3>Putting It All Together: run-placer</h3>
             <p>The <a href="python-utils/run_placer.py">run-placer</a>
-            console script is the user-facing entry point for every
+            Python script is the user-facing entry point for every
             build mode (<code>python</code>, <code>sw</code>,
             <code>golden</code>, <code>verilated</code>,
             <code>arm</code>, <code>fpga</code>). It parses LEF/DEF into JSON,
@@ -1653,16 +1591,17 @@
             either locally or remotely, and renders the resulting placement to
             PNG. For remote modes it opens one
             <a href="https://www.fabfile.org/">fabric</a> SSH session
-            against the board (credentials from a gitignored
+            to the board (credentials from a gitignored
             <code>.env</code>), SCPs the binary and netlist over, runs the
-            placer with <code>sudo</code> on the FPGA path so the mmap driver
-            can open <code>/dev/mem</code>, and SCPs the result JSONs back. Two
-            features make iteration easy: a <code>--sweep</code> flag that runs
+            placer on the FPGA path with the mmap driver opening
+            <code>/dev/mem</code> (if running in FPGA mode), and SCPs the result
+            JSONs back. Two features make iteration easy: a <code>--sweep</code>
+            flag that runs
             <code>max_outer_iter</code> from 1..16, captures a PNG per
-            iteration, and stitches a GIF/MP4 slideshow; and an
-            auto-detected batch mode that walks every benchmark in a
-            parent directory using one shared SSH session and prints a
-            cross-benchmark summary table at the end.</p>
+            iteration, and stitches a GIF/MP4 slideshow, as well as an
+            auto-detected batch mode that runs every benchmark in a parent
+            directory using one shared SSH session and prints a cross-benchmark
+            summary table at the end.</p>
         </section>
 
         <!-- =============================================================
@@ -1681,10 +1620,13 @@
         <section id="results">
             <h2>Results of Design</h2>
             <p>
-                To be as comprehensive as possible in gauging the results of our design, tests have been run across a range of
-                custom benchmarks. Each benchmark is a hand-written micron-scale design used to fit inside the FPGA's MAX_N=50 
-                cap (each die is 500 DBU on a side, far below the +/-4096 representable range of the Q13.14 fixed-point format).
-                A rough summary of each benchmark used in this section is listed in the following table:
+                To be as comprehensive as possible in gauging the results of our
+                design, tests have been run across a range of custom benchmarks.
+                Each benchmark is a hand-written micron-scale design used to fit
+                inside the FPGA's MAX_N=50 cap (each die is 500 DBU on a side,
+                far below the +/-4096 representable range of the Q13.14
+                fixed-point format). A rough summary of each benchmark used in
+                this section is listed in the following table:
             </p>
             <table style="width:100%; border-collapse: collapse; font-size: 15px;">
                 <thead>
@@ -1767,119 +1709,176 @@
 
             <h3>Functional Correctness</h3>
             <p>
-                Functional correctness was evaluated by comparing V6 of the FPGA-accelerated CG solver against the original ARM software baseline and a 
-                floating-point golden reference implementation. At the numerical level, the FPGA solver produced bit-consistent behavior with the 
-                expected CG update equations and converged reliably across the benchmark suite. While small floating-point differences accumulated 
-                over iterative solves and partitioning steps, the overall placement flow remained behaviorally consistent with the software baseline.
-                Higher-level placement metrics further support this functional equivalence. The convergence rate and revert rate matched closely 
-                between ARM and FPGA modes across the benchmark set, indicating that both implementations followed similar optimization trajectories 
-                and termination behavior. In practice, this means that the FPGA accelerator preserved the logical behavior of the analytical placer.
+                Functional correctness was evaluated by comparing V6 of the
+                FPGA-accelerated CG solver against the original ARM software
+                baseline and a floating-point golden reference implementation.
+                At the numerical level, the FPGA solver produced bit-consistent
+                behavior with the expected CG update equations and converged
+                reliably across the benchmark suite. While small floating-point
+                differences accumulated over iterative solves and partitioning
+                steps, the overall placement flow remained behaviorally
+                consistent with the software baseline. Higher-level placement
+                metrics further support this functional equivalence. The
+                convergence rate and revert rate matched closely between ARM and
+                FPGA modes across the benchmark set, indicating that both
+                implementations followed similar optimization trajectories and
+                termination behavior. In practice, this means that the FPGA
+                accelerator preserved the logical behavior of the analytical
+                placer.
             </p>
             <figure>
                 <img src="images/converged-frac.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    Convergence rate across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                    Convergence rate across 8 custom benchmarks in ARM mode vs.
+                    FPGA mode (V6 design)
                 </figcaption>
             </figure>
             <figure>
                 <img src="images/reverted-frac.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    Reversion rate across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                    Reversion rate across 8 custom benchmarks in ARM mode vs.
+                    FPGA mode (V6 design)
                 </figcaption>
             </figure>
             <br>
             <p>
-                The preservation of logical behavior is further supported by analyzing the number of outer iterations per custom benchmark.
-                With the exception of just 2 out of 8 benchmarks, the number of outer iterations matches exactly between the ARM and FPGA modes.
+                The preservation of logical behavior is further supported by
+                analyzing the number of outer iterations per custom benchmark.
+                With the exception of just 2 out of 8 benchmarks, the number of
+                outer iterations matches exactly between the ARM and FPGA modes.
             </p>
             <figure>
                 <img src="images/iters-used.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    Outer iterations used across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                    Outer iterations used across 8 custom benchmarks in ARM mode
+                    vs. FPGA mode (V6 design)
                 </figcaption>
             </figure>
             <p>
-                HPWL data in the section below further supports these conclusions about functional correctness.
+                HPWL data in the section below further supports these
+                conclusions about functional correctness.
             </p>
 
             <h3>Placement Quality</h3>
             <p>
-                The final half-perimeter wirelength (HPWL) results show that the FPGA solver generally follows the ARM software baseline closely, 
-                indicating that the hardware CG solver preserves overall placement quality and connectivity behavior. Several benchmarks—including 
-                <code>mesh_grid_25</code>, <code>mixed_macro_10</code>, and <code>simple_logic_10</code>—produce identical HPWL values between the FPGA 
-                and C++ baseline, showing strong functional agreement on smaller or more regular netlists. Moderate differences appear in benchmarks such as 
-                <code>dense_pack_36</code>, <code>parallel_chains_50</code>, and <code>star_fanout_31</code>, where the FPGA implementation produces slightly 
-                higher wirelengths, likely due to small floating-point differences accumulating over multiple CG iterations. The largest difference occurs in 
-                <code>size_extremes_mix</code>, which contains extreme cell-size imbalance and clustered connectivity, making it especially sensitive to small 
-                numerical changes. Interestingly, <code>two_clusters_bridge</code> shows the opposite trend, with the FPGA solver achieving lower HPWL, 
-                demonstrating that small numerical differences can sometimes lead the solver toward a different but still valid solution.
+                The final half-perimeter wirelength (HPWL) results show that the
+                FPGA solver generally follows the ARM software baseline closely,
+                indicating that the hardware CG solver preserves overall
+                placement quality and connectivity behavior. Several benchmarks,
+                including
+                <code>mesh_grid_25</code>, <code>mixed_macro_10</code>, and
+                <code>simple_logic_10</code>, produce identical HPWL values
+                between the FPGA and C++ baseline, showing strong functional
+                agreement on smaller or more regular netlists. Moderate
+                differences appear in benchmarks such as
+                <code>dense_pack_36</code>, <code>parallel_chains_50</code>, and
+                <code>star_fanout_31</code>, where the FPGA implementation
+                produces slightly higher wirelengths, likely due to small
+                floating-point differences accumulating over multiple CG
+                iterations. The largest difference occurs in
+                <code>size_extremes_mix</code>, which contains extreme cell-size
+                imbalance and clustered connectivity, making it especially
+                sensitive to small numerical changes. Interestingly,
+                <code>two_clusters_bridge</code> shows the opposite trend, with
+                the FPGA solver achieving lower HPWL, demonstrating that small
+                numerical differences can sometimes lead the solver toward a
+                different but still valid solution.
             </p>
             <figure>
                 <img src="images/hpwl-final.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    Final HWPL across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                    Final HWPL across 8 custom benchmarks in ARM mode vs. FPGA
+                    mode (V6 design)
                 </figcaption>
             </figure>
             <br>
             <p>
-                The max bin density results show larger differences between the ARM and FPGA implementations in placement spreading and 
-                overlap behavior. Benchmarks like <code>mesh_grid_25</code>, <code>simple_logic_10</code>, and <code>star_fanout_31</code> 
-                produce nearly identical density values, indicating that both solvers reached very similar final placements. However, 
-                benchmarks such as <code>parallel_chains_50</code> and <code>size_extremes_mix</code> show much higher density on the FPGA 
-                implementation, meaning the cells were not spread out as effectively and more local congestion remained.
+                The max bin density results show larger differences between the
+                ARM and FPGA implementations in placement spreading and overlap
+                behavior. Benchmarks like <code>mesh_grid_25</code>,
+                <code>simple_logic_10</code>, and <code>star_fanout_31</code> 
+                produce nearly identical density values, indicating that both
+                solvers reached very similar final placements. However,
+                benchmarks such as <code>parallel_chains_50</code> and
+                <code>size_extremes_mix</code> show much higher density on the
+                FPGA implementation, meaning the cells were not spread out as
+                effectively and more local congestion remained.
             </p>
             <p>
-                This likely comes from small numerical differences in the FPGA CG solver accumulating over multiple partition-and-anchor 
-                iterations. Slight changes in cell positions can affect partition boundaries and anchor locations, leading later iterations to 
-                diverge further from the ARM baseline. These effects are strongest in benchmarks with dense connectivity or large cell-size 
-                differences. Despite these outliers, most benchmarks still remain within similar overall density ranges.
+                This likely comes from small numerical differences in the FPGA
+                CG solver accumulating over multiple partition-and-anchor
+                iterations. Slight changes in cell positions can affect
+                partition boundaries and anchor locations, leading later
+                iterations to diverge further from the ARM baseline. These
+                effects are strongest in benchmarks with dense connectivity or
+                large cell-size differences. Despite these outliers, most
+                benchmarks still remain within similar overall density ranges.
             </p>
             <figure>
                 <img src="images/max-bin-density.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    Max bin density across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                    Max bin density across 8 custom benchmarks in ARM mode vs.
+                    FPGA mode (V6 design)
                 </figcaption>
             </figure>
 
             <h3>Performance & Relative Speed-up</h3>
             <p>
-                The average CG inner-loop timing results show a clear and consistent performance advantage for the V6 FPGA implementation across every 
-                benchmark. In all cases, the FPGA-accelerated solver completes each CG solve significantly faster (factor of 5x-10x) compared to the 
-                ARM software baseline; the total CG solve time shows comparable gains, as the number of inner loop iterations roughly matches
-                between ARM and FPGA mode. Smaller benchmarks such as <code>simple_logic_10</code> and <code>mixed_macro_10</code> already 
-                demonstrate noticeable speed-ups, while larger or more computationally intensive designs like <code>parallel_chains_50</code>, 
-                <code>star_fanout_31</code>, and <code>two_clusters_bridge</code> show the largest absolute timing reductions. The performance gains 
-                become more pronounced as benchmark complexity increases because the FPGA implementation parallelizes the most expensive CG 
-                operations.
+                The average CG inner-loop timing results show a clear and
+                consistent performance advantage for the V6 FPGA implementation
+                across every benchmark. In all cases, the FPGA-accelerated
+                solver completes each CG solve significantly faster (a factor of
+                5x-10x) compared to the ARM software baseline. The total CG
+                solve time shows comparable gains, as the number of inner loop
+                iterations roughly matches between ARM and FPGA mode. Smaller
+                benchmarks such as <code>simple_logic_10</code> and
+                <code>mixed_macro_10</code> already demonstrate noticeable
+                speed-ups, while larger or more computationally intensive
+                designs like <code>parallel_chains_50</code>,
+                <code>star_fanout_31</code>, and
+                <code>two_clusters_bridge</code> show the largest absolute
+                timing reductions. The performance gains become more pronounced
+                as benchmark complexity increases because the FPGA
+                implementation parallelizes the most expensive CG operations.
             </p>
             <figure>
                 <img src="images/cg-avg-ms.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    CG average inner loop time across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                    CG average inner loop time across 8 custom benchmarks in ARM
+                    mode vs. FPGA mode (V6 design)
                 </figcaption>
             </figure>
             <figure>
                 <img src="images/cg-total-ms.png"
                     style="display: block; margin: 0 auto; width: 600px; height: auto;">
                 <figcaption style="text-align: center;">
-                    CG total time across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
+                    CG total time across 8 custom benchmarks in ARM mode vs.
+                    FPGA mode (V6 design)
                 </figcaption>
             </figure>
             <br>
             <p>
-                Although the FPGA implementation greatly accelerates the CG inner loop, the improvement in total placer runtime is much smaller 
-                because the CG solve represents only one portion of the complete placement flow. The overall placer also spends significant time 
-                performing tasks like partitioning, anchor generation, density evaluation, and so on, all of which still execute in software on 
-                the ARM processor. As a result, speeding up only the numerical CG kernel reduces total runtime in general. This behavior becomes 
-                especially noticeable on smaller benchmarks, where fixed software overhead can dominate the total runtime. Larger benchmarks 
-                benefit more from FPGA acceleration, because the CG computation occupies a greater fraction of execution time. This implies that
-                without limits on the maximum number of cells, larger speed-ups in total time would be observed.
+                Although the FPGA implementation greatly accelerates the CG
+                inner loop, the improvement in total placer runtime is much
+                smaller because the CG solve represents only one portion of the
+                complete placement flow. The overall placer also spends
+                significant time performing tasks like partitioning, anchor
+                generation, density evaluation, and so on, all of which still
+                execute in software on the ARM processor. As a result, speeding
+                up only the numerical CG kernel produces only a modest reduction
+                in total runtime. This behavior becomes especially noticeable on
+                smaller benchmarks, where fixed software overhead can dominate
+                the total runtime. Larger benchmarks benefit more from FPGA
+                acceleration, because the CG computation occupies a greater
+                fraction of execution time. This implies that without limits on
+                the maximum number of cells, we would observe larger speed-ups
+                in total time.
             </p>
             <figure>
                 <img src="images/placer-total-ms.png"
@@ -1893,13 +1892,13 @@
             <p>
                 The final V6 design uses 80% of the total ALMs, 64% of the DSP
                 blocks, and 19% of the on-board M10K blocks. This shows our
-                design is mostly logic-constrained which makes sense given our
-                large adder and division subciruits as well as our multi-stage
-                FSM's. The DSP usage is directly related to the number of lanes
+                design is mostly logic-constrained, which makes sense given our
+                large adder and division subcircuits, as well as our multi-stage
+                FSMs. The DSP usage is directly related to the number of lanes
                 we parameterize at the toplevel, and while we could have added
                 more lanes, our attempts to do so resulted in routing failure.
                 With the current setup, we use about 53.4% of available routing
-                resources with a peak of 89.9% in the most constrained areas.
+                resources, with a peak of 89.9% in the most constrained areas.
                 For memory, our low usage makes sense given that, for a 50-cell
                 design where each x and y coordinate requires 32 bits to store
                 its Q13.14 fixed-point value, we require 16384 bytes per Q
@@ -1908,10 +1907,10 @@
                 SRAM, as well as 256 bytes for each position vector SRAM and
                 C-vector SRAM, so six altogether. The total amount of M10K
                 memory needed is thus \(16384*4 + 256*6 = 67072\) bytes. Given
-                we have used 76 M10K blocks, each of which holds 10,240 bits or
-                1280 bytes, this means 97,280 bytes total have been used on the
-                FPGA, of which the 67,072 bytes required for the SRAMs fits
-                within. For much larger designs, we would expect the
+                that we have used 76 M10K blocks, each of which holds 10,240
+                bits or 1280 bytes, 97,280 bytes total have been used on the
+                FPGA, which comfortably fits the 67,072 bytes required for the
+                SRAMs. For much larger designs, we would expect the
                 logic-to-memory ratio to be more balanced.
             </p>
             <figure>
@@ -1956,44 +1955,52 @@
 
             <h3>Appendix A: Permissions</h3>
             <p>The group approves this report for inclusion on the course website.</p>
-            <p>The group approves the video for inclusion on the course YouTube channel.</p>
+            <p>The group approves the video for inclusion on the course YouTube
+            channel.</p>
 
             <h3>Appendix B: Code Repository</h3>
-            <p>Our repository is located <a href="https://github.com/pis7/ece5760-final-project">here</a>.</p>
+            <p>Our repository is located <a
+            href="https://github.com/pis7/ece5760-final-project">here</a>.</p>
 
             <h3>Appendix C: References</h3>
-            <p><a href="https://cc.ee.ntu.edu.tw/~ywchang/Courses/PD_Source/TSLDM_placement.pdf">Essential Issues in Analytical Placement Algorithm</a></p>
-            <p><a href="https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=4724923">An Implementation of the Conjugate Gradient Algorithm on FPGAs</a></p>
+            <p><a
+            href="https://cc.ee.ntu.edu.tw/~ywchang/Courses/PD_Source/TSLDM_placement.pdf">Essential
+            Issues in Analytical Placement Algorithm</a></p>
+            <p><a
+            href="https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=4724923">An
+            Implementation of the Conjugate Gradient Algorithm on FPGAs</a></p>
 
             <h3>Appendix D: Tasks for Each Team Member</h3>
             <p>Parker worked primarily on the design-space exploration of the
             hardware placer implementations. He started out by making the Python
-            FL and V1 Verilog by hand and then exploring optimizations to the
-            base hardware in later versions.
+            FL and V1 Verilog by hand and then explored optimizations to the
+            base hardware in later versions.</p>
             <p>Jeremy did a significant portion of the background research for
-            getting started on this project. He also wrote inital code for dealing with the LEF/DEF file formats and contributed to the C++ placer.
+            getting started on this project. He also wrote initial code for
+            dealing with the LEF/DEF file formats and contributed to the C++
+            placer.</p>
             <p>Colin focused mostly on writing Python utilities, architecting
-            the initial hardware architecture, and gathering results across a variety
-            of benchmarks to gauge placer results.
+            the initial hardware architecture, and gathering results across a
+            variety of benchmarks to gauge placer results.
             </p>
 
             <h3>AI Attribution</h3>
             <p>Claude Code (Opus 4.7) was used extensively throughout this
             project. Our reasoning for this is simple: our group wanted to
             perform rapid design-space exploration and see real, working results
-            without worrying about the intricacies of M10K memory handling, or
+            without worrying about the intricacies of M10K memory handling or
             output signal selection in FSMs. We used Claude to help us formulate
             our original Python placement algorithm from the source documents,
             as well as to create a robust testing framework for running our
             placers. We created our own functional-level Python and V1 hardware,
             and then used Claude to convert our V1 hardware into synthesizable
-            hardware by generating FSMs and to serialize the previously
+            hardware by generating FSMs and serializing the previously
             combinational operations. The later versions all built off of V2 by
             introducing optimizations implemented by Claude. We finally used
             Claude to help us fill in technical details in this report,
             specifically in the hardware section, as well as to perform grammar
-            and clarity edits. Jeremy doesn't like LLM tools and did not use them
-            for any part of his research, implementation or writing.</p>
+            and clarity edits. Jeremy doesn't like LLM tools and did not use
+            them for any part of his research, implementation, or writing.</p>
         </section>
 
         <footer>
