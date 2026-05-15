@@ -239,6 +239,56 @@
 
 
             <h4>Sparse Matrix Format</h4>
+            <p>
+                A naive matrix representation of where \(Q_{i, j}\) is located at offset \((i \times \text{number of macros} + j)\) is infeasible.
+                The memory required to store \(Q\) would grow quadratically in the number of macros and quickly become too large.
+                Even if memory were not an issue, we make the observation \(Q\) is sparse as macros tend to be wired to only a few other macros.
+                Therefore, improving the matrix vector multiplication used by the conjugate gradient method from \(\mathcal{O}(\text{entries in }Q)\) to \(\mathcal{O}(\text{non-zero entries in }Q)\) is significant.
+                To do this, we represent \(Q\) in compressed sparse row (CSR) format.
+            </p>
+            <p>
+                CSR stores a matrix in three lists, a list of values, \(v_i\), a list of column indexes, \(c_i\), and a list of row indexes, \(r_i\).
+                \(c_i = j\) means \(v_i\) is in the \(j\)-th column of \(Q\) and \(r_i = k\) means the first value in row \(i\) is \(v_k\).
+                For reasons elaborated on later, it is conveinent to make the last element of \(r\) the number of non-zero elements in the matrix, so we do so.
+                As an example, consider representing the following matrix in CSR:
+                $$
+                    M = \begin{bmatrix}
+                        1 & 0 & 2 \\
+                        8 & 0 & 0 \\
+                        0 & 0 & 2 \\
+                    \end{bmatrix}
+                $$
+                \(M\) would be become
+                $$
+                    \begin{align}
+                        v &= 1, 2, 8, 2 \\
+                        c &= 0, 2, 0, 2 \\
+                        r &= 0, 2, 3, 4
+                    \end{align}
+                $$
+            </p>
+            <p>
+                CSR makes matrix-vector multiplications efficient as the operation can be implemented as a left to right traversal of \(v\).
+                The implementation is simple and elegant, presented with three lines of C-like pseudocode below:
+                <pre><code>
+                    // Let x be the vector we want to multiply by and b be the
+                    // result vector, initially zero.
+                    //
+                    // Let v, c, r be the matrix we mulitply by, defined above
+                    // Let n be the dimensions of x and b
+                    for (int row = 0; row < n; row++) {
+                        // The last value of r is the number of non-zero
+                        // elements so col_idx never goes out of bounds and r
+                        // is of length n + 1 so row + 1 never goes out of
+                        // bounds.
+                        for (int col_idx = r[row]; i < r[row + 1]; col_idx++) {
+                            b[row] += v[col_idx] * x[c[col_idx]];
+                        }
+                    }
+                </code></pre>
+                Looking at the above code, we realize <code>col_idx</code> is monotonically increases (even between loop iterations) because <code>r</code> monitonically increases.
+                Then, as <code>col_idx</code> is upper bounded by <code>row[n + 1]</code> the inner MAC runs only <code>row[n + 1] = number of non-zero matrix elements</code> times. Efficient!!!
+            </p>
 
             <h3>Logical Structure</h3>
             <p>[TODO: end-to-end flow -- LEF/DEF parse (explain what LEF and DEF are - see "What each file
