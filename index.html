@@ -148,9 +148,30 @@
             </p>
 
             <h3>Background Math</h3>
-            <p>[TODO: intro to the analytical placement formulation and explain
-            CG solve and partitioning/anchoring. Use placer-overview.md file in
-            background-knowledge/]</p>
+            <h4>Quadratic Wirelength Cost Model</h4>
+            <p>
+                Global placement can be formulated as an optimization problem minimizing an approximation for the wirelength used to connect macros while attempting to satisfy a density constraint.
+                We begin by considering the problem of minimizing wirelength and will return to satisfying the density constraint later.
+            </p>
+            <p>
+                We will use analytical methods to minimize wirelength, so we need a differentiable wirelength model. For simplicity, we choose a quadratic model for wirelength. The \(x\) and \(y\) coordinates are independant and summed so we present just the cost due to the \(x\) component. Given the \(x\) positions of all macros in a net, \(E\), we assign
+                $$L_E = \sum_{x_i, x_j \in E}\frac{2}{\left|E\right|} (x_i - x_j)^2$$
+                Without the \(\frac{2}{\left|E\right|}\) this cost would model routing as a clique, overweighting large nets. Wires tends to look more like a spanning tree, so we scale by the ratio of connections in a spanning tree to the number in a clique, \(\frac{\left|E\right|}{\binom{\left|E\right|}{2}} = \frac{2}{\left|E\right|}\). Let \(N\) be the set of nets in the design. We sum this per net cost for every net \(E \in N\) to get a total cost:
+                $$L = \sum_{E\in N}L_E$$
+            </p>
+            <p>
+                In order to optimize this, we want to frame this as a quadratic programming problem, finding \(Q\) and \(c\) such that \(L = \frac{1}{2}\mathbf{x}^\intercal Q\mathbf{x} + c^\intercal\mathbf{x}\) where \(\mathbf{x}\) is a vector of movable macro positions. We will rewrite \(L_E\) so that the values for \(Q\) and \(c\) become obvious.
+
+                Given a macro at position \(x_i\) there are two cases. Either it is connected to a macro at position \(x_j\), or it is connected to a pin at a constant position \(p_i\) (e.g. an io pin). Write the positions of constant position pins \(P(E)\) and the positions of macros be \(M(E)\). For convenience, let \(m = \left|M(E)\right|\).
+                $$\begin{aligned}L_E &= \frac{2}{\left|E\right|}\sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)}(x_i - x_j)^2 + \sum_{p_j \in P(E)} (x_i - p_j)^2\right) \\
+                &= \frac{2}{\left| E \right|} \sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)} x_i^2 + x_j^2 - 2x_i x_j + \sum_{p_j \in P(E)}x_i^2 + p_j^2 - 2x_ip_j \right) \\
+                &= \frac{2}{\left|E\right|}\sum_{x_i \in M(E)} \left(\sum_{x_j \in M(E)}2x_i^2 + x_j^2 -2x_ix_j + \sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
+                &= \frac{2}{\left|E\right|}\left(\sum_{x_i, x_j \in M(E)} 2x_i^2 + \sum_{x_i, x_j \in M(E)}x_j^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j + \sum_{x_i \in M(E)}\sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
+                &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} 3mx_i^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j + \sum_{x_i \in M(E)}\sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
+                &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} (3m-2)x_i^2 - \sum_{x_i, x_j \in M(E), i \neq j}2x_ix_j - \sum_{x_i \in M(E)}2x_i\sum_{p_j \in P(E)}p_j + m\sum_{p_j \in P(E)} p_j^2\right)
+                \end{aligned}$$
+                From the above summation, we can read off the portion of \(Q_{i, j}\) and \(c_i\) \(E\) contibutes. The first two terms describe the values in \(Q\) and the third term describes the values in \(c\). We ignore the \(m \sum_{p_j \in P(E)}p_j^2\) as constants do not change the minimum \(\mathbf{x}\) when optimizing \(L\). We sum these contibutions over each \(E \in N\) to get \(Q\) and \(c\).
+               </p>
 
             <!-- Example MathJax block (delete if unused) -->
             <!--
@@ -1639,8 +1660,7 @@
             FL and V1 Verilog by hand and then exploring optimizations to the
             base hardware in later versions.
             <p>Jeremy did a significant portion of the background research for
-            getting started on this project. He also wrote much of the code for
-            the baseline C++ placer tool.
+            getting started on this project. He also wrote inital code for dealing with the LEF/DEF file formats and contributed to the C++ placer.
             <p>Colin focused mostly on writing Python utilities, architecting
             the initial hardware architecture, and gathering results across a variety
             of benchmarks to gauge placer results.
@@ -1661,7 +1681,8 @@
             introducing optimizations implemented by Claude. We finally used
             Claude to help us fill in technical details in this report,
             specifically in the hardware section, as well as to perform grammar
-            and clarity edits.</p>
+            and clarity edits. Jeremy doesn't like LLM tools and did not use them
+            for any part of his research, implementation or writing.</p>
         </section>
 
         <footer>
