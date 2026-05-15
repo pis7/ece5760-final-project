@@ -1466,7 +1466,13 @@
 
             <h3>Functional Correctness</h3>
             <p>
-                [TODO: prose -- bit-exactness vs golden, scipy comparison, etc.]
+                Functional correctness was evaluated by comparing V6 of the FPGA-accelerated CG solver against the original ARM software baseline and a 
+                floating-point golden reference implementation. At the numerical level, the FPGA solver produced bit-consistent behavior with the 
+                expected CG update equations and converged reliably across the benchmark suite. While small floating-point differences accumulated 
+                over iterative solves and partitioning steps, the overall placement flow remained behaviorally consistent with the software baseline.
+                Higher-level placement metrics further support this functional equivalence. The convergence rate and revert rate matched closely 
+                between ARM and FPGA modes across the benchmark set, indicating that both implementations followed similar optimization trajectories 
+                and termination behavior. In practice, this means that the FPGA accelerator preserved the logical behavior of the analytical placer.
             </p>
             <figure>
                 <img src="images/converged-frac.png"
@@ -1484,7 +1490,8 @@
             </figure>
             <br>
             <p>
-                [TODO: (cont.) prose -- bit-exactness vs golden, scipy comparison, etc.]
+                The preservation of logical behavior is further supported by analyzing the number of outer iterations per custom benchmark.
+                With the exception of just 2 out of 8 benchmarks, the number of outer iterations matches exactly between the ARM and FPGA modes.
             </p>
             <figure>
                 <img src="images/iters-used.png"
@@ -1493,6 +1500,9 @@
                     Outer iterations used across 8 custom benchmarks in ARM mode vs. FPGA mode (V6 design)
                 </figcaption>
             </figure>
+            <p>
+                HPWL data in the section below further supports these conclusions about functional correctness.
+            </p>
 
             <h3>Placement Quality</h3>
             <p>
