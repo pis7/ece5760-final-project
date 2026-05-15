@@ -150,8 +150,8 @@
             <h3>Background Math</h3>
             <h4>Quadratic Wirelength Cost Model</h4>
             <p>
-                Global placement can be formulated as an optimization problem minimizing an approximation for the wirelength used to connect macros while attempting to satisfy a density constraint.
-                We begin by considering the problem of minimizing wirelength and will return to satisfying the density constraint later.
+                Global placement can be formulated as an optimization problem minimizing an approximation for the wirelength used to connect macros without macros overlapping.
+                We begin by considering the problem of minimizing wirelength and will return overlapping.
             </p>
             <p>
                 We will use analytical methods to minimize wirelength, so we need a differentiable wirelength model. For simplicity, we choose a quadratic model for wirelength. The \(x\) and \(y\) coordinates are independant and summed so we present just the cost due to the \(x\) component. Given the \(x\) positions of all macros in a net, \(E\), we assign
@@ -170,7 +170,7 @@
                 &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} 3mx_i^2 - \sum_{x_i, x_j \in M(E)}2x_ix_j + \sum_{x_i \in M(E)}\sum_{p_j \in P(E)} p_j^2 - 2x_ip_j\right) \\
                 &= \frac{2}{\left|E\right|}\left(\sum_{x_i \in M(E)} (3m-2)x_i^2 - \sum_{x_i, x_j \in M(E), i \neq j}2x_ix_j - \sum_{x_i \in M(E)}2x_i\sum_{p_j \in P(E)}p_j + m\sum_{p_j \in P(E)} p_j^2\right)
                 \end{aligned}$$
-                From the above summation, we can read off the portion of \(Q_{i, j}\) and \(c_i\) \(E\) contibutes. The first two terms describe the values in \(Q\) and the third term describes the values in \(c\). We ignore the \(m \sum_{p_j \in P(E)}p_j^2\) as constants do not change the minimum \(\mathbf{x}\) when optimizing \(L\). We sum these contibutions over each \(E \in N\) to get \(Q\) and \(c\).
+                From the above summation, we can read off the portion of \(Q_{i, j}\) and \(c_i\) that \(E\) contibutes. The first two terms describe the values in \(Q\) and the third term describes the values in \(c\). We ignore the \(m \sum_{p_j \in P(E)}p_j^2\) as constants do not change the minimum \(\mathbf{x}\) when optimizing \(L\). We sum these contibutions over each \(E \in N\) to get \(Q\) and \(c\).
                </p>
 
             <!-- Example MathJax block (delete if unused) -->
@@ -218,11 +218,27 @@
             </pre>
             -->
 
-            <h4>[TODO: subtopic, e.g. Partitioning and Anchoring]</h4>
-            <p>[TODO: prose.]</p>
+            <h4>Overlaps</h4>
+                <figure>
+                    <img src="images/partition.webp"
+                        style="display: block; margin: 0 auto; width: 800px; height: auto;">
+                    <figcaption style="text-align: center;">
+                        Placement after two partition steps. Four "fake" pins have been added.
+                    </figcaption>
+                </figure>
+            <p>
+                Using the above cost function and the conjugate gradient method, we can minimize wirelength.
+                However, this tends to cause macros to clump together and overlap. Therefore, we add a partition step to pull macros apart.
+                First, the above algorithm is run to find an inital placement with overlaps.
+                Then a fake, stationary pin is added one forth of the way across the way across the placement area.
+                The left half of the macros (measured by area) are connected to this pin. This process is repeated with the right side macros.
+                Intuitively, this assigns macros a "side" of the bisected placement area.
+                The placement processes is then run on this new design with the two fake nets.
+                If there is still large amounts of overlap (in particular, density below a certain threshold), this process recurses until overlap is sufficiently small.
+            </p>
 
-            <h4>[TODO: subtopic, e.g. Q CSR Format and why we need it]</h4>
-            <p>[TODO: prose.]</p>
+
+            <h4>Sparse Matrix Format</h4>
 
             <h3>Logical Structure</h3>
             <p>[TODO: end-to-end flow -- LEF/DEF parse (explain what LEF and DEF are - see "What each file
