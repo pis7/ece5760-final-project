@@ -109,23 +109,30 @@
             -->
 
             <p>
-                ASICs are composed of many <b>macros</b>, atomic logic units wired together.
-                To make an ASIC, a design is specified in an HDL which is then lowered to a set of macros and <b>nets</b>, connections between macros.
-                Macros are then placed on a grid and routed together.
-                Our design accelerates the <b>placement</b> step on the DE1-SoC.
-                We use a quadratic cost function for judging placements which we minimize.
-                Solving this quadratic programming problem exposes ample opportunity for parallism which we take advantage of using the FPGA.
-                This allows our design to achieve 10-15x speed-ups when minimizing our cost function, improving end to end placement by roughly 10% without sacrificing much in the way of result quality.
+                ASICs are composed of many <b>macros</b>, atomic logic units
+                wired together. To make an ASIC, a design is specified in an HDL
+                which is then lowered to a set of macros and <b>nets</b>,
+                connections between macros. Macros are then placed on a grid and
+                routed together. Our design accelerates the <b>placement</b>
+                step on the DE1-SoC. We use a quadratic cost function for
+                judging placements which we minimize. Solving this quadratic
+                programming problem exposes ample opportunity for parallism
+                which we take advantage of using the FPGA. This allows our
+                design to achieve 10-15x speed-ups when minimizing our cost
+                function, improving end to end placement by roughly 10% without
+                sacrificing much in the way of result quality.
             </p>
             
-            <iframe width="560" height="315"
-                src="https://www.youtube.com/embed/uZk1GfxBrS0?si=I-i_Qow8zvtvmiRo"
-                title="YouTube video player" frameborder="0" allow="accelerometer;
-                    autoplay; clipboard-write; encrypted-media; gyroscope;
-                    picture-in-picture; web-share"
-                referrerpolicy="strict-origin-when-cross-origin"
-                allowfullscreen>
-            </iframe>
+            <div style="text-align: center;">
+                <iframe width="560" height="315"
+                    src="https://www.youtube.com/embed/uZk1GfxBrS0?si=I-i_Qow8zvtvmiRo"
+                    title="YouTube video player" frameborder="0" allow="accelerometer;
+                        autoplay; clipboard-write; encrypted-media; gyroscope;
+                        picture-in-picture; web-share"
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    allowfullscreen>
+                </iframe>
+            </div>
            
         </section>
 
@@ -137,14 +144,29 @@
 
             <h3>Rationale and Sources</h3>
             <p>
-                The idea of accelerating placement is not new. The larger technique we consider is <b>analytical placement</b>, wherein a specific cost function is minimized using analytical methods.
-                These often involve gradient decent and are ripe with parallelism.
-                The current state of the art is <a href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a> which minimizes a cost function based around weighted average wirelength, taking advantage of GPUs to speed up the minimization.
-                Jeremy came across this paper, found this cool, and Jeremy and Parker who were both working with ASICs wanted to implement something similar.
-                More specifically, we want to accelerate placement with a design taking advantage of parallelism on the FPGA in similar places to where DREAMPlace takes advantage of the GPU.
+                The idea of accelerating placement is not new. The larger
+                technique we consider is <b>analytical placement</b>, wherein a
+                specific cost function is minimized using analytical methods.
+                These often involve gradient decent and are ripe with
+                parallelism. The current state of the art is <a
+                href="https://github.com/limbo018/DREAMPlace">DREAMPlace</a>
+                which minimizes a cost function based around weighted average
+                wirelength, taking advantage of GPUs to speed up the
+                minimization. Jeremy came across this paper, found this cool,
+                and Jeremy and Parker who were both working with ASICs wanted to
+                implement something similar. More specifically, we want to
+                accelerate placement with a design taking advantage of
+                parallelism on the FPGA in similar places to where DREAMPlace
+                takes advantage of the GPU.
 
-                In order to lower project scope, we simply the task done by DREAMPlace by using a simpler, quadratic cost model and only implementing <b>global placement</b>: an initial, off-grid placement which, where it to be used, must be <b>legalized</b>.
-                The cost model and high level global placement algorithm we based on an old (2007) survey by Yao-Wen Chang, Zhe-Wei Jiang, and Tung-Chieh Chen: <em>Essential Issues in Analytical Placement Algorithms</em>.
+                In order to lower project scope, we simply the task done by
+                DREAMPlace by using a simpler, quadratic cost model and only
+                implementing <b>global placement</b>: an initial, off-grid
+                placement which, where it to be used, must be <b>legalized</b>.
+                The cost model and high level global placement algorithm we
+                based on an old (2007) survey by Yao-Wen Chang, Zhe-Wei Jiang,
+                and Tung-Chieh Chen: <em>Essential Issues in Analytical
+                Placement Algorithms</em>.
             </p>
 
             <h3>Background Math</h3>
@@ -227,49 +249,56 @@
                     </figcaption>
                 </figure>
             <p>
-                Using the above cost function and the conjugate gradient method, we can minimize wirelength.
-                However, this tends to cause macros to clump together and overlap. Therefore, we add a partition step to pull macros apart.
-                First, the above algorithm is run to find an inital placement with overlaps.
-                Then a fake, stationary pin is added one forth of the way across the way across the placement area.
-                The left half of the macros (measured by area) are connected to this pin. This process is repeated with the right side macros.
-                Intuitively, this assigns macros a "side" of the bisected placement area.
-                The placement processes is then run on this new design with the two fake nets.
-                If there is still large amounts of overlap (in particular, density below a certain threshold), this process recurses until overlap is sufficiently small.
+                Using the above cost function and the conjugate gradient method,
+                we can minimize wirelength. However, this tends to cause macros
+                to clump together and overlap. Therefore, we add a partition
+                step to pull macros apart. First, the above algorithm is run to
+                find an inital placement with overlaps. Then a fake, stationary
+                pin is added one forth of the way across the way across the
+                placement area. The left half of the macros (measured by area)
+                are connected to this pin. This process is repeated with the
+                right side macros. Intuitively, this assigns macros a "side" of
+                the bisected placement area. The placement processes is then run
+                on this new design with the two fake nets. If there is still
+                large amounts of overlap (in particular, density below a certain
+                threshold), this process recurses until overlap is sufficiently
+                small.
             </p>
 
 
             <h4>Sparse Matrix Format</h4>
             <p>
-                A naive matrix representation of where \(Q_{i, j}\) is located at offset \((i \times \text{number of macros} + j)\) is infeasible.
-                The memory required to store \(Q\) would grow quadratically in the number of macros and quickly become too large.
-                Even if memory were not an issue, we make the observation \(Q\) is sparse as macros tend to be wired to only a few other macros.
-                Therefore, improving the matrix vector multiplication used by the conjugate gradient method from \(\mathcal{O}(\text{entries in }Q)\) to \(\mathcal{O}(\text{non-zero entries in }Q)\) is significant.
-                To do this, we represent \(Q\) in compressed sparse row (CSR) format.
+                A naive matrix representation of where \(Q_{i, j}\) is located
+                at offset \((i \times \text{number of macros} + j)\) is
+                infeasible. The memory required to store \(Q\) would grow
+                quadratically in the number of macros and quickly become too
+                large. Even if memory were not an issue, we make the observation
+                \(Q\) is sparse as macros tend to be wired to only a few other
+                macros. Therefore, improving the matrix vector multiplication
+                used by the conjugate gradient method from
+                \(\mathcal{O}(\text{entries in }Q)\) to
+                \(\mathcal{O}(\text{non-zero entries in }Q)\) is significant. To
+                do this, we represent \(Q\) in compressed sparse row (CSR)
+                format.
             </p>
             <p>
-                CSR stores a matrix in three lists, a list of values, \(v_i\), a list of column indexes, \(c_i\), and a list of row indexes, \(r_i\).
-                \(c_i = j\) means \(v_i\) is in the \(j\)-th column of \(Q\) and \(r_i = k\) means the first value in row \(i\) is \(v_k\).
-                For reasons elaborated on later, it is conveinent to make the last element of \(r\) the number of non-zero elements in the matrix, so we do so.
-                As an example, consider representing the following matrix in CSR:
-                $$
-                    M = \begin{bmatrix}
-                        1 & 0 & 2 \\
-                        8 & 0 & 0 \\
-                        0 & 0 & 2 \\
-                    \end{bmatrix}
-                $$
-                \(M\) would be become
-                $$
-                    \begin{align}
-                        v &= 1, 2, 8, 2 \\
-                        c &= 0, 2, 0, 2 \\
-                        r &= 0, 2, 3, 4
-                    \end{align}
-                $$
+                CSR stores a matrix in three lists, a list of values, \(v_i\), a
+                list of column indexes, \(c_i\), and a list of row indexes,
+                \(r_i\). \(c_i = j\) means \(v_i\) is in the \(j\)-th column of
+                \(Q\) and \(r_i = k\) means the first value in row \(i\) is
+                \(v_k\). For reasons elaborated on later, it is conveinent to
+                make the last element of \(r\) the number of non-zero elements
+                in the matrix, so we do so. As an example, consider representing
+                the following matrix in CSR: $$ M = \begin{bmatrix} 1 & 0 & 2 \\
+                8 & 0 & 0 \\ 0 & 0 & 2 \\ \end{bmatrix} $$ \(M\) would be become
+                $$ \begin{align} v &= 1, 2, 8, 2 \\ c &= 0, 2, 0, 2 \\ r &= 0,
+                2, 3, 4 \end{align} $$
             </p>
             <p>
-                CSR makes matrix-vector multiplications efficient as the operation can be implemented as a left to right traversal of \(v\).
-                The implementation is simple and elegant, presented with three lines of C-like pseudocode below:
+                CSR makes matrix-vector multiplications efficient as the
+                operation can be implemented as a left to right traversal of
+                \(v\). The implementation is simple and elegant, presented with
+                three lines of C-like pseudocode below:
                 <pre><code>
                     // Let x be the vector we want to multiply by and b be the
                     // result vector, initially zero.
@@ -286,8 +315,12 @@
                         }
                     }
                 </code></pre>
-                Looking at the above code, we realize <code>col_idx</code> is monotonically increases (even between loop iterations) because <code>r</code> monitonically increases.
-                Then, as <code>col_idx</code> is upper bounded by <code>row[n + 1]</code> the inner MAC runs only <code>row[n + 1] = number of non-zero matrix elements</code> times. Efficient!!!
+                Looking at the above code, we realize <code>col_idx</code> is
+                monotonically increases (even between loop iterations) because
+                <code>r</code> monitonically increases. Then, as
+                <code>col_idx</code> is upper bounded by <code>row[n + 1]</code>
+                the inner MAC runs only <code>row[n + 1] = number of non-zero
+                matrix elements</code> times. Efficient!!!
             </p>
 
             <h3>Summery of Placement</h3>
@@ -302,13 +335,24 @@
                         <li>Add fake pins to reduce overlap</li>
                     </ol></li>
                 </ol>
-                The only piece of the above we put on the FPGA is the minimization using the conjugate gradient method.
-                This method requires multiple matrix vector and vector vector multiplications which can be parallelized.
-                Conjugate gradient descent on the FPGA is a big improvement for performance, but sacrifices some precision during computations as lower precision fixed point is used instead of floating point.
-                In theory this can cause issues with the conjugate gradient method converging, but in practice we did not experience this, though we found individual runs on some benchmarks may have placements with higher costs when run on the FPGA.
-                We suspect the higher costs are due to the inherant chaos of slightly different arithmetic.
-                Much of the rest of this processes, such as parsing the LEF/DEF files or constructing \(Q\) and \(c\) is complicated, difficult to parallelize, and does not infeasibly scale as designs grow.
-                Becaues of these, we choose to implement these on the ARM processor with little tradeoff. The FPGA would be a poor fit for these tasks.
+                The only piece of the above we put on the FPGA is the
+                minimization using the conjugate gradient method. This method
+                requires multiple matrix vector and vector vector
+                multiplications which can be parallelized. Conjugate gradient
+                descent on the FPGA is a big improvement for performance, but
+                sacrifices some precision during computations as lower precision
+                fixed point is used instead of floating point. In theory this
+                can cause issues with the conjugate gradient method converging,
+                but in practice we did not experience this, though we found
+                individual runs on some benchmarks may have placements with
+                higher costs when run on the FPGA. We suspect the higher costs
+                are due to the inherant chaos of slightly different arithmetic.
+                Much of the rest of this processes, such as parsing the LEF/DEF
+                files or constructing \(Q\) and \(c\) is complicated, difficult
+                to parallelize, and does not infeasibly scale as designs grow.
+                Becaues of these, we choose to implement these on the ARM
+                processor with little tradeoff. The FPGA would be a poor fit for
+                these tasks.
             </p>
 
             <!--
@@ -334,12 +378,14 @@
         <section id="software-placers">
             <h2>Software Placers & Utilities</h2>
             <p>
-                Before delving into any logic implemented on the FPGA, it is worth spending some time
-                giving insight into relevant software. This comes in two forms: 
+                Before delving into any logic implemented on the FPGA, it is
+                worth spending some time giving insight into relevant software.
+                This comes in two forms: 
             </p>
             <ol>
                 <li>Utilities that create a more convenient interface for processing inputs or observing outputs</li>
-                <li>Placer scripts that act as a software baseline to which we can compare hardware speed-up later</li>
+                <li>Placer scripts that act as a software baseline to which we
+                can compare hardware speed-up later</li>
             </ol>
             <p>
                 Both of these are explained in detail in the sections below.
@@ -347,8 +393,9 @@
 
             <h3>LEF/DEF Parser</h3>
             <p>
-                To process input data, we have a dedicated LEF/DEF parser script, <code>lefdef-parser.py</code>. It is 
-                class-based, and has one public method for each of the 4 major steps it performs:
+                To process input data, we have a dedicated LEF/DEF parser
+                script, <code>lefdef-parser.py</code>. It is class-based, and
+                has one public method for each of the 4 major steps it performs:
             </p>
             <ol>
                 <li>
@@ -388,11 +435,14 @@
                 <li>
                     <b>parse_lef</b>
                     <p>
-                        Here, the script scans the LEF file and extracts relevant physical library
-                        information. It needs the name, width, and height of each macro, as well as
-                        the database unit scaling. Any other information—such as routing information
-                        on layers and vias—is not needed, and is therefore ignored by the parser. An
-                        example displaying information retrieved by the parser is shown below.
+                        Here, the script scans the LEF file and extracts
+                        relevant physical library information. It needs the
+                        name, width, and height of each macro, as well as the
+                        database unit scaling. Any other information—such as
+                        routing information on layers and vias—is not needed,
+                        and is therefore ignored by the parser. An example
+                        displaying information retrieved by the parser is shown
+                        below.
                     </p>
                     <pre><code>
                         VERSION 5.4 ;
@@ -426,11 +476,15 @@
                 <li>
                     <b>parse_def</b>
                     <p>
-                        Like with the previous method, the script will parse the DEF file and extract only the necessary
-                        information. It picks out information on the design name, units, die area, components (instance name,
-                        macro, and position), nets (net name and pin connections), and I/O pins (pin name, associated net, and 
-                        position). Any property definitions are unneeded and skipped. An example displaying information retrieved 
-                        by the parser is shown below.
+                        Like with the previous method, the script will parse the
+                        DEF file and extract only the necessary information. It
+                        picks out information on the design name, units, die
+                        area, components (instance name, macro, and position),
+                        nets (net name and pin connections), and I/O pins (pin
+                        name, associated net, and position). Any property
+                        definitions are unneeded and skipped. An example
+                        displaying information retrieved by the parser is shown
+                        below.
                     </p>
                     <code><pre>
                         VERSION 5.4 ;
@@ -467,11 +521,16 @@
                 <li>
                     <b>write_json</b>
                     <p>
-                        Once the LEF/DEF files have been parsed, they can be converted into a single JSON file. A number of dataclasses are
-                        defined in <code>json_utils.py</code> to make this easier: <code>Macro</code>, <code>Component</code>, <code>IOPin</code>, 
-                        <code>Net</code>, and <code>Netlist</code>. To create the JSON file, we initialize a <code>Netlist</code> object using 
-                        the data extracted from the LEF/DEF files previously and serialize it into JSON format. An example showing this 
-                        intermediate JSON format is shown below.
+                        Once the LEF/DEF files have been parsed, they can be
+                        converted into a single JSON file. A number of
+                        dataclasses are defined in <code>json_utils.py</code> to
+                        make this easier: <code>Macro</code>,
+                        <code>Component</code>, <code>IOPin</code>, 
+                        <code>Net</code>, and <code>Netlist</code>. To create
+                        the JSON file, we initialize a <code>Netlist</code>
+                        object using the data extracted from the LEF/DEF files
+                        previously and serialize it into JSON format. An example
+                        showing this intermediate JSON format is shown below.
                     </p>
                     <pre><code class="language-json"> 
                         {
@@ -503,19 +562,26 @@
                         }
                     </code></pre>
                     <p>
-                        The output file name is always chosen to be the <code>DESIGN</code> keyword listed in the DEF file, followed by a 
-                        .json extension.
+                        The output file name is always chosen to be the
+                        <code>DESIGN</code> keyword listed in the DEF file,
+                        followed by a .json extension.
                     </p>
                 </li>
             </ol>
 
             <h3>Design Visualizer</h3>
             <p>
-                A script called <code>visualizer.py</code> allows any JSON file containing physical layout information to be rendered and
-                visualized more clearly. When run normally with a single JSON file path as an argument, the code will boot up a Tkinter window. 
-                Components are rendered as blue rectangles of the specified size, and I/O pins are displayed as yellow circles
-                along the die outline. Hovering over any of the displayed components will provide information about that component's name and 
-                macro for identification purposes. To make the visualizer tool more interactive, the user has some control over the pop-up window:
+                A script called <code>visualizer.py</code> allows any JSON file
+                containing physical layout information to be rendered and
+                visualized more clearly. When run normally with a single JSON
+                file path as an argument, the code will boot up a Tkinter
+                window. Components are rendered as blue rectangles of the
+                specified size, and I/O pins are displayed as yellow circles
+                along the die outline. Hovering over any of the displayed
+                components will provide information about that component's name
+                and macro for identification purposes. To make the visualizer
+                tool more interactive, the user has some control over the pop-up
+                window:
             </p>
             <ul>
                 <li>Scroll to zoom in or out</li>
@@ -540,59 +606,94 @@
                 </figure>
             </div>
             <p>
-                When run with a <code>--png &ltout.png&gt &ltin.json&gt</code> flag, the script will instead run in headless mode, rendering
-                a single PNG image without a Tk window. This is useful for automating rendering images after each run.
+                When run with a <code>--png &ltout.png&gt &ltin.json&gt</code>
+                flag, the script will instead run in headless mode, rendering a
+                single PNG image without a Tk window. This is useful for
+                automating rendering images after each run.
             </p>
 
             <h3>Python Placer</h3>
             <p>
-                One baseline placer written in idiomatic Python is implemented in <code>sw-baseline-python/placer.py</code>. Its purpose is
-                simple: achieve algorithmic correctness at all costs, disregarding any tradeoff in speed. This makes it valuable as a point
-                of comparison for validating the implementations to follow. The file contains a <code>Placer</code> class that stores
-                information about the netlist, cell center positions, base and active linear systems, and the partition state. Its
-                methods are designed to streamline the execution of the full analytical placement algorithm. The sequence is roughly as follows:
+                One baseline placer written in idiomatic Python is implemented
+                in <code>sw-baseline-python/placer.py</code>. Its purpose is
+                simple: achieve algorithmic correctness at all costs,
+                disregarding any tradeoff in speed. This makes it valuable as a
+                point of comparison for validating the implementations to
+                follow. The file contains a <code>Placer</code> class that
+                stores information about the netlist, cell center positions,
+                base and active linear systems, and the partition state. Its
+                methods are designed to streamline the execution of the full
+                analytical placement algorithm. The sequence is roughly as
+                follows:
             </p>
 
             <ol>
                 <li>
-                    <b>Load Data:</b> runs <code>load_netlist()</code> to read in the JSON file produced by the LEF/DEF parser.
+                    <b>Load Data:</b> runs <code>load_netlist()</code> to read
+                    in the JSON file produced by the LEF/DEF parser.
                 </li>
                 <li>
-                    <b>Initialize Cell Positions:</b> runs <code>init_cell_positions()</code> to place cells at initial positions within
-                    the die area; in this baseline placer, all cells are initialized to the center of the die.
+                    <b>Initialize Cell Positions:</b> runs
+                    <code>init_cell_positions()</code> to place cells at initial
+                    positions within the die area; in this baseline placer, all
+                    cells are initialized to the center of the die.
                 </li>
                 <li>
-                    <b>Build Connectivity Matrix:</b> runs <code>build_system()</code> to construct the sparse quadratic system <code>Qx=-c</code> 
-                    and <code>Qy=-c</code> using clique net decomposition, where each net is converted into a set of weighted two-pin connections 
-                    between all pins.
+                    <b>Build Connectivity Matrix:</b> runs
+                    <code>build_system()</code> to construct the sparse
+                    quadratic system <code>Qx=-c</code> 
+                    and <code>Qy=-c</code> using clique net decomposition, where
+                    each net is converted into a set of weighted two-pin
+                    connections between all pins.
                 </li>
                 <li>
-                    <b>Initial CG Solve:</b> runs <code>solve_cg()</code>, solving the linear system using <code>scipy.sparse.linalg.cg</code> 
-                    to obtain the initial wirelength-optimal placement; this minimizes quadratic wirelength but ignores overlap constraints. We
-                    exit when <code>max_iter=1000</code> is exceeded, or the algorithm is deemed to have converged by comparison
-                    to a predefined threshold; otherwise, Step 4 is repeated.
+                    <b>Initial CG Solve:</b> runs <code>solve_cg()</code>,
+                    solving the linear system using
+                    <code>scipy.sparse.linalg.cg</code> 
+                    to obtain the initial wirelength-optimal placement; this
+                    minimizes quadratic wirelength but ignores overlap
+                    constraints. We exit when <code>max_iter=1000</code> is
+                    exceeded, or the algorithm is deemed to have converged by
+                    comparison to a predefined threshold; otherwise, Step 4 is
+                    repeated.
                 </li>
                 <li>
-                    <b>Perform Iterative Spreading:</b> this acts as the "outer loop" for the algorithm. It repeatedly applies recursive geometric 
-                    partitioning to generate spatial anchors, updates the linear system with additional quadratic penalties, and re-solves using 
-                    CG (the "inner loop", with the same exit condition as in Step 4). We exit Step 5 when <code>MAX_OUTER_ITER=15</code> is exceeded, 
-                    or when the overlap between cells is considered acceptable (i.e. max bin density < 0.75); otherwise, Step 5 is repeated.
+                    <b>Perform Iterative Spreading:</b> this acts as the "outer
+                    loop" for the algorithm. It repeatedly applies recursive
+                    geometric partitioning to generate spatial anchors, updates
+                    the linear system with additional quadratic penalties, and
+                    re-solves using CG (the "inner loop", with the same exit
+                    condition as in Step 4). We exit Step 5 when
+                    <code>MAX_OUTER_ITER=15</code> is exceeded, or when the
+                    overlap between cells is considered acceptable (i.e. max bin
+                    density < 0.75); otherwise, Step 5 is repeated.
                 </li>
                 <li>
-                    <b>Write Final Output:</b> writes the final placed design back to JSON via <code>write_output()</code>, producing a netlist
-                    with updated cell coordinates for visualization and downstream processing.
+                    <b>Write Final Output:</b> writes the final placed design
+                    back to JSON via <code>write_output()</code>, producing a
+                    netlist with updated cell coordinates for visualization and
+                    downstream processing.
                 </li>
             </ol>
 
             <h3>C++ Placer</h3>
             <p>
-                The C++ baseline placer, which is stored in <code>sw-baseline-c/placer.cpp</code>, is nearly identical in its implementation to
-                the Python baseline. It follows the same JSON I/O format, same algorithm, and even the same convergence criterion. The only
-                real difference of note is that the C++ file itself is multi-purpose. As a standalone software placer, it is designed to perform 
-                <code>cg_solve()</code> using hand-rolled double-precision logic; however, when the correct flags are set, <code>placer.cpp</code>
-                doubles as a placer front-end with which a hardware-based CG solver can seamlessly connect. In such a case, all parts of the
-                algorithm in between CG solve steps are handled in C++, and the rest are done in hardware (either with a verilated model or
-                using the FPGA itself). This will be discussed in more detail in the <b>System Integration</b> section.
+                The C++ baseline placer, which is stored in
+                <code>sw-baseline-c/placer.cpp</code>, is nearly identical in
+                its implementation to the Python baseline. It follows the same
+                JSON I/O format, same algorithm, and even the same convergence
+                criterion. The only real difference of note is that the C++ file
+                itself is multi-purpose. As a standalone software placer, it is
+                designed to perform 
+                <code>cg_solve()</code> using hand-rolled double-precision
+                logic; however, when the correct flags are set,
+                <code>placer.cpp</code>
+                doubles as a placer front-end with which a hardware-based CG
+                solver can seamlessly connect. In such a case, all parts of the
+                algorithm in between CG solve steps are handled in C++, and the
+                rest are done in hardware (either with a verilated model or
+                using the FPGA itself). This will be discussed in more detail in
+                the <b>System Integration</b> section.
             </p>
         </section>
 
@@ -651,7 +752,8 @@
                 <figcaption style="text-align: center;">
                     Block diagram of the V1 RTL. Red represents combinational
                     logic. Green represent sequential logic, blue represents FSM
-                    states, and orange represents wide bus connections.
+                    states, and orange represents wide bus/multiple parallel
+                    connections combined for brevity.
                 </figcaption>
             </figure>
 
@@ -689,6 +791,18 @@
             this design into a flat FSM.</p>
 
             <h3>V2 RTL</h3>
+
+            <figure>
+                <img src="images/v2.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V2 RTL. Red represents combinational
+                    logic. Green represent sequential logic, blue represents FSM
+                    states, orange represents wide bus/multiple parallel
+                    connections combined for brevity or Qsys modules, and purple
+                    represents self-contained submodules.
+                </figcaption>
+            </figure>
 
             <p>V2 is the first synthesizable revision and creates same the
             <code>CGCtrl</code>/<code>CGDpath</code> split that every subsequent
@@ -886,6 +1000,19 @@
 
             <h3>V3 RTL</h3>
 
+            <figure>
+                <img src="images/v3.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V3 RTL. Red represents combinational
+                    logic. Green represent sequential logic, blue represents FSM
+                    states, orange represents wide bus/multiple parallel
+                    connections combined for brevity or Qsys modules, and purple
+                    represents self-contained submodules. Changes from V2 are
+                    highlighted by red circles.
+                </figcaption>
+            </figure>
+
             <p>V3 leaves V2's FSM-level structure intact but introduces
             three implementation-level changes that together
             substantially shorten each CG iteration.</p>
@@ -995,6 +1122,19 @@
 
             <h3>V4 RTL</h3>
 
+            <figure>
+                <img src="images/v4.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V4 RTL. Red represents combinational
+                    logic. Green represent sequential logic, blue represents FSM
+                    states, orange represents wide bus/multiple parallel
+                    connections combined for brevity or Qsys modules, and purple
+                    represents self-contained submodules. Changes from V3 are
+                    highlighted by red circles.
+                </figcaption>
+            </figure>
+
             <h4>Dual AXPY Units</h4>
 
             <p>V4 exploits a property of the CG iteration that V2 and V3
@@ -1071,7 +1211,45 @@
             layout, and the <code>sel_y</code> x/y sequencing are all
             byte-identical to V3.</p>
 
+            <h4>Speedup vs. V3</h4>
+
+            <p>From Verilator simulation cycle-level performance, V4
+            reaches 1.03&times; on simple_logic_10 (25,160 &rarr;
+            24,375 total HW CG cycles), 1.03&times; on mixed_macro_10
+            (28,304 &rarr; 27,493), and 1.05&times; on
+            parallel_chains_50 (195,706 &rarr; 186,640) against V3,
+            with HPWL values bit-exact against V3 (no DPI flag
+            change needed since V4 reuses V3's NR <code>FpDiv</code>
+            and 5-cycle-per-nz <code>SPMV</code>). The win is modest
+            because the 5-cycle-per-nz <code>SPMV</code> inner loop
+            still dominates per-iter cost; V4's
+            <code>S_AXPY_XR_FEED</code> merge and the removed
+            <code>S_COPY_D</code> each save only
+            <code>num_groups</code> cycles, which is small compared
+            to the <code>5 &middot; nnz</code> cycles
+            <code>SPMV</code> spends per iter. The merged init-time
+            <code>S_VNS_R</code>/<code>S_COPY_D</code> also explains
+            why the parallel_chains_50 win (1.05&times;) is slightly
+            larger than the 10-cell benchmarks (1.03&times;): the
+            init-time savings scale with <code>num_groups</code>,
+            which is larger on the 50-cell design. The next
+            architectural lever &mdash; reducing the per-nz cost of
+            <code>SPMV</code> itself &mdash; is what V5 targets.</p>
+
             <h3>V5 RTL</h3>
+
+            <figure>
+                <img src="images/v5.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V5 RTL. Red represents combinational
+                    logic. Green represent sequential logic, blue represents FSM
+                    states, orange represents wide bus/multiple parallel
+                    connections combined for brevity or Qsys modules, and purple
+                    represents self-contained submodules. Changes from V4 are
+                    highlighted by red circles.
+                </figcaption>
+            </figure>
 
             <h4>Memory Topology</h4>
 
@@ -1185,6 +1363,19 @@
             mergers with V6's <code>CGEngine</code>.</p>
 
             <h3>V6 RTL</h3>
+
+            <figure>
+                <img src="images/v6.drawio.png"
+                    style="display: block; margin: 0 auto; width: 720px; height: auto;">
+                <figcaption style="text-align: center;">
+                    Block diagram of the V6 RTL. Red represents combinational
+                    logic. Green represent sequential logic, blue represents FSM
+                    states, orange represents wide bus/multiple parallel
+                    connections combined for brevity or Qsys modules, and purple
+                    represents self-contained submodules. White boxes represent
+                    the separate X and Y engines.
+                </figcaption>
+            </figure>
 
             <h4>CGEngine Wrapper</h4>
 
