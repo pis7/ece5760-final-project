@@ -290,9 +290,26 @@
                 Then, as <code>col_idx</code> is upper bounded by <code>row[n + 1]</code> the inner MAC runs only <code>row[n + 1] = number of non-zero matrix elements</code> times. Efficient!!!
             </p>
 
-            <h3>Logical Structure</h3>
-            <p>[TODO: end-to-end flow -- LEF/DEF parse (explain what LEF and DEF are - see "What each file
-                contains" from GitHub README) -> Q/c build -> CG solve -> overlap reduction -> visualization.]</p>
+            <h3>Summery of Placement</h3>
+            <p>
+                The end-to-end flow of placement is the following:
+                <ol>
+                    <li>Parse a list of macros and an inital placement from LEF/DEF files</li>
+                    <li>Construct \(Q\) and \(c\) from our quadratic cost function</li>
+                    <li>Repeat until solution has few enough overlaps
+                        <ol>
+                        <li>Minimize wirelength using conjugate gradient method</li>
+                        <li>Add fake pins to reduce overlap</li>
+                    </ol></li>
+                </ol>
+                The only piece of the above we put on the FPGA is the minimization using the conjugate gradient method.
+                This method requires multiple matrix vector and vector vector multiplications which can be parallelized.
+                Conjugate gradient descent on the FPGA is a big improvement for performance, but sacrifices some precision during computations as lower precision fixed point is used instead of floating point.
+                In theory this can cause issues with the conjugate gradient method converging, but in practice we did not experience this, though we found individual runs on some benchmarks may have placements with higher costs when run on the FPGA.
+                We suspect the higher costs are due to the inherant chaos of slightly different arithmetic.
+                Much of the rest of this processes, such as parsing the LEF/DEF files or constructing \(Q\) and \(c\) is complicated, difficult to parallelize, and does not infeasibly scale as designs grow.
+                Becaues of these, we choose to implement these on the ARM processor with little tradeoff. The FPGA would be a poor fit for these tasks.
+            </p>
 
             <!--
             <figure>
@@ -301,12 +318,14 @@
             </figure>
             -->
 
+            <!--
+            I think the below is covered by the intro but not 100% sure. People don't really use FPGAs for this because they are slow.
             <h3>Hardware/Software Tradeoffs</h3>
             <p>[TODO: what runs on HPS ARM vs FPGA fabric and why.]</p>
 
             <h3>Existing Designs</h3>
             <p>[TODO: prior work in analytical placement / FPGA-accelerated
-            linear solves]</p>
+            linear solves]</p>-->
         </section>
 
         <!-- =============================================================
