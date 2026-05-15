@@ -1516,7 +1516,14 @@
 
             <h3>Performance & Relative Speed-up</h3>
             <p>
-                [TODO: ARM vs FPGA CG timing on the benchmark suite - explain each benchmark]
+                The average CG inner-loop timing results show a clear and consistent performance advantage for the V6 FPGA implementation across every 
+                benchmark. In all cases, the FPGA-accelerated solver completes each CG solve significantly faster (factor of 5x-10x) compared to the 
+                ARM software baseline; the total CG solve time shows comparable gains, as the number of inner loop iterations roughly matches
+                between ARM and FPGA mode. Smaller benchmarks such as <code>simple_logic_10</code> and <code>mixed_macro_10</code> already 
+                demonstrate noticeable speed-ups, while larger or more computationally intensive designs like <code>parallel_chains_50</code>, 
+                <code>star_fanout_31</code>, and <code>two_clusters_bridge</code> show the largest absolute timing reductions. The performance gains 
+                become more pronounced as benchmark complexity increases because the FPGA implementation parallelizes the most expensive CG 
+                operations.
             </p>
             <figure>
                 <img src="images/cg-avg-ms.png"
@@ -1534,7 +1541,13 @@
             </figure>
             <br>
             <p>
-                [TODO: ARM vs. FPGA total placer time - explain why speed-up decreases]
+                Although the FPGA implementation greatly accelerates the CG inner loop, the improvement in total placer runtime is much smaller 
+                because the CG solve represents only one portion of the complete placement flow. The overall placer also spends significant time 
+                performing tasks like partitioning, anchor generation, density evaluation, and so on, all of which still execute in software on 
+                the ARM processor. As a result, speeding up only the numerical CG kernel reduces total runtime in general. This behavior becomes 
+                especially noticeable on smaller benchmarks, where fixed software overhead can dominate the total runtime. Larger benchmarks 
+                benefit more from FPGA acceleration, because the CG computation occupies a greater fraction of execution time. This implies that
+                without limits on the maximum number of cells, larger speed-ups in total time would be observed.
             </p>
             <figure>
                 <img src="images/placer-total-ms.png"
