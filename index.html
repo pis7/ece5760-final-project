@@ -181,8 +181,33 @@
                 derived from the netlist and \(c\) encodes the fixed-pin contributions.</p>
             -->
 
-            <h4>[TODO: subtopic, e.g. Conjugate Gradient]</h4>
-            <p>[TODO: prose.]</p>
+            <h4>Conjugate Gradient Method</h4>
+            <p>
+                To minimize \(L\), find when \(\nabla L = Q\mathbf{x} + c = 0\). This finds a minimum as \(Q\) is positive definite:
+                $$\forall E \in N, 0 < \sum_{x_i, x_j \in M(E)} (x_i - x_j)^2 < \mathbf{x}^\intercal Q_E \mathbf{x} \implies 0 < \mathbf{x}^\intercal Q \mathbf{x}$$
+
+                We find a solution for \(Q\mathbf{x} + c = 0\) using the congugate gradient method.
+            </p>
+            <p>
+                A full explination of the conjugate gradient method is beyond the scope of this article and can in a text or class on numerical analysis. An algebra heavy explanation can be found in <a href="https://www.cs.cornell.edu/courses/cs6220/2017fa/">Cornell's CS 6220</a> and a more geometric approach can be found in Jonathan Richard Shewchuk's <em>An Introduction to the Conjugate Gradient Method Without the Agonizing Pain</em>. Here, we will present a description of and loose intuition for the technique. This section is based on the two aformentioned resources and a conversation with <a href="https://jasonklein.dev/">Jason Klein</a>. (thanks!!!)
+            </p>
+            <p>
+                We can notice that when defining \(Q\), \(i, j\) are symmetric and thus \(Q\) is symmetric.
+                Therefore, we can use the congugate gradient method to solve \(Q\mathbf{x} + c = 0 \implies Q\mathbf{x} = 0c\).
+                The conjugate gradient method finds an \(\mathbf{x}_k\) close to \(\mathbf{x}\) by minimizing the <em>residual</em>: \(r = -c - Q\mathbf{x}_k\).
+                To do this, it starts with an initial guess at a solution \(\mathbf{x}_k = 0\) and computes the residual, \(r_k = -c - Q\mathbf{x}_k\).
+                It then takes a vector, \(p_k\) (\(p_0 = -c\)) and scales it by some \(\alpha\) so taking \(x_{k+1} = x_k + \alpha p_k\) causes \(r_{k+1}\) to have no \(p_k\) component.
+                The algorithm then iterates this process with more \(p_k\) pointing in different directions, formally \(p_k\) which are \(Q\)-orthogonal, i.e. \(p_iQp_j = 0\).
+                To do this efficiently, the algorithm maintains the following three recurrences, computing them for larger values of \(k\) until \(r_k\) is below a tunable threshold.
+                For convience, let \(\alpha_k = \frac{r_k \cdot r_k}{p_k \cdot Qp_k}, \beta_k = \frac{r_{k+1} \cdot r_{k+1}}{r_k \cdot r_k}\).
+                Note that \(r_{k+1}\) does not depend on \(\beta_k\) so \(\beta_k\) is computable. The three recurences are as follows:
+                $$\begin{align}
+                    \mathbf{x}_{k+1} &= \mathbf{x}_k + \alpha_k p_k &&\quad \text{removing }p_k \text{ from }\mathbf{x}_k\\
+                    r_{k+1} &= r_k - \alpha_k Q p_k &&\quad \text{updating the residual after changing the approximation of } \mathbf{x} \\
+                    p_{k+1} &= p_k + \beta_k p_k &&\quad \text{getting the next vector in the sequence of } p_i \\
+                \end{align}$$
+                When \(r_k\) is below the threshold, the algorithm simply outputs the solution \(\mathbf{x}_k\).
+            </p>
 
             <!-- Example code block (delete if unused) -->
             <!--
